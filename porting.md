@@ -129,7 +129,7 @@ Staged migration with **current status**:
 | ----- | ------ | ----------------- |
 | **A** | Hybrid CMake build; narrow Fortran/C++ adapters | **Done** — `mosflm_geometry`, `LegacyMosflmAdapter` (CELL(6), predict, summation, profile), optional `mosflm_indexing` |
 | **B** | Replace isolated kernels; keep Fortran as oracle | **In progress / advanced** — geometry, Gemmi crystal, miniCBF, stills+osc `PREDICT`, summation + profile fit, MTZ, Bravais façade. Domain API uses `PredictionRequest` / `IntegrationRequest` (see `mosflm-cpp/docs/DOMAIN_API.md`). Still missing: known-indexed Fortran dumps, post-refinement |
-| **C** | Switch implementation behind interfaces after differential tests pass | **In progress** — `#ifdef MOSFLM_CPP_PREDICT` applied at ≈194120 (`PREDICT_CPP_FROM_COMMON`); enable with `make MOSFLM_CPP_PREDICT=1` after building `mosflm_predict_hook`. Default path unchanged (`docs/PHASE_C_SPLICE.md`) |
+| **C** | Switch implementation behind interfaces after differential tests pass | **In progress** — `#ifdef MOSFLM_CPP_PREDICT` at ≈194120; `make MOSFLM_CPP_PREDICT=1 ipmosflm` **links and runs** (hook symbols in binary). Still need known-indexed differentials vs REEK (`docs/PHASE_C_SPLICE.md`) |
 | **D** | Retire Fortran only when all callers migrated | **Not started** |
 
 Keep COMMON blocks, column-major layout, and mangling inside `include/mosflm/legacy/`.
@@ -167,6 +167,6 @@ Day 5: Document first legacy routine to replace (`PREDICT`).
 ### Next
 
 1. Real known-indexed images (replace synthetic dumps via `capture_ipmosflm_oracle.sh`).
-2. **Phase C:** exercise `make MOSFLM_CPP_PREDICT=1 ipmosflm` on a known-indexed job; tighten `ETOLCPP` / axis mapping vs REEK differentials.
+2. **Phase C:** known-indexed job under `MOSFLM_CPP_PREDICT=1`; tighten `ETOLCPP` / `XG`–`YG` axis mapping vs REEK differentials.
 3. Post-refinement (Stage 2).
 4. Full `INTEG3` parity beyond the Gaussian profile stand-in.

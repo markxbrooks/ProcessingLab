@@ -19,9 +19,9 @@ writes into the in-scope `/GENDATA/` + `/IOSP/` arrays.
         DMINCPP = 0.0
         IF (DSTMAX.GT.1.0E-12) DMINCPP = WAVE/DSTMAX
         ETOLCPP = 0.0025
-        CALL PREDICT_CPP_FROM_COMMON(PSI, IFLAGPR, WAVE, RAST, RASTY,
-     +       IYLEN, NREC, PHIBEG, DMINCPP, ETOLCPP, NREFLS, IHG, IKG, ILG,
-     +       XG, YG, PHIG, PHIWG, IMG, NSPOT)
+        CALL PREDICT_CPP_FROM_COMMON(PSI, IFLAGPR, WAVE, RAST,
+     +       RASTY, IYLEN, NREC, PHIBEG, DMINCPP, ETOLCPP, NREFLS,
+     +       IHG, IKG, ILG, XG, YG, PHIG, PHIWG, IMG, NSPOT)
 #else
         CALL PREDICT(PSI, IFLAGPR)
 #endif
@@ -39,6 +39,9 @@ writes into the in-scope `/GENDATA/` + `/IOSP/` arrays.
 
 ## Enabling the experimental path
 
+Verified on macOS arm64 (Oct 2026): binary links and starts; `nm` shows
+`_predict_cpp_from_common_` / `_predict_still_psi_cpp_`.
+
 ```bash
 # 1. Build C++ + Fortran hook archive
 cmake -S mosflm-cpp -B mosflm-cpp/build -DMOSFLM_WITH_FORTRAN=ON
@@ -46,13 +49,17 @@ cmake --build mosflm-cpp/build --target mosflm_predict_hook
 
 # 2. Rebuild amalgamation with -DMOSFLM_CPP_PREDICT and link hooks
 cd mosflm
-make mosflm_all_ip_inc_noX.o   # MOSFLAGS includes -cpp
+rm -f mosflm_all_ip_inc_noX.o
 make MOSFLM_CPP_PREDICT=1 ipmosflm
 ```
 
 `mosflm/Makefile` always passes `-cpp` so `#ifdef` is safe when the macro is
 undefined. With `MOSFLM_CPP_PREDICT=1` it adds `-DMOSFLM_CPP_PREDICT`, links
-`libmosflm_predict_hook` + `libmosflm_geometry`, and uses `g++` as the linker.
+`libmosflm_predict_hook` + `libmosflm_geometry` via `g++` (with Homebrew
+`libgfortran` path), and omits gfortran-only `FFLAGS` from the link line.
+
+Fixed-form note: keep `CALL PREDICT_CPP_FROM_COMMON` continuations ≤72 columns
+(earlier `ILG`+`XG` truncation produced a bogus `ILXG` symbol).
 
 ## COMMON mapping
 

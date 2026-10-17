@@ -50,15 +50,22 @@ LOCALLIBS   = ${DPSLIB}/libdps_index.a ${DPSLIB}/DPSLIB.a ${DPSLIB}/libfftpack.a
 #   make MOSFLM_CPP_PREDICT=1 ipmosflm
 MOSFLM_CPP_DIR = ../mosflm-cpp
 MOSFLM_CPP_BUILD = $(MOSFLM_CPP_DIR)/build
+# Link flags (must not pass gfortran-only FFLAGS to g++).
+LINKFLAGS =
 ifeq ($(MOSFLM_CPP_PREDICT),1)
 MOSFLAGS += -DMOSFLM_CPP_PREDICT
 FLINK = g++
-LIBS += -L$(MOSFLM_CPP_BUILD) -lmosflm_predict_hook -lmosflm_geometry -lgfortran
+# Homebrew gfortran is not on the default clang++ library search path.
+GFORTRAN_LIBDIR := $(shell dirname `gfortran -print-file-name=libgfortran.dylib`)
+LIBS += -L$(MOSFLM_CPP_BUILD) -lmosflm_predict_hook -lmosflm_geometry \
+	-L$(GFORTRAN_LIBDIR) -lgfortran -lc++
+else
+LINKFLAGS = ${FFLAGS}
 endif
 
 ipmosflm:	${OBJS}
 		mkdir -p ${DPSBIN}
-		${FLINK} ${ipmosflm_LDFLAGS} ${FFLAGS} ${OBJS} ${LOCALLIBS} ${LIBS} \
+		${FLINK} ${ipmosflm_LDFLAGS} ${LINKFLAGS} ${OBJS} ${LOCALLIBS} ${LIBS} \
                 -o ${DPSBIN}/ipmosflm ${LDFLAGS}
 
 mosflm_all_ip_inc.o: mosflm_all_ip_inc.f
