@@ -38,6 +38,21 @@ if(MOSFLM_WITH_FORTRAN)
     endif()
 endif()
 
+# Fortran *test drivers* were lost when mosflm-cpp/tests was gitignored; the
+# bridge modules under fortran/ survive. Only add the Fortran test targets when
+# their driver sources are present, so configuration never fails.
+set(MOSFLM_FORTRAN_TESTS OFF)
+if(MOSFLM_HAS_FORTRAN AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fortran/test_fortran_c_api.f90" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fortran/test_predict_still_f77.f" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fortran/test_predict_cpp_bridge.f90")
+    set(MOSFLM_FORTRAN_TESTS ON)
+else()
+    message(WARNING
+        "Fortran test drivers missing under fortran/; "
+        "skipping Fortran test targets (Phase C hook library still built)")
+endif()
+
 FetchContent_Declare(
     eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
@@ -186,6 +201,9 @@ if(MOSFLM_WITH_CCTBX)
 endif()
 
 if(BUILD_TESTING)
+    # Shared assertion helpers (tests/test_util.hpp).
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/tests)
+
     add_executable(test_unit_cell
         tests/unit/test_unit_cell.cpp
     )
@@ -209,6 +227,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_metric_invcel PRIVATE mosflm_geometry)
     add_test(NAME metric_invcel COMMAND test_metric_invcel)
+    set_tests_properties(metric_invcel PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_ANALYTICAL_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/analytical/thaumatin_cell.txt"
+    )
 
     add_executable(test_gemmi_crystal
         tests/differential/test_gemmi_crystal.cpp
@@ -324,7 +346,7 @@ if(BUILD_TESTING)
     target_link_libraries(test_ub_from_psi PRIVATE mosflm_geometry)
     add_test(NAME ub_from_psi COMMAND test_ub_from_psi)
 
-    if(MOSFLM_HAS_FORTRAN)
+    if(MOSFLM_FORTRAN_TESTS)
         add_executable(test_fortran_c_api
             fortran/mosflm_c_bind.f90
             fortran/test_fortran_c_api.f90
@@ -450,7 +472,9 @@ if(BUILD_TESTING)
             target_link_libraries(test_predict_cpp_from_common PRIVATE gfortran)
         endif()
         add_test(NAME predict_cpp_from_common COMMAND test_predict_cpp_from_common)
+    endif()
 
+    if(MOSFLM_HAS_FORTRAN)
         # Static archive for Autotools ``make MOSFLM_CPP_PREDICT=1 ipmosflm``.
         add_library(mosflm_predict_hook STATIC
             fortran/predict_cpp_bridge.f90

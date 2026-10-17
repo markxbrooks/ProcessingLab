@@ -6,5 +6,7 @@ cmake_install.cmake
 CTestTestfile.cmake
 *.a
 *.o
-mosflm_cpp_cli
-test_*
+/mosflm_cpp_cli
+# Only ignore test binaries at repo root (build outputs); never the sources.
+/test_*
+/test_*.dSYM/

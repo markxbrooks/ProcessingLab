@@ -99,6 +99,21 @@ std::string read_ascii_prefix(const std::filesystem::path& path, std::size_t nby
     return buf;
 }
 
+/// Pull ``_array_data.header_contents`` text via CBFlib (Dectris/Eiger style).
+std::string cbf_header_contents(cbf_handle cbf) {
+    std::string out;
+    if (cbf_find_category(cbf, "array_data") != 0 ||
+        cbf_find_column(cbf, "header_contents") != 0 ||
+        cbf_rewind_row(cbf) != 0) {
+        return out;
+    }
+    const char* value = nullptr;
+    if (cbf_get_value(cbf, &value) == 0 && value != nullptr) {
+        out = value;
+    }
+    return out;
+}
+
 }  // namespace
 
 DiffractionImage CbfImageReader::read(const std::filesystem::path& path) const {
@@ -172,6 +187,10 @@ DiffractionImage CbfImageReader::read(const std::filesystem::path& path) const {
         ndim1,
         ndim2
     );
+
+    // Prefer the structured ``_array_data.header_contents`` text; fall back to
+    // scanning the raw ASCII prefix for real files that inline it up front.
+    std::string header_text = cbf_header_contents(cbf);
     cbf_free_handle(cbf);
     if (img_err != 0) {
         throw std::runtime_error(
@@ -179,12 +198,17 @@ DiffractionImage CbfImageReader::read(const std::filesystem::path& path) const {
         );
     }
 
-    // Fill miniCBF metadata gaps from ASCII comment header.
+    if (header_text.empty()) {
+        try {
+            header_text = read_ascii_prefix(path, 8192);
+        } catch (const std::exception&) {
+            // Pixels already decoded; metadata remains best-effort.
+        }
+    }
     try {
-        const std::string prefix = read_ascii_prefix(path, 8192);
-        parse_minicbf_comment_header(prefix, meta);
+        parse_minicbf_comment_header(header_text, meta);
     } catch (const std::exception&) {
-        // Pixels already decoded; metadata remains best-effort.
+        // Metadata stays best-effort.
     }
 
     return image;
