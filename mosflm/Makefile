@@ -5,7 +5,7 @@ CC     = gcc -c
 F77    = gfortran -c
 FLINK  = gfortran
 FFLAGS = -g -O2 -fno-second-underscore -fallow-argument-mismatch
-MOSFLAGS =  -g -O2 -fno-second-underscore -fallow-argument-mismatch
+MOSFLAGS =  -g -O2 -fno-second-underscore -fallow-argument-mismatch -cpp
 CFLAGS = -O0 -g -O0 -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration -Wno-return-type -I../jpg -I/opt/homebrew/opt/hdf5/include -I../lz4
 LIBS = -L/Applications/ccp4-9/lib -lccp4f -lccp4c -lmmdb2 -L/usr/X11/lib -lSM -lICE \
    -lgfortran -lm -lncurses -L/opt/homebrew/opt/hdf5/lib -lhdf5_hl -lhdf5
@@ -44,6 +44,17 @@ LOCALLIBS   = ${DPSLIB}/libdps_index.a ${DPSLIB}/DPSLIB.a ${DPSLIB}/libfftpack.a
 
 .f.o:
 	${F77} ${FFLAGS} -o $@ $<
+
+# Optional Phase C stills PREDICT (off by default):
+#   cmake --build ../mosflm-cpp/build --target mosflm_predict_hook
+#   make MOSFLM_CPP_PREDICT=1 ipmosflm
+MOSFLM_CPP_DIR = ../mosflm-cpp
+MOSFLM_CPP_BUILD = $(MOSFLM_CPP_DIR)/build
+ifeq ($(MOSFLM_CPP_PREDICT),1)
+MOSFLAGS += -DMOSFLM_CPP_PREDICT
+FLINK = g++
+LIBS += -L$(MOSFLM_CPP_BUILD) -lmosflm_predict_hook -lmosflm_geometry -lgfortran
+endif
 
 ipmosflm:	${OBJS}
 		mkdir -p ${DPSBIN}

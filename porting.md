@@ -8,7 +8,7 @@ Your first milestone should be a C++ executable that reproduces a small, indepen
 
 ## Current status (Oct 2026)
 
-Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there (24 tests with DPS libraries and optional `MOSFLM_WITH_CCTBX`).
+Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there (28 tests with DPS libraries and optional `MOSFLM_WITH_CCTBX`).
 
 | Topic | Status |
 | ----- | ------ |
@@ -129,7 +129,7 @@ Staged migration with **current status**:
 | ----- | ------ | ----------------- |
 | **A** | Hybrid CMake build; narrow Fortran/C++ adapters | **Done** — `mosflm_geometry`, `LegacyMosflmAdapter` (CELL(6), predict, summation, profile), optional `mosflm_indexing` |
 | **B** | Replace isolated kernels; keep Fortran as oracle | **In progress / advanced** — geometry, Gemmi crystal, miniCBF, stills+osc `PREDICT`, summation + profile fit, MTZ, Bravais façade. Domain API uses `PredictionRequest` / `IntegrationRequest` (see `mosflm-cpp/docs/DOMAIN_API.md`). Still missing: known-indexed Fortran dumps, post-refinement |
-| **C** | Switch implementation behind interfaces after differential tests pass | **In progress** — hardened C ABI + domain request objects + `predict_cpp_still` / `predict_cpp_still_psi` (PSI→UB) bridge (`docs/PHASE_C_SPLICE.md`). Autotools amalgamation `#ifdef MOSFLM_CPP_PREDICT` not applied yet |
+| **C** | Switch implementation behind interfaces after differential tests pass | **In progress** — `#ifdef MOSFLM_CPP_PREDICT` applied at ≈194120 (`PREDICT_CPP_FROM_COMMON`); enable with `make MOSFLM_CPP_PREDICT=1` after building `mosflm_predict_hook`. Default path unchanged (`docs/PHASE_C_SPLICE.md`) |
 | **D** | Retire Fortran only when all callers migrated | **Not started** |
 
 Keep COMMON blocks, column-major layout, and mangling inside `include/mosflm/legacy/`.
@@ -167,6 +167,6 @@ Day 5: Document first legacy routine to replace (`PREDICT`).
 ### Next
 
 1. Real known-indexed images (replace synthetic dumps via `capture_ipmosflm_oracle.sh`).
-2. **Phase C:** apply `MOSFLM_CPP_PREDICT` ifdef at amalgamation ≈194120 and link `libmosflm_geometry` into Autotools `ipmosflm` (recipe in `mosflm-cpp/docs/PHASE_C_SPLICE.md`; use `PREDICT_CPP_STILL_PSI`).
+2. **Phase C:** exercise `make MOSFLM_CPP_PREDICT=1 ipmosflm` on a known-indexed job; tighten `ETOLCPP` / axis mapping vs REEK differentials.
 3. Post-refinement (Stage 2).
 4. Full `INTEG3` parity beyond the Gaussian profile stand-in.

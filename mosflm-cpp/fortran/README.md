@@ -10,11 +10,14 @@ Amalgamation-oriented wrapper: `predict_cpp_still` in `predict_cpp_bridge.f90`
 
 ABI contract (status codes, count-only, UB/SG): [`../docs/C_ABI.md`](../docs/C_ABI.md).
 
+GENDATA pack/unpack (mm ↔ 10 µm `XG`/`YG`): `predict_gendata_pack.f90`.  
+Amalgamation hooks: `predict_cpp_hook.f90`, `predict_cpp_from_common.f90`
+(`libmosflm_predict_hook` for Autotools). See [`../docs/PHASE_C_SPLICE.md`](../docs/PHASE_C_SPLICE.md).
+
 ```bash
 cmake -S . -B build -DMOSFLM_WITH_FORTRAN=ON
-cmake --build build --target test_fortran_c_api test_predict_still_f77 \
-  test_predict_cpp_bridge test_predict_cpp_psi
-ctest --test-dir build -R 'fortran_c_api|predict_still_f77|predict_cpp_bridge|predict_cpp_psi|ub_from_psi|c_api_contract' --output-on-failure
+cmake --build build --target mosflm_predict_hook
+ctest --test-dir build -R 'predict_cpp_|ub_from_psi|c_api_contract|fortran_c_api' --output-on-failure
 ```
 
 Requires `gfortran` (Homebrew GCC on macOS). Disable with `-DMOSFLM_WITH_FORTRAN=OFF`.

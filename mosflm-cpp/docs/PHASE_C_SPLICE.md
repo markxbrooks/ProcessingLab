@@ -5,99 +5,72 @@
 Route one stills-oriented call site from Fortran `PREDICT` through the C++ ABI
 without rewriting the full reflection-list machinery in COMMON.
 
-## Hook location
+## Hook location (applied)
 
-In `mosflm/mosflm_all_ip_inc_noX.f` near line **194120**:
+In `mosflm/mosflm_all_ip_inc_noX.f` near line **194120** (`REFLFIND`), behind
+`#ifdef MOSFLM_CPP_PREDICT` (default **off** — production still calls `PREDICT`).
 
-```fortran
-        CALL PREDICT(PSI, IFLAGPR)
-```
-
-## Blockers before applying the ifdef
-
-The call site at ≈194120 sits inside interactive re-predict (fills COMMON
-`/IOSP/` `NSPOT` and spot lists used by XML / pixel matching below). The C++
-bridge returns flat `H,K,L,XMM,…` arrays; it does **not** yet:
-
-1. Pack detector / cell / φ / `DMIN` from COMMON into bridge scalars
-2. Scatter bridge outputs into the MOSFLM reflection COMMON arrays
-3. Link `libmosflm_geometry` + `predict_cpp_bridge.f90` into Autotools `ipmosflm`
-
-Until (1)–(3) exist, leave the amalgamation on `CALL PREDICT`. The ifdef
-recipe below is ready to paste when packing is implemented.
-
-### COMMON pack / unpack sketch
-
-Fortran `PREDICT` does not compute spots itself; it calls `REEK` (then
-`OVERLAP`), which mutates shared state. A C++ splice must mimic the **outputs
-consumers read**, not the REEK call tree.
-
-| Symbol | Role after `PREDICT` | C++ bridge source |
-| ------ | -------------------- | ----------------- |
-| `NSPOT` (`COMMON /IOSP/`) | Spot count | `nspot` |
-| `IFLAGPR` | −1 if list overflow | `ierr != 0` or buffer truncate |
-| Spot miller / detector lists (`XG`/`YG`, indices, φ beg/end, full flags — names vary by include) | Per-spot geometry | `h,k,l,x_mm,y_mm,phi_beg,phi_end,ifull` |
-
-**Inputs to pack from COMMON** (typical): `CELL(6)`, detector distance /
-wavelength / pixel / beam, still `PHI`, resolution / Ewald limits, and `PSI(3)`
-(already the `PREDICT` argument). Optional: precomputed `AMAT`/`MATRIX` via
-`mosflm_ub_from_matrix9` instead of PSI.
-
-**Suggested implementation order:** (a) Fortran helper that copies COMMON →
-bridge args and bridge → `NSPOT` + spot arrays; (b) unit-test that helper
-against analytical stills fixture offline; (c) then enable
-`MOSFLM_CPP_PREDICT` at ≈194120.
-
-## Proposed ifdef (not applied to the Autotools tree yet)
+`REFLFIND` does not include `/CELLCOM/` or `/XY/`. The ifdef calls
+`PREDICT_CPP_FROM_COMMON`, which reads `CELL` / `XTOFD` from those commons and
+writes into the in-scope `/GENDATA/` + `/IOSP/` arrays.
 
 ```fortran
 #ifdef MOSFLM_CPP_PREDICT
-C---- Experimental stills PREDICT via mosflm-cpp (PSI → UB).
-C     Pack CELL / detector from COMMON into locals, then:
-        CALL PREDICT_CPP_STILL_PSI(CELL, DIST, WAVE, PX, PY, NF, NS,
-     +       BX, BY, PHI, DMIN, ETOL, PSI, H, K, L, XMM, YMM, PHIB,
-     +       PHIE, IFULL, NMAX, NSPOT, IERR)
-        IF (IERR .NE. 0) IFLAGPR = -1
+        DMINCPP = 0.0
+        IF (DSTMAX.GT.1.0E-12) DMINCPP = WAVE/DSTMAX
+        ETOLCPP = 0.0025
+        CALL PREDICT_CPP_FROM_COMMON(PSI, IFLAGPR, WAVE, RAST, RASTY,
+     +       IYLEN, NREC, PHIBEG, DMINCPP, ETOLCPP, NREFLS, IHG, IKG, ILG,
+     +       XG, YG, PHIG, PHIWG, IMG, NSPOT)
 #else
         CALL PREDICT(PSI, IFLAGPR)
 #endif
 ```
 
-Bridge source: [`../fortran/predict_cpp_bridge.f90`](../fortran/predict_cpp_bridge.f90)
-(`predict_cpp_still` identity UB; `predict_cpp_still_psi` with missetting).  
-C ABI: `predict_still_cpp_` / `predict_still_psi_cpp_` /
-`mosflm_ub_from_psi` / `mosflm_ub_from_matrix9` in
-[`../include/mosflm/legacy/MosflmCApi.h`](../include/mosflm/legacy/MosflmCApi.h).
+## Stack
 
-## Mapping notes (COMMON → bridge args)
+| Layer | File |
+| ----- | ---- |
+| Amalgamation ifdef | `mosflm/mosflm_all_ip_inc_noX.f` |
+| COMMON reader | [`../fortran/predict_cpp_from_common.f90`](../fortran/predict_cpp_from_common.f90) |
+| Hook | [`../fortran/predict_cpp_hook.f90`](../fortran/predict_cpp_hook.f90) |
+| GENDATA pack | [`../fortran/predict_gendata_pack.f90`](../fortran/predict_gendata_pack.f90) |
+| C ABI | [`../include/mosflm/legacy/MosflmCApi.h`](../include/mosflm/legacy/MosflmCApi.h) |
 
-| Bridge arg | Typical MOSFLM source | Notes |
-| ---------- | --------------------- | ----- |
-| `CELL(6)` | Direct cell COMMON | `REAL` Å / degrees |
-| `DIST`, `WAVE`, `PX`, `PY` | Detector / beam keywords | mm, Å |
-| `NF`, `NS` | Image dimensions | fast / slow |
-| `BX`, `BY` | Beam centre | **beam-relative mm** in C++ (often 0,0 in that frame) |
-| `PHI` | Still φ / image start | degrees |
-| `PSI(3)` | Missetting at `PREDICT` | degrees → `UB = R(PSI)·A*` via `mosflm_ub_from_psi` |
-| `DMIN`, `ETOL` | Resolution / Ewald | Å, Å⁻¹ |
-| `H,K,L,XMM,…` | Output lists | C++ writes up to `NMAX` |
+## Enabling the experimental path
 
-**MATRIX path:** if COMMON already holds a lab A/UB matrix (9 reals), copy with
-`mosflm_ub_from_matrix9` and call `mosflm_predict_still` directly (no PSI).
-Zero PSI matches the identity-UB bridge (`predict_cpp_still`).
+```bash
+# 1. Build C++ + Fortran hook archive
+cmake -S mosflm-cpp -B mosflm-cpp/build -DMOSFLM_WITH_FORTRAN=ON
+cmake --build mosflm-cpp/build --target mosflm_predict_hook
 
-## Linkage
+# 2. Rebuild amalgamation with -DMOSFLM_CPP_PREDICT and link hooks
+cd mosflm
+make mosflm_all_ip_inc_noX.o   # MOSFLAGS includes -cpp
+make MOSFLM_CPP_PREDICT=1 ipmosflm
+```
 
-The Autotools `ipmosflm` binary does **not** yet link `libmosflm_geometry.a`.
-Steps when enabling the hook:
+`mosflm/Makefile` always passes `-cpp` so `#ifdef` is safe when the macro is
+undefined. With `MOSFLM_CPP_PREDICT=1` it adds `-DMOSFLM_CPP_PREDICT`, links
+`libmosflm_predict_hook` + `libmosflm_geometry`, and uses `g++` as the linker.
 
-1. Build `mosflm-cpp` → `libmosflm_geometry.a`
-2. Compile `predict_cpp_bridge.f90` with the amalgamation objects
-3. Define `-DMOSFLM_CPP_PREDICT` and link C++ stdlib + Eigen/Gemmi deps as needed
-4. Keep the `#else` path as the production default until differentials pass
+## COMMON mapping
+
+| Symbol | Role | Source |
+| ------ | ---- | ------ |
+| `CELL(6)` | Unit cell | `/CELLCOM/` via `PREDICT_CPP_FROM_COMMON` |
+| `XTOFD` | Distance, **10 µm** | `/XY/` → mm ×0.01 |
+| `WAVE`, `PHIBEG` | Å, φ | `/MISC/` (in `REFLFIND`) |
+| `RAST`/`RASTY` | Pixel mm | `/SCN/` (slow/fast) |
+| `IYLEN`/`NREC` | Fast/slow dims | `/SCN/` |
+| `DSTMAX` | → `DMINCPP=WAVE/DSTMAX` | `/REEKE/` |
+| `IHG…IMG`, `XG/YG` | Spot list | `/GENDATA/` written by hook |
+| `NSPOT` | Count | `/IOSP/` |
+
+`XG`/`YG` are beam-relative **10 µm** units (mm×100). `IMG`: 0=full, 50=partial stand-in.
 
 ## Verification in mosflm-cpp
 
 ```bash
-ctest --test-dir build -R 'predict_cpp_bridge|predict_cpp_psi|ub_from_psi|predict_still_f77|fortran_c_api'
+ctest --test-dir build -R 'predict_cpp_from_common|predict_cpp_hook|predict_gendata_pack'
 ```

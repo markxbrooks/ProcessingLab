@@ -193220,6 +193220,9 @@ C     .. Local Scalars ..
      +        LLASTREC,IADD,IMIDIMG,INDENT,NWMAXSAVE,IFLAGPR,iplot,
      +        iprofile,ifail,ITHBIN,NBIN,INTMAX
       REAL XC,YC,XCAL,YCAL,LBGRAT,LOCALPHIAVG,FRACGEN,XGEN,YGEN,DSQ,
+#ifdef MOSFLM_CPP_PREDICT
+     +     DMINCPP,ETOLCPP,
+#endif
      +     DSQMIN,RESL,DSTSQ,FRACMAX,SCALE,RESWIDTH,SUMFRAC
       LOGICAL REDO
       CHARACTER THIS*30,CALLED*30,COMMENT*100,filenam*15,str*3,
@@ -194117,7 +194120,18 @@ C     as these are used in SPTEST in generation of relfection list.
 C
         DSTMIN2PHIP = DSTMIN**2
         DSTMAX2PHIP = DSTMAX**2
+#ifdef MOSFLM_CPP_PREDICT
+C---- Experimental stills PREDICT via mosflm-cpp (PHASE_C_SPLICE.md).
+C     CELL/XTOFD from COMMON inside PREDICT_CPP_FROM_COMMON.
+        DMINCPP = 0.0
+        IF (DSTMAX.GT.1.0E-12) DMINCPP = WAVE/DSTMAX
+        ETOLCPP = 0.0025
+        CALL PREDICT_CPP_FROM_COMMON(PSI, IFLAGPR, WAVE, RAST, RASTY,
+     +       IYLEN, NREC, PHIBEG, DMINCPP, ETOLCPP, NREFLS, IHG, IKG, ILG,
+     +       XG, YG, PHIG, PHIWG, IMG, NSPOT)
+#else
         CALL PREDICT(PSI, IFLAGPR)
+#endif
         REDO = .FALSE.
       END IF
        

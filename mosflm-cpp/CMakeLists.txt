@@ -383,6 +383,86 @@ if(BUILD_TESTING)
             target_link_libraries(test_predict_cpp_psi PRIVATE gfortran)
         endif()
         add_test(NAME predict_cpp_psi COMMAND test_predict_cpp_psi)
+
+        add_executable(test_predict_gendata_pack
+            fortran/predict_cpp_bridge.f90
+            fortran/predict_gendata_pack.f90
+            fortran/test_predict_gendata_pack.f90
+        )
+        target_link_libraries(test_predict_gendata_pack PRIVATE mosflm_geometry)
+        set_target_properties(test_predict_gendata_pack PROPERTIES
+            LINKER_LANGUAGE CXX
+            Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_gendata_mods
+        )
+        if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(test_predict_gendata_pack PRIVATE gfortran)
+        endif()
+        add_test(NAME predict_gendata_pack COMMAND test_predict_gendata_pack)
+
+        add_executable(test_predict_cpp_hook
+            fortran/predict_cpp_bridge.f90
+            fortran/predict_gendata_pack.f90
+            fortran/predict_cpp_hook.f90
+            fortran/test_predict_cpp_hook.f90
+        )
+        target_link_libraries(test_predict_cpp_hook PRIVATE mosflm_geometry)
+        set_target_properties(test_predict_cpp_hook PROPERTIES
+            LINKER_LANGUAGE CXX
+            Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_hook_mods
+        )
+        if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(test_predict_cpp_hook PRIVATE gfortran)
+        endif()
+        add_test(NAME predict_cpp_hook COMMAND test_predict_cpp_hook)
+
+        add_executable(test_predict_cpp_hook_f77
+            fortran/predict_cpp_bridge.f90
+            fortran/predict_gendata_pack.f90
+            fortran/predict_cpp_hook.f90
+            fortran/test_predict_cpp_hook_f77.f
+        )
+        set_source_files_properties(fortran/test_predict_cpp_hook_f77.f
+            PROPERTIES Fortran_FORMAT FIXED
+        )
+        target_link_libraries(test_predict_cpp_hook_f77 PRIVATE mosflm_geometry)
+        set_target_properties(test_predict_cpp_hook_f77 PROPERTIES
+            LINKER_LANGUAGE CXX
+            Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_hook_f77_mods
+        )
+        if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(test_predict_cpp_hook_f77 PRIVATE gfortran)
+        endif()
+        add_test(NAME predict_cpp_hook_f77 COMMAND test_predict_cpp_hook_f77)
+
+        add_executable(test_predict_cpp_from_common
+            fortran/predict_cpp_bridge.f90
+            fortran/predict_gendata_pack.f90
+            fortran/predict_cpp_hook.f90
+            fortran/predict_cpp_from_common.f90
+            fortran/test_predict_cpp_from_common.f90
+        )
+        target_link_libraries(test_predict_cpp_from_common PRIVATE mosflm_geometry)
+        set_target_properties(test_predict_cpp_from_common PROPERTIES
+            LINKER_LANGUAGE CXX
+            Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_from_common_mods
+        )
+        if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(test_predict_cpp_from_common PRIVATE gfortran)
+        endif()
+        add_test(NAME predict_cpp_from_common COMMAND test_predict_cpp_from_common)
+
+        # Static archive for Autotools ``make MOSFLM_CPP_PREDICT=1 ipmosflm``.
+        add_library(mosflm_predict_hook STATIC
+            fortran/predict_cpp_bridge.f90
+            fortran/predict_gendata_pack.f90
+            fortran/predict_cpp_hook.f90
+            fortran/predict_cpp_from_common.f90
+        )
+        target_link_libraries(mosflm_predict_hook PUBLIC mosflm_geometry)
+        set_target_properties(mosflm_predict_hook PROPERTIES
+            Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_hook_lib_mods
+            POSITION_INDEPENDENT_CODE ON
+        )
     endif()
 
     add_executable(test_known_indexed_oracle
