@@ -1,0 +1,13 @@
+! Template for a future real ipmosflm capture (SYNTHETIC params below).
+! Replace IMAGE paths with real frames under this directory, then run:
+!   ./tools/capture_ipmosflm_oracle.sh
+!
+! WAVE 1.0
+! DISTANCE 250.0
+! BEAM 0.0 0.0
+! PIXEL 0.172 0.172
+! CELL 58.0 58.0 150.0 90.0 90.0 90.0
+! MATRIX  ... (identity orientation)
+! IMAGE image_001.cbf
+! GO
+! EXIT

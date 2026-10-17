@@ -1,0 +1,7 @@
+# SYNTHETIC known_indexed geometry (analytical stills / osc fixtures)
+# Cell (thaumatin-like): 58 58 150 90 90 90
+# Orientation: identity (UB from cell, R = I)
+# Detector: λ=1.0 Å, distance=250 mm, pixel=0.172 mm, 1475×1679
+# Beam centre: (0, 0) mm in beam-relative frame
+# Stills: φ=0, dmin=3.5 Å, ewald_tol=0.0025 Å⁻¹
+# Osc: φ ∈ [0, 0.5]°, dmin=5.0 Å, φ step=0.05°
