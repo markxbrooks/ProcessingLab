@@ -33,6 +33,8 @@
 #                          coordinates ipmosflm used for each reflection)
 #   ipmosflm.log           full ipmosflm run log
 #
-# NOTE: the mapping between ipmosflm's printed orientation matrix and the
-# C++ predictor lab frame (beam along +z) is still being reconciled before a
-# positional differential test can be wired up.
+# NOTE: lab-frame mapping still open. CTest insulin_hkl_overlap probes axis
+# permutations of [A]; best so far is YZX with sign bits=2 (~7% HKL recall vs
+# the integrated MTZ). Positional XDET/YDET differential not wired yet.
+# Experimental Autotools splice: make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
+# (requires mosflm_predict_hook; see mosflm-cpp/docs/PHASE_C_SPLICE.md).

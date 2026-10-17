@@ -497,6 +497,16 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
+    add_executable(test_insulin_hkl_overlap
+        tests/differential/test_insulin_hkl_overlap.cpp
+    )
+    target_link_libraries(test_insulin_hkl_overlap PRIVATE mosflm_geometry)
+    add_test(
+        NAME insulin_hkl_overlap
+        COMMAND test_insulin_hkl_overlap
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
     if(MOSFLM_HAS_DPS_BRAVAIS)
         add_executable(test_bravais_classifier
             tests/differential/test_bravais_classifier.cpp

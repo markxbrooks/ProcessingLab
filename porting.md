@@ -12,13 +12,13 @@ Your first milestone should be a C++ executable that reproduces a small, indepen
 
 ## Current status (Oct 2026)
 
-Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there (28 tests with DPS libraries and optional `MOSFLM_WITH_CCTBX`).
+Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there (28 tests with DPS libraries; optional `MOSFLM_WITH_CCTBX`).
 
 | Topic | Status |
 | ----- | ------ |
 | C++ vertical slice | Geometry, miniCBF I/O, stills + oscillation `PREDICT`, box summation, 2D Gaussian profile fit, MTZ write — covered by CTest and `mosflm_cpp_cli` |
-| PREDICT oracles | Analytical dumps under `mosflm-cpp/testdata/oracle/` (`predict_still.dump`, `predict_osc.dump`). Known-indexed `ipmosflm` capture is scaffolded only (`mosflm-cpp/tools/capture_ipmosflm_oracle.sh`) |
-| Legacy `bin/ipmosflm` | Keyword smoke matches CCP4 `/Applications/ccp4-9/bin/ipmosflm` (banner **7.4.0**). Shared-library linkage differs (local rebuild uses Homebrew GCC / different rpaths) — not a phase gate |
+| PREDICT oracles | Analytical dumps + real insulin capture under `mosflm-cpp/testdata/oracle/known_indexed/` (MTZ, spot list, log). CTest `insulin_hkl_overlap` (~7% HKL recall; axis mapping open) |
+| Legacy `bin/ipmosflm` | Autotools binary; `MOSFLM_CPP_PREDICT=1` links C++ hook. Default path unchanged |
 
 Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-languages). Package layout and CLI: [`mosflm-cpp/README.md`](mosflm-cpp/README.md).
 
@@ -174,6 +174,6 @@ Day 5: Document first legacy routine to replace (`PREDICT`).
 ### Next
 
 1. Real known-indexed images (replace synthetic dumps via `capture_ipmosflm_oracle.sh`).
-2. **Phase C:** known-indexed job under `MOSFLM_CPP_PREDICT=1`; tighten `ETOLCPP` / `XG`–`YG` axis mapping vs REEK differentials.
+2. **Phase C:** raise `insulin_hkl_overlap` recall (lab-frame / A-matrix mapping); then XDET positional differential; exercise `MOSFLM_CPP_PREDICT=1` on insulin PROCESS.
 3. Post-refinement (Stage 2).
 4. Full `INTEG3` parity beyond the Gaussian profile stand-in.

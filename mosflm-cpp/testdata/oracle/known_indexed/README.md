@@ -20,10 +20,15 @@ positional oracle for a future `PREDICT` differential test.
 fixtures (`tools/generate_synthetic_known_indexed.sh`, `mosflm_cpp_cli`); they
 are **not** from `ipmosflm`.
 
-## Open item
+## Differentials
 
-The mapping between ipmosflm's printed orientation matrix (`U` / `A`) and the
-C++ predictor lab frame (beam along +z, spindle rotation about x) is not yet
-reconciled — see the note in `../images/known_indexed/geometry.txt`. Until that
-is resolved a positional `PREDICT` differential cannot be wired up; the MTZ
-`H K L + I/SIGI` list is available immediately for an integration differential.
+| Test | What it checks |
+| ---- | -------------- |
+| `known_indexed_oracle` | Synthetic analytical dumps still match C++ fixtures |
+| `insulin_hkl_overlap` | C++ PREDICT vs `insulin_1_001.mtz` Miller-index set, probing A-matrix axis/sign permutations |
+
+**Baseline (2026-10-17):** best recall ≈ **6.8%** (99 / 1463 unique MTZ HKLs)
+with axis permutation **YZX** and sign pattern **2**, dmin=2.5 Å, φ∈[0,1]°.
+Predictor still emits many extra spots (SG absences / Ewald window). Positional
+`XDET`/`YDET` comparison remains blocked on lab-frame reconciliation — see
+`../images/known_indexed/geometry.txt`.
