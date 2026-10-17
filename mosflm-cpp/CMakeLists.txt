@@ -18,6 +18,26 @@ option(MOSFLM_WITH_CCTBX
     OFF
 )
 
+option(MOSFLM_WITH_FORTRAN
+    "Build Fortran iso_c_binding Phase C bridge + test (needs gfortran)"
+    ON
+)
+
+# Phase C: Fortran → C ABI smoke (optional if no Fortran compiler).
+set(MOSFLM_HAS_FORTRAN OFF)
+if(MOSFLM_WITH_FORTRAN)
+    include(CheckLanguage)
+    check_language(Fortran)
+    if(CMAKE_Fortran_COMPILER)
+        enable_language(Fortran)
+        set(MOSFLM_HAS_FORTRAN ON)
+    else()
+        message(WARNING
+            "MOSFLM_WITH_FORTRAN=ON but no Fortran compiler found; "
+            "skipping fortran/ bridge")
+    endif()
+endif()
+
 FetchContent_Declare(
     eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
@@ -73,12 +93,20 @@ add_library(mosflm_geometry
     src/geometry/ReciprocalLattice.cpp
     src/geometry/OrientationMatrix.cpp
     src/geometry/DetectorGeometry.cpp
+    src/geometry/Rotmat.cpp
+    src/geometry/Dstar.cpp
+    src/geometry/Clcalc.cpp
+    src/geometry/Matset.cpp
     src/legacy/LegacyMosflmAdapter.cpp
+    src/legacy/MosflmCApi.cpp
     src/image/CbfImageReader.cpp
     src/crystal/CrystalMetadata.cpp
     src/crystal/SpaceGroupInfo.cpp
     src/crystal/MtzAdapter.cpp
     src/diffraction/ReflectionPredictor.cpp
+    src/diffraction/SummationIntegrator.cpp
+    src/diffraction/ProfileFitter.cpp
+    src/diffraction/LpCorrection.cpp
     ${gemmi_SOURCE_DIR}/src/mtz.cpp
     ${gemmi_SOURCE_DIR}/src/sprintf.cpp
     ${gemmi_SOURCE_DIR}/src/gz.cpp
@@ -116,6 +144,7 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
         PRIVATE
             ${MOSFLM_IPMOSFLM_ROOT}/util
             ${MOSFLM_IPMOSFLM_ROOT}/index
+            ${MOSFLM_IPMOSFLM_ROOT}/include
     )
     target_link_libraries(mosflm_indexing
         PUBLIC
@@ -208,6 +237,96 @@ if(BUILD_TESTING)
         COMMAND test_predict_stub
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
+    set_tests_properties(predict_stub PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_PREDICT_ORACLE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/oracle/predict_still.dump"
+    )
+
+    add_executable(test_summation_integrate
+        tests/differential/test_summation_integrate.cpp
+    )
+    target_link_libraries(test_summation_integrate PRIVATE mosflm_geometry)
+    add_test(
+        NAME summation_integrate
+        COMMAND test_summation_integrate
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_dstar_rotmat
+        tests/unit/test_dstar_rotmat.cpp
+    )
+    target_link_libraries(test_dstar_rotmat PRIVATE mosflm_geometry)
+    add_test(NAME dstar_rotmat COMMAND test_dstar_rotmat)
+
+    add_executable(test_clcalc_matset
+        tests/unit/test_clcalc_matset.cpp
+    )
+    target_link_libraries(test_clcalc_matset PRIVATE mosflm_geometry)
+    add_test(NAME clcalc_matset COMMAND test_clcalc_matset)
+
+    add_executable(test_vertical_slice
+        tests/differential/test_vertical_slice.cpp
+    )
+    target_link_libraries(test_vertical_slice PRIVATE mosflm_geometry)
+    add_test(NAME vertical_slice COMMAND test_vertical_slice)
+
+    add_executable(test_predict_osc
+        tests/differential/test_predict_osc.cpp
+    )
+    target_link_libraries(test_predict_osc PRIVATE mosflm_geometry)
+    add_test(
+        NAME predict_osc
+        COMMAND test_predict_osc
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(predict_osc PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_PREDICT_OSC_ORACLE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/oracle/predict_osc.dump"
+    )
+
+    add_executable(test_cbf_vertical_slice
+        tests/differential/test_cbf_vertical_slice.cpp
+    )
+    target_link_libraries(test_cbf_vertical_slice PRIVATE mosflm_geometry)
+    add_test(
+        NAME cbf_vertical_slice
+        COMMAND test_cbf_vertical_slice
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(cbf_vertical_slice PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_CBF_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/cbf/sample_minicbf.cbf"
+    )
+
+    add_executable(test_profile_fitter
+        tests/differential/test_profile_fitter.cpp
+    )
+    target_link_libraries(test_profile_fitter PRIVATE mosflm_geometry)
+    add_test(NAME profile_fitter COMMAND test_profile_fitter)
+
+    add_executable(test_c_api_lp
+        tests/unit/test_c_api_lp.cpp
+    )
+    target_link_libraries(test_c_api_lp PRIVATE mosflm_geometry)
+    add_test(NAME c_api_lp COMMAND test_c_api_lp)
+
+    if(MOSFLM_HAS_FORTRAN)
+        add_executable(test_fortran_c_api
+            fortran/mosflm_c_bind.f90
+            fortran/test_fortran_c_api.f90
+        )
+        target_link_libraries(test_fortran_c_api PRIVATE mosflm_geometry)
+        # C++ provides the ABI implementation; keep C++ as the link driver and
+        # pull in the GNU Fortran runtime when needed.
+        set_target_properties(test_fortran_c_api PROPERTIES
+            LINKER_LANGUAGE CXX
+            Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_mods
+        )
+        if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(test_fortran_c_api PRIVATE gfortran)
+        endif()
+        add_test(NAME fortran_c_api COMMAND test_fortran_c_api)
+    endif()
 
     if(MOSFLM_HAS_DPS_BRAVAIS)
         add_executable(test_bravais_classifier

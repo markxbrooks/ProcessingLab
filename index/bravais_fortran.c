@@ -28,7 +28,8 @@ void bravais_fortran_(float *a, float *wave, struct matrix_3x3 cl_om[45], float 
     om.r[2].x = a[7]/(*wave);
     om.r[2].y = a[8]/(*wave);
     output_type = 1;
-    bravais(&om, cl_om, crit, sys_id, output_type);
+    /* Fortran passes a flat char buffer; Cambridge API wants char[45][3]. */
+    bravais(&om, cl_om, crit, (char (*)[3])sys_id, output_type);
     if (error != NULL) {
         *error = 0;
     }

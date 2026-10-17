@@ -4,8 +4,9 @@
  *                          Purdue University                       	*
  *                          West Lafayette, Indiana (USA)           	*
  *                                                                      *
+ * Wrapper: helpers live next to this file; the bravais() prototype is
+ * defined once in include/dps/bravais_api.h (5-arg Cambridge API).
  *======================================================================*/
-
 
 #ifndef BRAVAIS_H
 
@@ -21,7 +22,7 @@ typedef short BravaisMode;
 #define BRAVAIS_COMPARE 0
 #define BRAVAIS_DETERMINE 1
 
-/* Match index/bravais.c and src/dps/bravais/bravais.c (5-arg API). */
-void bravais(struct matrix_3x3 *, struct matrix_3x3 *, float crit[45], char sys_id[45][3], int output_type);
+#include "../include/dps/bravais_api.h"
+
 #define BRAVAIS_H
 #endif

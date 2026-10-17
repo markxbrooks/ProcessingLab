@@ -6,11 +6,23 @@ The key distinction is that `ipmosflm` is the project, while the `mosflm` direct
 
 Your first milestone should be a C++ executable that reproduces a small, independently verifiable MOSFLM calculation. That gives you a reliable foundation before you tackle image integration, refinement, or a graphical interface.
 
+## Current status (Oct 2026)
+
+Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there (~16 tests with DPS libraries and optional `MOSFLM_WITH_CCTBX`).
+
+| Topic | Status |
+| ----- | ------ |
+| C++ vertical slice | Geometry, miniCBF I/O, stills + oscillation `PREDICT`, box summation, 2D Gaussian profile fit, MTZ write — covered by CTest and `mosflm_cpp_cli` |
+| PREDICT oracles | Analytical dumps under `mosflm-cpp/testdata/oracle/` (`predict_still.dump`, `predict_osc.dump`). Known-indexed `ipmosflm` capture is scaffolded only (`mosflm-cpp/tools/capture_ipmosflm_oracle.sh`) |
+| Legacy `bin/ipmosflm` | Keyword smoke matches CCP4 `/Applications/ccp4-9/bin/ipmosflm` (banner **7.4.0**). Shared-library linkage differs (local rebuild uses Homebrew GCC / different rpaths) — not a phase gate |
+
+Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-languages). Package layout and CLI: [`mosflm-cpp/README.md`](mosflm-cpp/README.md).
+
 ## Repo findings (verified locally)
 
 | Item | Finding |
 | ---- | ------- |
-| Package | Autotools **ipmosflm 7.3.0** (`configure.ac`); binary `bin/ipmosflm` |
+| Package | Autotools **ipmosflm 7.3.0** in `configure.ac`; built binary banner reports **Mosflm 7.4.0** (same as CCP4-9) |
 | Core sources | Amalgamated Fortran in `mosflm/mosflm_all_ip_inc*.f` (~250k lines) + `unoptimizable.f` + `control.f` |
 | Entry point | `PROGRAM MOSFLM` in `mosflm/unoptimizable.f:5`; command loop `SUBROUTINE CONTROL` in `control.f:4` |
 | Indexing | DPS under `src/dps/` + `index/`; **REFIX stubbed** (`torefix*.f`) — public tree has no `refix_all.for` |
@@ -20,24 +32,24 @@ Your first milestone should be a C++ executable that reproduces a small, indepen
 
 ### High-value routine map (no-X amalgamation preferred)
 
-| Routine | File | Approx. line |
-| ------- | ---- | ------------ |
-| `PREDICT` | `mosflm_all_ip_inc_noX.f` | 171805 |
-| `DSTAR` | `unoptimizable.f` | 17692 |
-| `ROTMAT` | `unoptimizable.f` | 37480 |
-| `CLCALC` | `mosflm_all_ip_inc_noX.f` | 23322 |
-| `MATSET` | `mosflm_all_ip_inc_noX.f` | 117930 |
-| `INTEG` / `INTEG2` | `unoptimizable.f` | 22256 / 20799 |
-| `INTEG3` | `mosflm_all_ip_inc_noX.f` | 97457 |
-| `MEAS` | `mosflm_all_ip_inc_noX.f` | 119120 |
-| `PROCESS` | `unoptimizable.f` | 25854 |
-| `METRIC` / `INVCEL` | `torefix_noX.f` | 182 / 130 |
+| Routine | File | Approx. line | C++ status (Oct 2026) |
+| ------- | ---- | ------------ | --------------------- |
+| `PREDICT` | `mosflm_all_ip_inc_noX.f` | 171805 | Stills + oscillation predictor + analytical oracles; not wired into Fortran |
+| `DSTAR` | `unoptimizable.f` | 17692 | Thin helpers (`Dstar`) |
+| `ROTMAT` | `unoptimizable.f` | 37480 | `rotmat_from_missetting` |
+| `CLCALC` | `mosflm_all_ip_inc_noX.f` | 23322 | `cell_from_metric_tensor` |
+| `MATSET` | `mosflm_all_ip_inc_noX.f` | 117930 | Thin `matset` (no COMMON derivatives) |
+| `INTEG` / `INTEG2` | `unoptimizable.f` | 22256 / 20799 | Box summation integrator |
+| `INTEG3` | `mosflm_all_ip_inc_noX.f` | 97457 | Gaussian `ProfileFitter` stand-in (not full parity) |
+| `MEAS` | `mosflm_all_ip_inc_noX.f` | 119120 | Not ported |
+| `PROCESS` | `unoptimizable.f` | 25854 | Not ported |
+| `METRIC` / `INVCEL` | `torefix_noX.f` | 182 / 130 | `UnitCell` (+ differential test) |
 
 Modular C oracles (good early differential targets): `src/dps/util/vector_math.c`, `cryst_matrix.c`, `mat_inversion.c`.
 
 ### Bravais header hygiene
 
-There are multiple `bravais.h` basenames (`index/`, `util/`, `src/dps/bravais/`). The **definition** in `index/bravais.c` is the **5-argument** Cambridge API. `util/bravais.h` previously declared a stale 6-arg form; `bravais_fortran.c` was updated to call the 5-arg API and set `*error = 0` for Fortran. Prefer a single include path under `src/dps/bravais/` long-term rather than divergent same-basename headers.
+There are multiple `bravais.h` basenames (`index/`, `util/`, `src/dps/bravais/`). The **definition** in `index/bravais.c` is the **5-argument** Cambridge API. Those local headers are now **wrappers** around a single prototype in [`include/dps/bravais_api.h`](include/dps/bravais_api.h). `bravais_fortran.c` calls the 5-arg API (with an explicit cast for Fortran’s flat `sys_id` buffer) and sets `*error = 0`.
 
 ### Building the legacy oracle (macOS arm64, Oct 2026)
 
@@ -64,13 +76,14 @@ EXIT
 EOF
 ```
 
-Smoke-tested: version banner prints and `EXIT` terminates cleanly.
+Smoke-tested: version banner prints and `EXIT` terminates cleanly. Keyword smoke (`CELL` / `MATRIX` / Pilatus template errors) matches CCP4-9’s `ipmosflm`.
 
 ### Building mosflm-cpp
 
 ```bash
 cd mosflm-cpp
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+# Optional: -DMOSFLM_WITH_CCTBX=ON  (Phenix cctbx.python POC)
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
@@ -106,41 +119,54 @@ MOSFLM's documented workflow has three major stages:
 
 For a C++ port, use **integration of a known, already indexed dataset** as the first substantial end-to-end target. Autoindexing adds ambiguity that obscures early discrepancies.
 
-Regression corpus lives under [`mosflm-cpp/testdata/`](mosflm-cpp/testdata/README.md).
+Regression corpus lives under [`mosflm-cpp/testdata/`](mosflm-cpp/testdata/README.md). Analytical oracles are in place; a known-indexed image set is still required for Fortran differentials (`tools/capture_ipmosflm_oracle.sh`).
 
 ## 3. Choose a migration strategy that allows mixed languages
 
-Staged migration:
+Staged migration with **current status**:
 
-- **Phase A** — Hybrid CMake build; narrow Fortran/C++ adapters.
-- **Phase B** — Replace isolated kernels; keep Fortran as oracle.
-- **Phase C** — Switch implementation behind interfaces after differential tests pass.
-- **Phase D** — Retire Fortran only when all callers migrated.
+| Phase | Intent | Status (Oct 2026) |
+| ----- | ------ | ----------------- |
+| **A** | Hybrid CMake build; narrow Fortran/C++ adapters | **Done** — `mosflm_geometry`, `LegacyMosflmAdapter` (CELL(6), predict, summation, profile), optional `mosflm_indexing` |
+| **B** | Replace isolated kernels; keep Fortran as oracle | **In progress / advanced** — geometry, Gemmi crystal, miniCBF reader, stills+osc `PREDICT`, summation + Gaussian profile fit, MTZ, DPS Bravais façade, CLCALC/MATSET/DSTAR/ROTMAT helpers. Still missing: known-indexed Fortran PREDICT/integrate dumps, post-refinement |
+| **C** | Switch implementation behind interfaces after differential tests pass | **In progress** — C ABI + `fortran/mosflm_c_bind.f90` (`predict_still_cpp`) + `fortran_c_api` CTest (656-spot analytical oracle). Full amalgamation `PREDICT` call-site swap still pending |
+| **D** | Retire Fortran only when all callers migrated | **Not started** |
 
 Keep COMMON blocks, column-major layout, and mangling inside `include/mosflm/legacy/`.
 
 ## 4. Design the C++ domain model before porting algorithms
 
-Layout under `mosflm-cpp/` (created): geometry, diffraction, refinement, image, io, legacy adapters; CMake + CTest; Eigen via FetchContent.
+Layout under `mosflm-cpp/` (populated): `geometry`, `diffraction`, `crystal`, `image`, `indexing`, `legacy`; CMake + CTest; Eigen + Gemmi via FetchContent. A `refinement/` tree is **deferred** (Stage 2). Optional CCTBX remains a standalone evaluator (`docs/CCTBX_EVAL.md`), not a hard dependency.
 
 ## 5. Build a vertical slice, not a collection of translated functions
 
-1. Read diffraction image + metadata.
-2. Represent experimental geometry (this milestone: UnitCell / Orientation / Detector).
-3. Predict reflections (`PREDICT` path — see below).
-4. Summation integrate (defer profile fitting).
-5. Write MTZ; compare with numeric tolerances.
+| Step | Target | Status |
+| ---- | ------ | ------ |
+| 1 | Read diffraction image + metadata | **Done** — `CbfImageReader` (CBFlib + miniCBF `#` comments) |
+| 2 | Experimental geometry | **Done** — `UnitCell` / `OrientationMatrix` / `DetectorGeometry` (+ Dstar, Rotmat, Clcalc, Matset) |
+| 3 | Predict reflections (`PREDICT`) | **Done** — stills + oscillation; analytical oracles; see [`FIRST_ROUTINE.md`](mosflm-cpp/docs/FIRST_ROUTINE.md) |
+| 4 | Summation integrate | **Done** — `SummationIntegrator`. Profile stand-in: **Done** — `ProfileFitter` (not full `INTEG3`) |
+| 5 | Write MTZ; compare with numeric tolerances | **Done** for synthetic / CBF smoke. **Todo**: real `integrate.mtz` vs known-indexed `ipmosflm` |
 
 ## First Fortran routine to replace: `PREDICT`
 
-See [mosflm-cpp/docs/FIRST_ROUTINE.md](mosflm-cpp/docs/FIRST_ROUTINE.md) for callers, I/O contract, and regression criteria.
+See [mosflm-cpp/docs/FIRST_ROUTINE.md](mosflm-cpp/docs/FIRST_ROUTINE.md) for callers, I/O contract, and regression criteria. C++ stills/oscillation path and dump format are implemented; Fortran call-site swap is Phase C.
 
-## My recommendation for your first week
+## Milestones
 
-Days 1–2: Source audit + baseline build (done).
+### First week (done)
 
-Days 2–3: Regression corpus scaffolding (done).
+Days 1–2: Source audit + baseline build.
 
-Days 3–4: First C++ geometry kernel + unit tests (done).
+Days 2–3: Regression corpus scaffolding.
 
-Day 5: Document first legacy routine to replace (`PREDICT`) (done).
+Days 3–4: First C++ geometry kernel + unit tests.
+
+Day 5: Document first legacy routine to replace (`PREDICT`).
+
+### Next
+
+1. Known-indexed dataset under `mosflm-cpp/testdata/images/known_indexed/` + `capture_ipmosflm_oracle.sh` → Fortran PREDICT / integrate dumps for true differentials.
+2. **Phase C:** splice `predict_still_cpp` into one amalgamation stills caller (bridge + CTest already green).
+3. Post-refinement (Stage 2).
+4. Full `INTEG3` parity beyond the Gaussian profile stand-in.

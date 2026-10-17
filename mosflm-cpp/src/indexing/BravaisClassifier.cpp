@@ -5,10 +5,12 @@
 #include <stdexcept>
 
 // DPS / Cambridge headers. util.h must precede bravais.h so matrix_3x3 exists
-// before bravais_goof.h. Linked from lib/dps_index.a + lib/libdps.a.
+// before bravais_goof.h. Prototype comes from unique include/dps/bravais_api.h
+// (pulled in by bravais.h). Linked from lib/dps_index.a + lib/libdps.a.
 extern "C" {
 #include "util.h"
 #include "bravais.h"
+#include "dps/bravais_api.h"
 }
 
 namespace mosflm::indexing {

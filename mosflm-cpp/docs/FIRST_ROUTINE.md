@@ -44,8 +44,21 @@ inside the amalgamation; when porting, extract:
   φ begin/end (or still flag), full/partial classification.
 - Count of predictions in the image window.
 
-Document the precise MOSFLM arrays once a single scripted `ipmosflm` job is
-captured under `testdata/oracle/`.
+### Frozen stills oracle (current)
+
+| Item | Path / value |
+| ---- | ------------ |
+| Dump (stills) | [`testdata/oracle/predict_still.dump`](../testdata/oracle/predict_still.dump) |
+| Dump (osc) | [`testdata/oracle/predict_osc.dump`](../testdata/oracle/predict_osc.dump) |
+| Inputs | [`testdata/oracle/predict_still.inputs.txt`](../testdata/oracle/predict_still.inputs.txt) |
+| Generators | [`predict_still_oracle.py`](../tools/predict_still_oracle.py), [`predict_osc_oracle.py`](../tools/predict_osc_oracle.py) |
+| C++ API | `ReflectionPredictor` + `LegacyMosflmAdapter::predict_still` / `integrate_summation` |
+| C / Fortran ABI | `MosflmCApi.h` + [`fortran/mosflm_c_bind.f90`](../fortran/mosflm_c_bind.f90) (`predict_still_cpp`) |
+| Dump lines | `PREDICT_DUMP n=N` then `h k l x_mm y_mm phi_beg phi_end full(0\|1)` |
+
+A full `bin/ipmosflm` PREDICT capture still needs a known-indexed image set
+(see `testdata/README.md`). Until then the analytical dump is the differential
+oracle for stills.
 
 ## Regression criteria
 
@@ -64,7 +77,8 @@ Do **not** require bit-identical floats.
 2. Oracle `bin/ipmosflm` job on `testdata/` producing a frozen prediction dump.
 3. C++ `ReflectionPredictor` API matching the I/O contract above.
 4. Differential test comparing C++ vs oracle dump.
-5. Only then route one caller through `LegacyMosflmAdapter` → C++.
+5. Route one stills caller through `predict_still_cpp` / `MosflmCApi` (Fortran bridge +
+   `fortran_c_api` CTest already exercise the analytical fixture path).
 
 ## Non-goals for the first replacement
 

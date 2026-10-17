@@ -24,7 +24,38 @@ UnitCell LegacyMosflmAdapter::from_cell6(const float in[6]) {
 
 std::string LegacyMosflmAdapter::oracle_hint() {
     return "Run ../bin/ipmosflm with DYLD_LIBRARY_PATH=$CCP4/lib:"
-           "/opt/homebrew/opt/hdf5/lib (see porting.md).";
+           "/opt/homebrew/opt/hdf5/lib (see porting.md). Stills PREDICT "
+           "oracle: testdata/oracle/predict_still.dump.";
+}
+
+std::vector<diffraction::PredictedReflection> LegacyMosflmAdapter::predict_still(
+    const diffraction::PredictRequest& request
+) {
+    return diffraction::ReflectionPredictor{}.predict(request);
+}
+
+std::vector<diffraction::IntegratedReflection>
+LegacyMosflmAdapter::integrate_summation(
+    const image::DiffractionImage& image,
+    const DetectorGeometry& detector,
+    const std::vector<diffraction::PredictedReflection>& predictions,
+    const diffraction::IntegrateRequest& request
+) {
+    return diffraction::SummationIntegrator{}.integrate(
+        image, detector, predictions, request
+    );
+}
+
+std::vector<diffraction::ProfileFittedReflection>
+LegacyMosflmAdapter::integrate_profile(
+    const image::DiffractionImage& image,
+    const DetectorGeometry& detector,
+    const std::vector<diffraction::PredictedReflection>& predictions,
+    const diffraction::ProfileFitRequest& request
+) {
+    return diffraction::ProfileFitter{}.fit(
+        image, detector, predictions, request
+    );
 }
 
 }  // namespace mosflm::legacy

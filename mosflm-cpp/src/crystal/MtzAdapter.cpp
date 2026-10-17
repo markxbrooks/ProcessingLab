@@ -2,6 +2,7 @@
 
 #include <gemmi/mtz.hpp>
 
+#include <cmath>
 #include <stdexcept>
 #include <vector>
 
@@ -44,6 +45,41 @@ void MtzAdapter::write_simple(
             std::string("MtzAdapter::write_simple failed: ") + ex.what()
         );
     }
+}
+
+std::vector<SimpleReflection> MtzAdapter::read_simple(
+    const std::filesystem::path& path
+) {
+    gemmi::Mtz mtz;
+    try {
+        mtz.read_file(path.string());
+    } catch (const std::exception& ex) {
+        throw std::runtime_error(
+            std::string("MtzAdapter::read_simple failed: ") + ex.what()
+        );
+    }
+    const gemmi::Mtz::Column* col_h = mtz.column_with_label("H");
+    const gemmi::Mtz::Column* col_k = mtz.column_with_label("K");
+    const gemmi::Mtz::Column* col_l = mtz.column_with_label("L");
+    const gemmi::Mtz::Column* col_i = mtz.column_with_label("I");
+    const gemmi::Mtz::Column* col_s = mtz.column_with_label("SIGI");
+    if (!col_h || !col_k || !col_l || !col_i || !col_s) {
+        throw std::runtime_error(
+            "MtzAdapter::read_simple: missing H/K/L/I/SIGI columns"
+        );
+    }
+    std::vector<SimpleReflection> out;
+    out.reserve(static_cast<std::size_t>(mtz.nreflections));
+    for (int i = 0; i < mtz.nreflections; ++i) {
+        SimpleReflection r;
+        r.h = static_cast<int>(std::lround((*col_h)[static_cast<std::size_t>(i)]));
+        r.k = static_cast<int>(std::lround((*col_k)[static_cast<std::size_t>(i)]));
+        r.l = static_cast<int>(std::lround((*col_l)[static_cast<std::size_t>(i)]));
+        r.intensity = (*col_i)[static_cast<std::size_t>(i)];
+        r.sigma = (*col_s)[static_cast<std::size_t>(i)];
+        out.push_back(r);
+    }
+    return out;
 }
 
 }  // namespace mosflm::crystal

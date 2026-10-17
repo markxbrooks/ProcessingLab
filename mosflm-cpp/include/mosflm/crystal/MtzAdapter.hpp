@@ -16,7 +16,7 @@ struct SimpleReflection {
     float sigma{};
 };
 
-/// Minimal MTZ writer for future integrate comparisons (Gemmi Mtz API).
+/// Minimal MTZ writer/reader for integrate comparisons (Gemmi Mtz API).
 class MtzAdapter {
 public:
     /// Write a single-dataset MTZ with H K L I SIGI columns.
@@ -24,6 +24,11 @@ public:
         const std::filesystem::path& path,
         const CrystalMetadata& crystal,
         const std::vector<SimpleReflection>& reflections
+    );
+
+    /// Read H K L I SIGI from an MTZ written by :func:`write_simple`.
+    [[nodiscard]] static std::vector<SimpleReflection> read_simple(
+        const std::filesystem::path& path
     );
 };
 

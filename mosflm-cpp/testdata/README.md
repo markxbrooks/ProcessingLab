@@ -5,7 +5,7 @@
 | Path | Purpose |
 | ---- | ------- |
 | `analytical/` | Geometry fixtures that need no images (INVCEL / METRIC / UB) |
-| `oracle/` | Outputs from `bin/ipmosflm` on the known-indexed image set |
+| `oracle/` | Frozen dumps for differentials (`predict_still.dump` analytical stills; future `ipmosflm` captures) |
 
 ## Known-indexed image set (to capture)
 
@@ -30,20 +30,24 @@ testdata/oracle/known_indexed/
 
 ## Capture oracle results
 
+Prefer the scaffold script (creates `images/known_indexed/` README if missing):
+
+```bash
+./tools/capture_ipmosflm_oracle.sh
+```
+
+Or run manually once `testdata/images/known_indexed/ipmosflm.in` exists:
+
 ```bash
 export CCP4=/Applications/ccp4-9
 export DYLD_LIBRARY_PATH="$CCP4/lib:/opt/homebrew/opt/hdf5/lib"
-IPMOSFLM=../../bin/ipmosflm
-
-# Example skeleton (edit paths / keywords for your images):
-$IPMOSFLM <<EOF > testdata/oracle/known_indexed/ipmosflm.log
-! WAVE … DISTANCE … BEAM … CELL … MATRIX …
-! GO
-EXIT
-EOF
+../../bin/ipmosflm < testdata/images/known_indexed/ipmosflm.in \
+  > testdata/oracle/known_indexed/ipmosflm.log
 ```
 
 Compare C++ outputs with **numeric tolerances**, not bit-identical floats.
+Analytical PREDICT dumps (`oracle/predict_still.dump`, `predict_osc.dump`) are
+used until a known-indexed capture is available.
 
 ## Analytical fixture
 
