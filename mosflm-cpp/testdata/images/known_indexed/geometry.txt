@@ -1,7 +1,38 @@
-# SYNTHETIC known_indexed geometry (analytical stills / osc fixtures)
-# Cell (thaumatin-like): 58 58 150 90 90 90
-# Orientation: identity (UB from cell, R = I)
-# Detector: λ=1.0 Å, distance=250 mm, pixel=0.172 mm, 1475×1679
-# Beam centre: (0, 0) mm in beam-relative frame
-# Stills: φ=0, dmin=3.5 Å, ewald_tol=0.0025 Å⁻¹
-# Osc: φ ∈ [0, 0.5]°, dmin=5.0 Å, φ step=0.05°
+# Known-indexed capture geometry (CCP4 example data: insulin_1_001.img)
+#
+# This is a REAL ipmosflm capture target, not a synthetic fixture.
+#
+# Detector (from the SMV header):
+#   type:       ADSC Quantum (SMV), 2-byte unsigned short, little endian
+#   size:       2304 x 2304, pixel 0.0816 mm (square)
+#   distance:   160.0 mm
+#   beam:       (94.0, 94.7) mm
+#   wavelength: 0.9790 A
+#   scan:       phi 0.0 -> 1.0 deg (OSC_RANGE 1.0, PHI 0.0)
+#
+# Indexing (ipmosflm DPS autoindex, solution 12):
+#   space group: I23 (number 197, cI)
+#   regularized cell: 78.190 78.190 78.190 90.0 90.0 90.0
+#
+# Orientation (as printed by ipmosflm "Crystal Parameters"; see ipmosflm.log):
+#   Rotation matrix U defining standard setting:
+#       -0.97734 -0.02860 -0.20972
+#        0.17495  0.44851 -0.87649
+#        0.11912 -0.89332 -0.43335
+#   Orientation Matrix [A] (components of A*,B*,C* along X,Y,Z):
+#       -0.012237 -0.000358 -0.002626
+#        0.002191  0.005616 -0.010974
+#        0.001492 -0.011185 -0.005426
+#
+# Oracle outputs (testdata/oracle/known_indexed/):
+#   insulin_1.spt          spot list (612 spots) from phase-1 spot search
+#   insulin_1_001.mtz      integrated frame; columns include H K L
+#                          M/ISYM BATCH I SIGI IPR SIGIPR FRACTIONCALC
+#                          XDET YDET ROT WIDTH LP MPART FLAG BGPKRATIOS
+#                          (XDET/YDET are the predicted detector pixel
+#                          coordinates ipmosflm used for each reflection)
+#   ipmosflm.log           full ipmosflm run log
+#
+# NOTE: the mapping between ipmosflm's printed orientation matrix and the
+# C++ predictor lab frame (beam along +z) is still being reconciled before a
+# positional differential test can be wired up.

@@ -1,13 +1,34 @@
-! Template for a future real ipmosflm capture (SYNTHETIC params below).
-! Replace IMAGE paths with real frames under this directory, then run:
-!   ./tools/capture_ipmosflm_oracle.sh
+! Real known-indexed capture: CCP4 example insulin_1_001.img (SMV, 2304x2304).
+! Source image: /apps/ccp4/ccp4-9/examples/data/insulin_1_001.img
+! Run via tools/capture_ipmosflm_oracle.sh (handles CCP4/ncurses env + 2 phases).
 !
-! WAVE 1.0
-! DISTANCE 250.0
-! BEAM 0.0 0.0
-! PIXEL 0.172 0.172
-! CELL 58.0 58.0 150.0 90.0 90.0 90.0
-! MATRIX  ... (identity orientation)
-! IMAGE image_001.cbf
-! GO
-! EXIT
+! Phase 1 (spot finding; writes insulin_1.spt):
+!   IMAGE insulin_1_001.img
+!   DISTANCE 160.0
+!   WAVELENGTH 0.9790
+!   PIXEL 0.0816 0.0816
+!   BEAM 94.0 94.7
+!   SEPARATION 0.57 0.57
+!   AUTOINDEX
+!   GO
+!
+! Phase 2 (autoindex from spot list + integrate one frame; writes MTZ + genfile).
+! IMAGE and PROCESS are mutually exclusive in a single run, so phase 2 relies on
+! the .spt file (no IMAGE keyword) which leaves PROCESS legal.
+GENFILE gen.dat
+NEWMAT ins.mat
+DIRECTORY .
+TEMPLATE insulin_1_###.img
+DISTANCE 160.0
+WAVELENGTH 0.9790
+PIXEL 0.0816 0.0816
+BEAM 94.0 94.7
+SEPARATION 0.57 0.57
+autoindex dps threshold 20 hkldev 0.3 unfixdist nvect 30 nvref 30 solution 12 image 1 file "insulin_1.spt"
+GO
+CELL 78.190 78.190 78.190 90.0 90.0 90.0
+SYMMETRY 197
+MOSAIC 0.30
+PROCESS 1 to 1 start 0.0 angle 1.0
+GO
+exit
