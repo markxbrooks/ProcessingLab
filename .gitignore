@@ -1,0 +1,19 @@
+# Compiled object files
+*.o
+*.obj
+
+# Compiled libraries
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.lib
+
+# Executables and build artifacts
+*.exe
+*.out
+
+# Build directories
+build/
+_build/
