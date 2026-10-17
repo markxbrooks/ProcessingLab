@@ -1,0 +1,150 @@
+
+      * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+      *                                                               *
+      *                           FFTPACK                             *
+      *                                                               *
+      *                                                               *
+      *     A package of Fortran subprograms for calculating          *
+      *                                                               *
+      *     fast Fourier transforms for both complex and real         *
+      *                                                               *
+      *      periodic sequences and certain other symmetric           *
+      *                                                               *
+      *             sequences that are listed below                   *
+      *                                                               *
+      *               (Version 4.1 November 1988)                     *
+      *                                                               *
+      *                             by                                *
+      *                                                               *
+      *                      Paul Swarztrauber                        *
+      *                                                               *
+      *                             of                                *
+      *                                                               *
+      *         The National Center for Atmospheric Research          *
+      *                                                               *
+      *                Boulder, Colorado  (80307)  U.S.A.             *
+      *                                                               *
+      *                   which is sponsored by                       *
+      *                                                               *
+      *              the National Science Foundation                  *
+      *                                                               *
+      * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+  LATEST REVISION
+  ---------------
+  November 1988  (Version 4.1)
+
+  PURPOSE
+  -------
+  This package consists of programs which perform fast Fourier
+  transforms for both complex and real periodic sequences and
+  certain other symmetric sequences that are listed below.
+
+  USAGE
+  -----
+  1.   RFFTI     initialize  RFFTF and RFFTB
+  2.   RFFTF     forward transform of a real periodic sequence
+  3.   RFFTB     backward transform of a real coefficient array
+
+  4.   EZFFTI    initialize EZFFTF and EZFFTB
+  5.   EZFFTF    a simplified real periodic forward transform
+  6.   EZFFTB    a simplified real periodic backward transform
+
+  7.   SINTI     initialize SINT
+  8.   SINT      sine transform of a real odd sequence
+
+  9.   COSTI     initialize COST
+  10.  COST      cosine transform of a real even sequence
+
+  11.  SINQI     initialize SINQF and SINQB
+  12.  SINQF     forward sine transform with odd wave numbers
+  13.  SINQB     unnormalized inverse of SINQF
+
+  14.  COSQI     initialize COSQF and COSQB
+  15.  COSQF     forward cosine transform with odd wave numbers
+  16.  COSQB     unnormalized inverse of COSQF
+
+  17.  CFFTI     initialize CFFTF and CFFTB
+  18.  CFFTF     forward transform of a complex periodic sequence
+  19.  CFFTB     unnormalized inverse of CFFTF
+
+  SPECIAL CONDITIONS
+  ------------------
+  Before calling routines EZFFTB and EZFFTF for the first time,
+  or before calling EZFFTB and EZFFTF with a different length,
+  users must initialize by calling routine EZFFTI.
+
+  I/O
+  ---
+  None
+
+  PRECISION
+  ---------
+  None
+
+  REQUIRED LIBRARY FILES
+  ----------------------
+  None
+
+  LANGUAGE
+  --------
+  Fortran
+
+  HISTORY
+  -------
+  Developed at NCAR in Boulder, Colorado by Paul N. Swarztrauber
+  of the Scientific Computing Division.  Released on NCAR's public
+  software libraries in January 1980.
+     September 1973    Version 1
+     April     1976    Version 2
+     January   1978    Version 3
+     December  1979    Version 3.1
+     February  1985    Documentation upgrade
+     May       1985    Increased efficiency
+     November  1988    Version 4.1, Fortran 77 changes
+     June      1989    Add function PIMACH for distribution purposes
+
+  PORTABILITY
+  -----------
+  Fortran 77
+
+  INSTALLATION ON UNIX MACHINES
+  -----------------------------
+  A Makefile has been included in this package to facilitate
+  installation on unix systems.  If you use it, you may want to change
+  the LIBDIR = /usr/local/lib to the directory where you want to install
+  FFTPACK.  This Makefile will archive the testing routine with the 
+  library archive file.
+
+  INSTALLATION ON non-UNIX MACHINES
+  ---------------------------------
+  To install the library, compile all of the provided .f files into
+  a relocatable binary library in the manner familiar to your system.
+
+  TESTING
+  -------
+  A subroutine TFFTPK has been supplied as a partial test of FFTPACK.
+  We emphasize the partial nature of this test; it exercises little
+  of the package and is only meant to be a simple check of the library
+  installation.  To use TFFTPK, you will need to write a stub program:
+
+	PROGRAM MAIN
+	CALL TFFTPK(IERROR)
+	STOP
+	END
+
+  Routine TFFTPK should return a 0 and print a success message, 
+  or return a 1 and print a failure message otherwise.
+
+  REFERENCES
+  ----------
+
+ (1) "Vectorizing the Fast Fourier Transforms", by Paul Swarztrauber, 
+     Parallel Computations, G. Rodrigue, ed., Academic Press, 
+     New York 1982.
+
+ (2) "Fast Fourier Transforms Algorithms for Vector Computers", by 
+     Paul Swarztrauber, Parallel Computing, (1984) pp.45-63.
+
+                         - End of FFTPACK document -

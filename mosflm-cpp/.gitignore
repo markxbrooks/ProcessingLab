@@ -1,0 +1,10 @@
+/build/
+/_deps/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+*.a
+*.o
+mosflm_cpp_cli
+test_*

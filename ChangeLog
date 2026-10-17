@@ -1,0 +1,72 @@
+Changes since 6.2.6
+
+    * Many changes which allow processing information to be communicated
+      between Mosflm and the new TclTk-based Graphical User Interface,
+      which is now called iMosflm. Mosflm itself can be run as before as
+      a standalone program, but can also be run from iMosflm. The
+      original X11 GUI, based on John Campbell's XDL_VIEW libraries is
+      still included and can be used if desired.
+    * Now checks to see if an image file is still being written to
+      before attempting to process it.
+    * More improvements to the autoindexing to make it more robust in
+      cases where it failed previously.
+    * Build developed which will run (without the X11 graphics) on
+      MS-Windows, allowing iMosflm to run properly on that operating
+      system. It works on both XP and Vista, and may well work on 2000
+      and 98.
+    * Many small bug fixes which address rare but annoying problems. 
+
+
+Changes since 6.2.5
+
+Most changes are "behind the scenes" for improved performance, so there are 
+no new major commands.
+
+   * Improvements to spot finding for autoindexing, including a new mode 
+     "FINDSPOTS LOCAL", which uses a locally (rather than radially) calculated
+     background.
+
+   * Many changes for use with the new Graphical User Interface.
+   * numerous small bug fixes and minor changes.
+
+Changes since 6.2.4
+
+   * Detector contribution to uncertainty in sigma(I) has been improved.
+   * More types of excluded area can now be specified, either via the
+     command-line (see major command EXCLUDE) or using mouse clicks on an
+     image in the GUI. The new areas are
+        o generalized convex quadrilateral
+        o inside an arc region
+        o outside an arc region
+        o Ice or other powder rings can also be picked with mouse clicks.
+     This has been accompanied by a tidying up of the "Beam/backstop" button
+     in the GUI.
+   * Autoindexing has been further improved, and is also more flexible and
+     gives (optionally) more feedback. All options are available via either
+     the GUI or comand line indexing. These include:
+        o choice of minimum cell edge
+        o L.S. refinement of basis triclinic solution prior to symmetry
+          tests
+        o Distortion index in addition to Penalty for each solution
+   * The user can now choose either hexagonal (H3, H32) or rhombohedral (R3,
+     R32) axes for rhombohedral cells.
+   * New detectors added include MarMosaic 325mm and Ed Westbrook's lens
+     coupled CCD detector (NOIR at APS).
+   * minor improvements to STRATEGY option
+   * numerous small bug fixes and minor changes.
+
+Changes since 6.2.3
+
+   * CCP4 version 4 no longer supported. Mosflm version 6.2.4 requires the
+     prior installation of CCP4 version 5.
+   * Revamped build, which should be easier to customize for different
+     compilers.
+   * Beam centres now read from MarCCD; improved processing of Oxford
+     Diffraction and Bruker images.
+   * Output option for Sasha Popov's intelligent strategy program BEST
+     (available from him at sasha@embl-hamburg.de) - invoked by keywords
+     BEST ON.
+   * The bug which occasionally produced the message "QOPEN (no streams
+     left)" has been fixed.
+   * Many other small bug fixes and minor changes.
+

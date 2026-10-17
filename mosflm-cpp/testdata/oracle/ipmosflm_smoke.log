@@ -1,0 +1,34 @@
+<B><FONT COLOR="#FF0000"><!--SUMMARY_BEGIN-->
+<html> <!-- CCP4 HTML LOGFILE -->
+<hr>
+<!--SUMMARY_END--></FONT></B>
+
+
+ ************ Mosflm version 7.4.0 for IP, CCD and PAD data Sep 16 2021  ***********
+ Andrew Leslie and Harry Powell, MRC Laboratory of Molecular Biology,
+ Hills Road, Cambridge CB2 0QH, UK
+ E-mails: andrew@mrc-lmb.cam.ac.uk, harry@mrc-lmb.cam.ac.uk
+ References:
+ Mosflm: A.G.W. Leslie and H.R. Powell (2007), Evolving Methods for 
+         Macromolecular Crystallography, 245, 41-51 ISBN 978-1-4020-6314-5
+ New auto-indexing based on DPS: I. Steller,  R. Bolotovsky and M.G. Rossmann
+         (1997) J. Appl. Cryst. 30, 1036-1040
+ New iMosflm GUI:  T.G.G. Battye, L. Kontogiannis, O. Johnson, H.R. Powell 
+         and A.G.W. Leslie.(2011) Acta Cryst. D67, 271-281
+ Nature Protocols paper describing how to deal with challenging cases:
+         H.R. Powell, T.G.G. Battye, L. Kontogiannis, O. Johnson
+         and A.G.W. Leslie. (2017) Nature Protocols 12, 1310-1325
+ LZ compression algorithm (lz4) from Yann Collet with HDF5 filter implemented
+ by Dectris.Bitshuffle filter from Kiyoshi Masui.
+--------------------------------------------------------------------------------
+      Mosflm run on Saturday, October 17 2026 at 12:04 by root
+      Compiler command: gfortran
+      Compiler version: GNU Fortran (Homebrew GCC 15.1.0) 15.1.0 Copyright (C) 2025 Free Software Foundation, Inc. This is free software; see the source for copying conditions. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+      Executable type:  Mach-O 64-bit executable arm64
+      This executable was built by brooks on Saturday, October 17 2026 at 11:57
+--------------------------------------------------------------------------------
+ ===> EXIT
+
+
+
+ *********** END OF PROCESSING *****************

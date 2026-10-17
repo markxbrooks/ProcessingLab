@@ -1,0 +1,24 @@
+This directory is part of the Data Processing Suite. For further information 
+look at:
+
+http://www.cs.purdue.edu/homes/sb/Projects/DPS
+
+Compiling:
+
+Use the Makefile in this directory. On SGI use
+
+make sgi
+
+on DEC-ALPHA use
+
+make alpha
+
+on PC running LINUX use
+
+make linux
+
+Please report any problems, bug or inconveniences to
+
+steller@hawaii.bio.purdue.edu
+
+	

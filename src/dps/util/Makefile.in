@@ -1,0 +1,107 @@
+# Makefile for DPS, Ingo Steller
+#
+# make test: for making al routines and the test program
+# make:		 make all
+#
+#
+# Version 0.1
+
+CC = @CC@
+CFLAGS = @CFLAGS@
+F77 = @F77@ -c
+FFLAGS = @FFLAGS@
+LIB = @top_srcdir@/lib
+BIN = @top_srcdir@/bin
+AR_FLAGS = @AR_FLAGS@
+
+OBJS = util.o vector_math.o cryst_matrix.o invert.o read_peaks.o \
+       ind_transform.o nrutil.o mat_inversion.o call_blas.o \
+       read_frame.o \
+       ind_stat.o fftn.o read_om.o allocate.o ref_cell_on_xyz.o 
+LIBS = -lfilec
+LIB = ../../../lib
+BIN = ../../../bin
+HEADERS = util.h util_def.h
+all: util fftpack_lib filec_lib
+
+fftpack_lib:  
+	cd fftpack; ${MAKE} -f Makefile
+
+filec_lib:  
+	cd filec; ${MAKE} -f Makefile
+
+util: $(OBJS) 
+	${AR} $(AR_FLAGS) $(LIB)/libdps.a $(OBJS)
+	chmod 644 $(LIB)/libdps.a
+
+util.o: $(HEADERS)
+vector_math.o: $(HEADERS)
+cryst_matrix.o: $(HEADERS)
+invert.o: $(HEADERS)
+	${F77} ${FFLAGS} -o invert.o invert.f
+
+read_peaks.o: $(HEADERS) read_peaks.h
+ind_transform.o: $(HEADERS) ind_transform.h
+nrutil.o: $(HEADERS)
+mat_inversion.o: $(HEADERS)
+call_blas.o: $(HEADERS)
+ind_stat.o: $(HEADERS)
+read_om.o: $(HEADERS) read_om.h
+read_frame.o: $(HEADERS) read_frame.h
+fftn.o: $(HEADERS)
+allocate.o: $(HEADERS) allocate.h
+ref_cell_on_xyz.o: $(HEADERS) ref_cell_on_xyz.h
+
+dps_frameinfo.o: 
+
+dps_frameinfo: dps_frameinfo.o util
+	${CC} -o $(BIN)/dps_frameinfo dps_frameinfo.o $(LIB)/libdps.a \
+            $(LIB)/libfilec.a -lm 
+
+dps_analyseOM.o:
+
+dps_analyseOM: dps_analyseOM.o util
+	${CC} -o $(BIN)/dps_analyseOM dps_analyseOM.o $(LIB)/libdps.a -lm 
+
+mostlyclean-compile:
+	-rm -f *.o core *.core
+
+clean-generic:
+	-rm -f *~
+
+clean-bin:
+	test -z $(LIB)/libdps.a || rm -f $(LIB)/libdps.a  
+	test -z $(BIN)/dps_frameinfo || rm -f $(BIN)/dps_frameinfo
+	test -z $(BIN)/dps_analyseOM || rm -f $(BIN)/dps_analyseOM
+
+clean: clean-generic mostlyclean-compile
+	cd fftpack; ${MAKE} -f Makefile clean
+	cd filec; ${MAKE} -f Makefile clean
+
+distclean-generic:
+	-rm -f ${MAKE}file Makefile
+
+distclean: distclean-generic clean clean-bin
+	cd fftpack; ${MAKE} -f Makefile distclean
+	cd filec; ${MAKE} -f Makefile distclean
+
+realclean: distclean-generic clean clean-bin
+	-rm -f ${SOURCES} ${HEADERS} ${DIST-COMMON}
+	cd fftpack; ${MAKE} -f Makefile realclean
+	cd filec; ${MAKE} -f Makefile realclean
+
+uninstall: clean-bin
+	cd fftpack: ${MAKE} -f Makefile uninstall
+	cd filec; ${MAKE} -f Mkaefile uninstall
+
+SOURCES = allocate.c call_blas.c cryst_matrix.c dps_analyseOM.c \
+	dps_frameinfo.c fftn.c fht_spectrum.c ind_stat.c ind_transform.c \
+	invert.f mat_inversion.c nrutil.c read_frame.c read_om.c \
+	read_peaks.c ref_cell_on_xyz.c util.c vector_math.c
+
+HEADERS = allocate.h call_blas.h cryst_matrix.h fftn.h ind_stat.h \
+	ind_transform.h mat_inversion.h nrutil.h read_frame.h read_om.h \
+	read_peaks.h ref_cell_on_xyz.h util.h util_def.h vector_math.h
+
+DIST-COMMON = Makefile.in 
+
