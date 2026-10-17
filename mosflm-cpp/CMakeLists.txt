@@ -38,9 +38,7 @@ if(MOSFLM_WITH_FORTRAN)
     endif()
 endif()
 
-# Fortran *test drivers* were lost when mosflm-cpp/tests was gitignored; the
-# bridge modules under fortran/ survive. Only add the Fortran test targets when
-# their driver sources are present, so configuration never fails.
+# Only add Fortran test targets when their driver sources are present.
 set(MOSFLM_FORTRAN_TESTS OFF)
 if(MOSFLM_HAS_FORTRAN AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fortran/test_fortran_c_api.f90" AND
@@ -84,7 +82,7 @@ endif()
 
 # Vendored CBFlib (Option A) — sibling of mosflm-cpp under the ipmosflm tree.
 set(MOSFLM_IPMOSFLM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH
-    "ipmosflm repository root (CBF + DPS libs)")
+    "ProcessingLab repository root (CBF + DPS libs)")
 set(MOSFLM_CBF_INCLUDE_DIR "${MOSFLM_IPMOSFLM_ROOT}/cbf/include")
 set(MOSFLM_CBF_LIB "${MOSFLM_IPMOSFLM_ROOT}/cbf/lib/libcbf.a")
 if(NOT EXISTS "${MOSFLM_CBF_LIB}")

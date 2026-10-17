@@ -1,8 +1,12 @@
-# Porting ipmosflm to C++: a practical roadmap
+# Porting ProcessingLab (MOSFLM) to C++: a practical roadmap
+
+**Repository:** ProcessingLab (formerly `ipmosflm`). The Autotools binary remains
+named `ipmosflm` for CCP4 keyword compatibility; the C++ port lives in
+`mosflm-cpp/`.
 
 I would approach this as a progressive reimplementation of MOSFLM's computational core, with a C++ interface and a compatibility layer around the existing crystallographic algorithms—not as a line-by-line translation of the entire repository.
 
-The key distinction is that `ipmosflm` is the project, while the `mosflm` directory is the part to investigate first for the underlying diffraction-processing algorithms. Before choosing an architecture, establish which source files implement the scientific calculations, which manage the application and its input/output, and which depend on legacy Fortran conventions.
+The key distinction is that ProcessingLab is the project, while the `mosflm` directory is the part to investigate first for the underlying diffraction-processing algorithms. Before choosing an architecture, establish which source files implement the scientific calculations, which manage the application and its input/output, and which depend on legacy Fortran conventions.
 
 Your first milestone should be a C++ executable that reproduces a small, independently verifiable MOSFLM calculation. That gives you a reliable foundation before you tackle image integration, refinement, or a graphical interface.
 
@@ -22,13 +26,13 @@ Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-language
 
 | Item | Finding |
 | ---- | ------- |
-| Package | Autotools **ipmosflm 7.3.0** in `configure.ac`; built binary banner reports **Mosflm 7.4.0** (same as CCP4-9) |
+| Package | Repo **ProcessingLab**; Autotools still `AC_INIT([ipmosflm], [7.3.0])`; binary banner **Mosflm 7.4.0** (same as CCP4-9) |
 | Core sources | Amalgamated Fortran in `mosflm/mosflm_all_ip_inc*.f` (~250k lines) + `unoptimizable.f` + `control.f` |
 | Entry point | `PROGRAM MOSFLM` in `mosflm/unoptimizable.f:5`; command loop `SUBROUTINE CONTROL` in `control.f:4` |
 | Indexing | DPS under `src/dps/` + `index/`; **REFIX stubbed** (`torefix*.f`) — public tree has no `refix_all.for` |
 | GUI | External iMosflm (Tcl/Tk) over sockets; **no Tcl in this tree** |
 | License | BSD-style `COPYING` (A.G.W. Leslie / MRC LMB) |
-| C++ port home | `mosflm-cpp/` (this roadmap) |
+| C++ port home | `mosflm-cpp/` (this roadmap); top-level CMake project name `ProcessingLab` |
 
 ### High-value routine map (no-X amalgamation preferred)
 
@@ -78,15 +82,18 @@ EOF
 
 Smoke-tested: version banner prints and `EXIT` terminates cleanly. Keyword smoke (`CELL` / `MATRIX` / Pilatus template errors) matches CCP4-9’s `ipmosflm`.
 
-### Building mosflm-cpp
+### Building mosflm-cpp (ProcessingLab)
 
 ```bash
-cd mosflm-cpp
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+# From the ProcessingLab repo root (or mosflm-cpp/):
+cmake -S mosflm-cpp -B mosflm-cpp/build -DCMAKE_BUILD_TYPE=Release
 # Optional: -DMOSFLM_WITH_CCTBX=ON  (Phenix cctbx.python POC)
-cmake --build build
-ctest --test-dir build --output-on-failure
+cmake --build mosflm-cpp/build
+ctest --test-dir mosflm-cpp/build --output-on-failure
 ```
+
+After a directory rename, delete `mosflm-cpp/build` once so CMake does not keep
+stale absolute paths from the old tree.
 
 ## 1. Start with a source-code inventory
 

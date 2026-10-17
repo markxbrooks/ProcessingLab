@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Capture PREDICT / integrate oracles from ipmosflm for a known-indexed frame.
+# Capture PREDICT / integrate oracles from legacy ipmosflm (ProcessingLab
+# Autotools binary, or CCP4's) for a known-indexed frame.
 #
-# Default target is the CCP4 example frame insulin_1_001.img. ipmosflm is a
-# Fortran binary that links libncurses.so.5 / libtinfo.so.5; on systems that
-# only ship .so.6 we synthesise compatibility symlinks under a temp dir.
+# Default target is the CCP4 example frame insulin_1_001.img. Prefer
+# ProcessingLab's bin/ipmosflm when built; fall back to CCP4. On Linux the
+# binary may want libncurses.so.5 / libtinfo.so.5 — we synthesise .so.6
+# compat symlinks under a temp dir when needed.
 #
 # Outputs land in testdata/oracle/known_indexed/ (log, MTZ, spot list) and
 # testdata/images/known_indexed/ipmosflm.in is the phase-2 recipe.
@@ -12,8 +14,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IPMOSFLM_ROOT="$(cd "${ROOT}/.." && pwd)"
 
-CCP4="${CCP4:-/apps/ccp4/ccp4-9}"
-IPMOSFLM="${IPMOSFLM:-${CCP4}/bin/ipmosflm}"
+CCP4="${CCP4:-/Applications/ccp4-9}"
+# Prefer ProcessingLab rebuild, then CCP4.
+if [[ -z "${IPMOSFLM:-}" ]]; then
+  if [[ -x "${IPMOSFLM_ROOT}/bin/ipmosflm" ]]; then
+    IPMOSFLM="${IPMOSFLM_ROOT}/bin/ipmosflm"
+  else
+    IPMOSFLM="${CCP4}/bin/ipmosflm"
+  fi
+fi
 IMAGE="${MOSFLM_IMAGE:-${CCP4}/examples/data/insulin_1_001.img}"
 TEMPLATE="${MOSFLM_TEMPLATE:-insulin_1_###.img}"
 

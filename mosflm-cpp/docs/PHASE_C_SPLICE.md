@@ -76,8 +76,17 @@ Fixed-form note: keep `CALL PREDICT_CPP_FROM_COMMON` continuations ≤72 columns
 
 `XG`/`YG` are beam-relative **10 µm** units (mm×100). `IMG`: 0=full, 50=partial stand-in.
 
-## Verification in mosflm-cpp
+### Axis mapping (open differential)
+
+gendata.f: `XG` is parallel to lab **Y** (⊥ rotation axis); `YG` parallel to lab
+**Z** (rotation axis). C++ `ReflectionPredictor` uses detector `x_mm`/`y_mm` in
+the flat-detector frame from `DetectorGeometry::lab_to_detector_mm`. Until a
+known-indexed REEK dump is compared, the hook maps **1:1**
+(`XG=100*x_mm`, `YG=100*y_mm`). If pixel overlays disagree, swap or negate here
+first—not in the predictor.
+
+## Verification in mosflm-cpp (ProcessingLab)
 
 ```bash
-ctest --test-dir build -R 'predict_cpp_from_common|predict_cpp_hook|predict_gendata_pack'
+ctest --test-dir mosflm-cpp/build -R 'predict_cpp_from_common|predict_cpp_hook|predict_gendata_pack'
 ```

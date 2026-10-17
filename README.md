@@ -1,54 +1,39 @@
-MOSFLM 7.0.9
-============
+# ProcessingLab
 
-This program can be copied either as a pre-built executable (available
-for some popular platforms) or in a build-it-yourself form (see the
-appropriate directories).
+Progressive C++ port of the MOSFLM diffraction-processing core, plus the
+legacy Autotools `ipmosflm` tree used as the scientific oracle.
 
-We strongly recommend using the pre-built executables unless you have a 
-properly installed copy of CCP4 version 5.0 or later. Even then, it is 
-likely that you will gain very little by building your own copy.
+| Path | Role |
+| ---- | ---- |
+| [`mosflm-cpp/`](mosflm-cpp/) | C++ geometry, PREDICT, integration, C ABI, CTest |
+| [`mosflm/`](mosflm/) | Amalgamated Fortran (oracle / Phase C splice) |
+| [`porting.md`](porting.md) | Migration roadmap and current status |
+| `bin/ipmosflm` | Legacy keyword-driven binary (Autotools) |
 
-Compiler notes
-==============
+## Quick start (C++ port)
 
-(i) gfortran/gcc 4 is currently under active development; optimization of many
-of the routines in Mosflm is not possible with this compiler, so the build is
-performed with all optimization turned off. Surprisingly, some of the C
-functionality seems to be rather fragile, as can be seen in the X11 display.
+```bash
+cmake -S mosflm-cpp -B mosflm-cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build mosflm-cpp/build
+ctest --test-dir mosflm-cpp/build --output-on-failure
+./mosflm-cpp/build/mosflm_cpp_cli version
+```
 
-(ii) The Intel compilers ifort and icc for Mac OS X Intel-based machines 
-give fast, stable executables and are well worth installing (as a time-limited
-free download) as an alternative to gfortran/gcc 4. I include a method to use 
-them, but cannot distribute executables built with them.
+Top-level CMake (`-S .`) adds `mosflm-cpp` when `PROCESSINGLAB_BUILD_CPP=ON`
+(default).
 
+## Legacy Autotools oracle
 
-General notes
-=============
-   configure --with-ccp4-prefix=PFX
-   make
-   make install
+Requires CCP4. See [`porting.md`](porting.md) for macOS notes.
 
-You need to have at least CCP4 version 5.0 installed to build MOSFLM, 
-including the X-windows libraries. I recommend installing the newest version 
-you can find - currently 6.3.0.
+```bash
+./configure --with-ccp4-prefix=/Applications/ccp4-9
+make -C mosflm
+# Experimental C++ stills PREDICT splice:
+#   cmake --build mosflm-cpp/build --target mosflm_predict_hook
+#   make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
+```
 
-The build-it-yourself version will not link with the 
-now obsolete CCP4 version 4. 
+## License
 
-The build-it-yourself version does not contain source code for the
-REFIX autoindexing routine, but does have the DPS autoindexing
-code. If you wish to build MOSFLM version 7.0.1 yourself, and want
-REFIX, then e-mail Andrew Leslie (andrew@mrc-lmb.cam.ac.uk) or me 
-(harry@mrc-lmb.cam.ac.uk) directly and ask for it. The file for
-inclusion (refix_all.for) has changed so old versions will probably
-not work.
-
-The file 'mosflm.hlp' should be copied to the directory $CCP4_HELPDIR
-so that the online help facility works.
-
-Harry Powell 
-harry@mrc-lmb.cam.ac.uk
-
-20th August 2011
-==============================================================================
+BSD-style — see [`COPYING`](COPYING) (A.G.W. Leslie / MRC LMB).

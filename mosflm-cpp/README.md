@@ -1,12 +1,12 @@
-# mosflm-cpp
+# mosflm-cpp (ProcessingLab)
 
-Progressive C++ reimplementation of MOSFLM’s computational core. See
+C++ computational core for **ProcessingLab** (MOSFLM port). See
 [`../porting.md`](../porting.md) for strategy and legacy build notes.
 
-**Status (Phase B advanced / Phase C groundwork):** geometry + Gemmi crystal +
+**Status (Phase B advanced / Phase C in progress):** geometry + Gemmi crystal +
 miniCBF I/O + DPS Bravais façade + stills/oscillation `PREDICT` + box summation
 + **2D Gaussian profile fit** + LP correction + C ABI (`MosflmCApi.h`) + MTZ
-write are in place with CTest. Post-refinement and known-indexed `ipmosflm`
+write + amalgamation `MOSFLM_CPP_PREDICT` hook. Post-refinement and known-indexed
 oracle captures remain ahead (`tools/capture_ipmosflm_oracle.sh`).
 
 Phase A–D table and vertical-slice checklist: [`../porting.md`](../porting.md)
