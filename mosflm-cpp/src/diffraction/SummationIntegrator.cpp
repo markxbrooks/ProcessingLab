@@ -41,16 +41,18 @@ void SummationIntegrator::mm_to_image_pixel(
 }
 
 std::vector<IntegratedReflection> SummationIntegrator::integrate(
-    const image::DiffractionImage& image,
-    const DetectorGeometry& detector,
-    const std::vector<PredictedReflection>& predictions,
-    const IntegrateRequest& request
+    const IntegrationRequest& request
 ) const {
+    const auto& image = request.image;
+    const auto& detector = request.detector;
+    const auto& predictions = request.reflections;
+    const auto& settings = request.settings;
+
     std::vector<IntegratedReflection> out;
     out.reserve(predictions.size());
 
-    const int half = request.box_half_px;
-    const int frame = request.bg_frame_px;
+    const int half = settings.box_half_px;
+    const int frame = settings.bg_frame_px;
     if (half < 0 || frame < 0) {
         return out;
     }
@@ -120,7 +122,7 @@ std::vector<IntegratedReflection> SummationIntegrator::integrate(
                        std::fabs(bg_mean)
                  : 0.0);
         r.sigma = std::sqrt(std::max(var, 1.0));
-        if (request.apply_lp) {
+        if (settings.apply_lp) {
             apply_lp_inplace(detector, r.x_mm, r.y_mm, r.intensity, r.sigma);
         }
         r.ok = true;

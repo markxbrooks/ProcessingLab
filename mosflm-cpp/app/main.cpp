@@ -42,28 +42,32 @@ int cmd_version() {
 int cmd_predict_still(const std::filesystem::path& dump) {
     const auto req =
         mosflm::diffraction::ReflectionPredictor::analytical_still_fixture();
-    const auto spots =
+    const auto result =
         mosflm::legacy::LegacyMosflmAdapter::predict_still(req);
-    mosflm::diffraction::ReflectionPredictor::write_dump(dump, spots);
-    std::cout << "wrote " << spots.size() << " stills predictions → " << dump
-              << '\n';
+    mosflm::diffraction::ReflectionPredictor::write_dump(
+        dump, result.reflections
+    );
+    std::cout << "wrote " << result.reflections.size()
+              << " stills predictions → " << dump << '\n';
     return 0;
 }
 
 int cmd_predict_osc(const std::filesystem::path& dump) {
     const auto req =
         mosflm::diffraction::ReflectionPredictor::analytical_oscillation_fixture();
-    const auto spots =
+    const auto result =
         mosflm::diffraction::ReflectionPredictor{}.predict(req);
-    mosflm::diffraction::ReflectionPredictor::write_dump(dump, spots);
+    mosflm::diffraction::ReflectionPredictor::write_dump(
+        dump, result.reflections
+    );
     int n_partial = 0;
-    for (const auto& s : spots) {
+    for (const auto& s : result.reflections) {
         if (!s.full) {
             ++n_partial;
         }
     }
-    std::cout << "wrote " << spots.size() << " osc predictions (" << n_partial
-              << " partial) → " << dump << '\n';
+    std::cout << "wrote " << result.reflections.size() << " osc predictions ("
+              << n_partial << " partial) → " << dump << '\n';
     return 0;
 }
 
@@ -125,9 +129,9 @@ void plant_gaussian(
 int cmd_vertical_slice(const std::filesystem::path& mtz_path) {
     auto req =
         mosflm::diffraction::ReflectionPredictor::analytical_still_fixture();
-    req.dmin_A = 8.0;
+    req.settings.dmin_A = 8.0;
     const auto preds =
-        mosflm::legacy::LegacyMosflmAdapter::predict_still(req);
+        mosflm::legacy::LegacyMosflmAdapter::predict_still(req).reflections;
 
     mosflm::image::DiffractionImage image;
     image.metadata.width = req.detector.nfast;
@@ -148,13 +152,13 @@ int cmd_vertical_slice(const std::filesystem::path& mtz_path) {
         plant_box(image, col, row, half, peak);
     }
 
-    mosflm::diffraction::IntegrateRequest ireq;
-    ireq.box_half_px = half;
-    ireq.bg_frame_px = 1;
+    mosflm::diffraction::IntegrationSettings settings;
+    settings.box_half_px = half;
+    settings.bg_frame_px = 1;
+    const mosflm::diffraction::IntegrationRequest ireq{
+        image, req.detector, preds, settings};
     const auto integrated =
-        mosflm::legacy::LegacyMosflmAdapter::integrate_summation(
-            image, req.detector, preds, ireq
-        );
+        mosflm::legacy::LegacyMosflmAdapter::integrate_summation(ireq);
 
     std::vector<mosflm::crystal::SimpleReflection> simple;
     for (const auto& r : integrated) {
@@ -182,19 +186,19 @@ int cmd_cbf_slice(
     req.detector = image.metadata.to_detector_geometry();
     req.detector.beam_x_mm = 0.0;
     req.detector.beam_y_mm = 0.0;
-    req.phi_start_deg = image.metadata.oscillation_start_deg;
-    req.phi_end_deg = image.metadata.oscillation_start_deg;
-    req.dmin_A = 4.0;
+    req.scan.phi_start_deg = image.metadata.oscillation_start_deg;
+    req.scan.phi_end_deg = image.metadata.oscillation_start_deg;
+    req.settings.dmin_A = 4.0;
 
     const auto preds =
-        mosflm::legacy::LegacyMosflmAdapter::predict_still(req);
-    mosflm::diffraction::IntegrateRequest ireq;
-    ireq.box_half_px = 2;
-    ireq.bg_frame_px = 1;
+        mosflm::legacy::LegacyMosflmAdapter::predict_still(req).reflections;
+    mosflm::diffraction::IntegrationSettings settings;
+    settings.box_half_px = 2;
+    settings.bg_frame_px = 1;
+    const mosflm::diffraction::IntegrationRequest ireq{
+        image, req.detector, preds, settings};
     const auto integrated =
-        mosflm::legacy::LegacyMosflmAdapter::integrate_summation(
-            image, req.detector, preds, ireq
-        );
+        mosflm::legacy::LegacyMosflmAdapter::integrate_summation(ireq);
 
     std::vector<mosflm::crystal::SimpleReflection> simple;
     for (const auto& r : integrated) {
@@ -216,9 +220,9 @@ int cmd_cbf_slice(
 int cmd_profile_fit(const std::filesystem::path& mtz_path) {
     auto req =
         mosflm::diffraction::ReflectionPredictor::analytical_still_fixture();
-    req.dmin_A = 8.0;
+    req.settings.dmin_A = 8.0;
     const auto preds =
-        mosflm::legacy::LegacyMosflmAdapter::predict_still(req);
+        mosflm::legacy::LegacyMosflmAdapter::predict_still(req).reflections;
 
     mosflm::image::DiffractionImage image;
     image.metadata.width = req.detector.nfast;
@@ -241,15 +245,15 @@ int cmd_profile_fit(const std::filesystem::path& mtz_path) {
         plant_gaussian(image, col, row, amp, bg, sig, half);
     }
 
-    mosflm::diffraction::ProfileFitRequest freq;
-    freq.box_half_px = half;
-    freq.sigma_px = sig;
-    freq.refine_sigma = true;
-    freq.apply_lp = true;
+    mosflm::diffraction::ProfileFitSettings settings;
+    settings.box_half_px = half;
+    settings.sigma_px = sig;
+    settings.refine_sigma = true;
+    settings.apply_lp = true;
+    const mosflm::diffraction::ProfileFitRequest freq{
+        image, req.detector, preds, settings};
     const auto fitted =
-        mosflm::legacy::LegacyMosflmAdapter::integrate_profile(
-            image, req.detector, preds, freq
-        );
+        mosflm::legacy::LegacyMosflmAdapter::integrate_profile(freq);
 
     std::vector<mosflm::crystal::SimpleReflection> simple;
     int n_ok = 0;
@@ -279,21 +283,21 @@ int cmd_profile_fit_cbf(
     req.detector = image.metadata.to_detector_geometry();
     req.detector.beam_x_mm = 0.0;
     req.detector.beam_y_mm = 0.0;
-    req.phi_start_deg = image.metadata.oscillation_start_deg;
-    req.phi_end_deg = image.metadata.oscillation_start_deg;
-    req.dmin_A = 4.0;
+    req.scan.phi_start_deg = image.metadata.oscillation_start_deg;
+    req.scan.phi_end_deg = image.metadata.oscillation_start_deg;
+    req.settings.dmin_A = 4.0;
 
     const auto preds =
-        mosflm::legacy::LegacyMosflmAdapter::predict_still(req);
-    mosflm::diffraction::ProfileFitRequest freq;
-    freq.box_half_px = 5;
-    freq.sigma_px = 1.5;
-    freq.refine_sigma = true;
-    freq.apply_lp = true;
+        mosflm::legacy::LegacyMosflmAdapter::predict_still(req).reflections;
+    mosflm::diffraction::ProfileFitSettings settings;
+    settings.box_half_px = 5;
+    settings.sigma_px = 1.5;
+    settings.refine_sigma = true;
+    settings.apply_lp = true;
+    const mosflm::diffraction::ProfileFitRequest freq{
+        image, req.detector, preds, settings};
     const auto fitted =
-        mosflm::legacy::LegacyMosflmAdapter::integrate_profile(
-            image, req.detector, preds, freq
-        );
+        mosflm::legacy::LegacyMosflmAdapter::integrate_profile(freq);
 
     std::vector<mosflm::crystal::SimpleReflection> simple;
     for (const auto& r : fitted) {

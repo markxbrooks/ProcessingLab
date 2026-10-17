@@ -64,8 +64,8 @@ EvalPhi evaluate_phi(
     return out;
 }
 
-PredictRequest base_analytical_fixture() {
-    PredictRequest req;
+PredictionRequest base_analytical_fixture() {
+    PredictionRequest req;
     const UnitCell cell{58.0, 58.0, 150.0, 90.0, 90.0, 90.0};
     req.crystal = crystal::CrystalMetadata::from_mosflm_cell(cell, "P 1");
     req.orientation = OrientationMatrix::from_cell_and_rotation(cell);
@@ -77,40 +77,40 @@ PredictRequest base_analytical_fixture() {
     req.detector.pixel_size_y_mm = 0.172;
     req.detector.nfast = 1475;
     req.detector.nslow = 1679;
-    req.ewald_tolerance_Ainv = 0.0025;
-    req.phi_step_deg = 0.05;
+    req.settings.ewald_tolerance_Ainv = 0.0025;
+    req.settings.phi_step_deg = 0.05;
     return req;
 }
 
 }  // namespace
 
-PredictRequest ReflectionPredictor::analytical_still_fixture() {
+PredictionRequest ReflectionPredictor::analytical_still_fixture() {
     auto req = base_analytical_fixture();
-    req.phi_start_deg = 0.0;
-    req.phi_end_deg = 0.0;
-    req.dmin_A = 3.5;
+    req.scan.phi_start_deg = 0.0;
+    req.scan.phi_end_deg = 0.0;
+    req.settings.dmin_A = 3.5;
     return req;
 }
 
-PredictRequest ReflectionPredictor::analytical_oscillation_fixture() {
+PredictionRequest ReflectionPredictor::analytical_oscillation_fixture() {
     auto req = base_analytical_fixture();
-    req.phi_start_deg = 0.0;
-    req.phi_end_deg = 0.5;
-    req.dmin_A = 5.0;
-    req.phi_step_deg = 0.05;
+    req.scan.phi_start_deg = 0.0;
+    req.scan.phi_end_deg = 0.5;
+    req.settings.dmin_A = 5.0;
+    req.settings.phi_step_deg = 0.05;
     return req;
 }
 
-std::vector<PredictedReflection> ReflectionPredictor::predict(
-    const PredictRequest& request
+PredictionResult ReflectionPredictor::predict(
+    const PredictionRequest& request
 ) const {
     const double lambda = request.detector.wavelength_A;
-    if (!(lambda > 0.0) || !(request.dmin_A > 0.0)) {
+    if (!(lambda > 0.0) || !(request.settings.dmin_A > 0.0)) {
         throw std::invalid_argument(
             "ReflectionPredictor::predict: invalid wavelength or dmin"
         );
     }
-    if (request.phi_end_deg < request.phi_start_deg) {
+    if (request.scan.phi_end_deg < request.scan.phi_start_deg) {
         throw std::invalid_argument(
             "ReflectionPredictor::predict: phi_end < phi_start"
         );
@@ -121,26 +121,30 @@ std::vector<PredictedReflection> ReflectionPredictor::predict(
     const double inv_lambda = 1.0 / lambda;
     const Eigen::Vector3d s0(0.0, 0.0, inv_lambda);
     const Eigen::Matrix3d& UB = request.orientation.ub();
-    const bool still =
-        std::fabs(request.phi_end_deg - request.phi_start_deg) < 1e-12;
+    const bool still = std::fabs(
+                           request.scan.phi_end_deg - request.scan.phi_start_deg
+                       ) < 1e-12;
 
-    const int max_h = static_cast<int>(std::ceil(cell.a / request.dmin_A)) + 1;
-    const int max_k = static_cast<int>(std::ceil(cell.b / request.dmin_A)) + 1;
-    const int max_l = static_cast<int>(std::ceil(cell.c / request.dmin_A)) + 1;
+    const int max_h =
+        static_cast<int>(std::ceil(cell.a / request.settings.dmin_A)) + 1;
+    const int max_k =
+        static_cast<int>(std::ceil(cell.b / request.settings.dmin_A)) + 1;
+    const int max_l =
+        static_cast<int>(std::ceil(cell.c / request.settings.dmin_A)) + 1;
 
     // Build φ samples (inclusive endpoints).
     std::vector<double> phis;
     if (still) {
-        phis.push_back(request.phi_start_deg);
+        phis.push_back(request.scan.phi_start_deg);
     } else {
-        const double step = std::max(request.phi_step_deg, 1e-6);
-        for (double phi = request.phi_start_deg; phi <= request.phi_end_deg + 1e-9;
-             phi += step) {
-            phis.push_back(std::min(phi, request.phi_end_deg));
+        const double step = std::max(request.settings.phi_step_deg, 1e-6);
+        for (double phi = request.scan.phi_start_deg;
+             phi <= request.scan.phi_end_deg + 1e-9; phi += step) {
+            phis.push_back(std::min(phi, request.scan.phi_end_deg));
         }
         if (phis.empty() ||
-            std::fabs(phis.back() - request.phi_end_deg) > 1e-9) {
-            phis.push_back(request.phi_end_deg);
+            std::fabs(phis.back() - request.scan.phi_end_deg) > 1e-9) {
+            phis.push_back(request.scan.phi_end_deg);
         }
     }
 
@@ -151,7 +155,7 @@ std::vector<PredictedReflection> ReflectionPredictor::predict(
                 if (h == 0 && k == 0 && l == 0) {
                     continue;
                 }
-                if (recip.d_spacing(h, k, l) < request.dmin_A) {
+                if (recip.d_spacing(h, k, l) < request.settings.dmin_A) {
                     continue;
                 }
                 const Eigen::Vector3d q0 = UB * Eigen::Vector3d(h, k, l);
@@ -170,7 +174,7 @@ std::vector<PredictedReflection> ReflectionPredictor::predict(
                         phis[ip],
                         s0,
                         inv_lambda,
-                        request.ewald_tolerance_Ainv,
+                        request.settings.ewald_tolerance_Ainv,
                         request.detector
                     );
                     if (!ev.ok) {
@@ -227,7 +231,9 @@ std::vector<PredictedReflection> ReflectionPredictor::predict(
         }
         return a.l < b.l;
     });
-    return spots;
+    PredictionResult result;
+    result.reflections = std::move(spots);
+    return result;
 }
 
 void ReflectionPredictor::write_dump(

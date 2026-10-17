@@ -45,9 +45,9 @@ tests need `../lib/dps_index.a` and `../lib/libdps.a`.
 | `include/mosflm/geometry` | UnitCell, ReciprocalLattice, Orientation, Detector, Dstar, Rotmat, Clcalc, Matset |
 | `include/mosflm/crystal` | Gemmi CrystalMetadata / SpaceGroup / MtzAdapter |
 | `include/mosflm/image` | `CbfImageReader` (CBFlib + miniCBF `#` comments) |
-| `include/mosflm/diffraction` | ReflectionPredictor, SummationIntegrator, ProfileFitter, LpCorrection |
+| `include/mosflm/diffraction` | PredictionRequest / IntegrationRequest APIs; see `docs/DOMAIN_API.md` |
 | `include/mosflm/indexing` | BravaisClassifier (DPS façade) |
-| `include/mosflm/legacy` | CELL(6) + `MosflmCApi.h` C ABI + predict/integrate hooks |
+| `include/mosflm/legacy` | CELL(6) + hardened `MosflmCApi.h` (see `docs/C_ABI.md`) |
 | `fortran/` | `iso_c_binding` mirror + `predict_still_cpp` (Phase C; needs gfortran) |
 | `tests/` | unit + differential (oracle dumps under `testdata/oracle/`) |
 | `tools/` | `predict_*_oracle.py`, `cbf_smoke.c`, `cctbx_cell_poc.py` |

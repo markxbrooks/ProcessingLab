@@ -3,9 +3,7 @@
 #include "mosflm/diffraction/ProfileFitter.hpp"
 #include "mosflm/diffraction/ReflectionPredictor.hpp"
 #include "mosflm/diffraction/SummationIntegrator.hpp"
-#include "mosflm/geometry/DetectorGeometry.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
-#include "mosflm/image/DiffractionImage.hpp"
 
 #include <string>
 #include <vector>
@@ -22,25 +20,16 @@ public:
     static UnitCell from_cell6(const float in[6]);
     [[nodiscard]] static std::string oracle_hint();
 
-    [[nodiscard]] static std::vector<diffraction::PredictedReflection>
-    predict_still(const diffraction::PredictRequest& request);
+    [[nodiscard]] static diffraction::PredictionResult predict_still(
+        const diffraction::PredictionRequest& request
+    );
 
     [[nodiscard]] static std::vector<diffraction::IntegratedReflection>
-    integrate_summation(
-        const image::DiffractionImage& image,
-        const DetectorGeometry& detector,
-        const std::vector<diffraction::PredictedReflection>& predictions,
-        const diffraction::IntegrateRequest& request = {}
-    );
+    integrate_summation(const diffraction::IntegrationRequest& request);
 
     /// Route 2D Gaussian profile fitting (INTEG3-style stand-in).
     [[nodiscard]] static std::vector<diffraction::ProfileFittedReflection>
-    integrate_profile(
-        const image::DiffractionImage& image,
-        const DetectorGeometry& detector,
-        const std::vector<diffraction::PredictedReflection>& predictions,
-        const diffraction::ProfileFitRequest& request = {}
-    );
+    integrate_profile(const diffraction::ProfileFitRequest& request);
 };
 
 }  // namespace mosflm::legacy

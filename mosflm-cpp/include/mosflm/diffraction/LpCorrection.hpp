@@ -6,9 +6,12 @@ namespace mosflm::diffraction {
 
 /// Lorentz–polarization helpers for intensity scaling (unpolarized beam).
 ///
-/// ``P = (1 + cos² 2θ) / 2``, ``L = 1 / |sin 2θ|`` (clamped near the beam).
-/// Combined factor ``LP = L · P`` multiplies observed intensities when
-/// converting to a roughly corrected scale (stand-in for MOSFLM LP).
+/// Single source of truth for the C ABI ``mosflm_lp_factor`` and integrators.
+///
+/// ``P = (1 + cos² 2θ) / 2``, ``L = 1 / |sin 2θ|``. When ``|sin 2θ|`` is below
+/// an internal floor, returns ``1.0`` (avoids singularity; **not** a physically
+/// valid on-axis correction). Combined ``LP = L · P`` multiplies intensities
+/// when ``apply_lp`` is enabled on the integrate / profile path.
 [[nodiscard]] double lp_factor(
     const DetectorGeometry& detector,
     double x_mm,

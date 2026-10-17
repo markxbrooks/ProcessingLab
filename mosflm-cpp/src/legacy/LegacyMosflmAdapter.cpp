@@ -28,34 +28,24 @@ std::string LegacyMosflmAdapter::oracle_hint() {
            "oracle: testdata/oracle/predict_still.dump.";
 }
 
-std::vector<diffraction::PredictedReflection> LegacyMosflmAdapter::predict_still(
-    const diffraction::PredictRequest& request
+diffraction::PredictionResult LegacyMosflmAdapter::predict_still(
+    const diffraction::PredictionRequest& request
 ) {
     return diffraction::ReflectionPredictor{}.predict(request);
 }
 
 std::vector<diffraction::IntegratedReflection>
 LegacyMosflmAdapter::integrate_summation(
-    const image::DiffractionImage& image,
-    const DetectorGeometry& detector,
-    const std::vector<diffraction::PredictedReflection>& predictions,
-    const diffraction::IntegrateRequest& request
+    const diffraction::IntegrationRequest& request
 ) {
-    return diffraction::SummationIntegrator{}.integrate(
-        image, detector, predictions, request
-    );
+    return diffraction::SummationIntegrator{}.integrate(request);
 }
 
 std::vector<diffraction::ProfileFittedReflection>
 LegacyMosflmAdapter::integrate_profile(
-    const image::DiffractionImage& image,
-    const DetectorGeometry& detector,
-    const std::vector<diffraction::PredictedReflection>& predictions,
     const diffraction::ProfileFitRequest& request
 ) {
-    return diffraction::ProfileFitter{}.fit(
-        image, detector, predictions, request
-    );
+    return diffraction::ProfileFitter{}.fit(request);
 }
 
 }  // namespace mosflm::legacy

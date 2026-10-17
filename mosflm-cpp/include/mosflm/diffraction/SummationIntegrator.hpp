@@ -4,6 +4,7 @@
 #include "mosflm/geometry/DetectorGeometry.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
 
+#include <span>
 #include <vector>
 
 namespace mosflm::diffraction {
@@ -22,13 +23,25 @@ struct IntegratedReflection {
     bool ok{false};
 };
 
-struct IntegrateRequest {
+/// Algorithm options for box summation integrate.
+struct IntegrationSettings {
     /// Half-width of the peak box in pixels (box is ``2*half+1`` square).
     int box_half_px{3};
     /// Background frame thickness outside the peak box (pixels).
     int bg_frame_px{2};
     /// If true, scale intensity/sigma by unpolarized ``lp_factor``.
     bool apply_lp{false};
+};
+
+/// Inputs for one summation-integrate call.
+///
+/// ``image``, ``detector``, and ``reflections`` are referenced (not copied);
+/// they must outlive the call.
+struct IntegrationRequest {
+    const image::DiffractionImage& image;
+    const DetectorGeometry& detector;
+    std::span<const PredictedReflection> reflections;
+    IntegrationSettings settings{};
 };
 
 /// Box summation integrator for predicted spots on a still image.
@@ -39,10 +52,7 @@ struct IntegrateRequest {
 class SummationIntegrator {
 public:
     [[nodiscard]] std::vector<IntegratedReflection> integrate(
-        const image::DiffractionImage& image,
-        const DetectorGeometry& detector,
-        const std::vector<PredictedReflection>& predictions,
-        const IntegrateRequest& request = {}
+        const IntegrationRequest& request
     ) const;
 
     /// Map beam-relative detector mm → integer pixel (column=fast, row=slow).

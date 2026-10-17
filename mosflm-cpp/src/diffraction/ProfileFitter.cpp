@@ -109,14 +109,16 @@ FitResult fit_fixed_sigma(
 }  // namespace
 
 std::vector<ProfileFittedReflection> ProfileFitter::fit(
-    const image::DiffractionImage& image,
-    const DetectorGeometry& detector,
-    const std::vector<PredictedReflection>& predictions,
     const ProfileFitRequest& request
 ) const {
+    const auto& image = request.image;
+    const auto& detector = request.detector;
+    const auto& predictions = request.reflections;
+    const auto& settings = request.settings;
+
     std::vector<ProfileFittedReflection> out;
     out.reserve(predictions.size());
-    const int half = request.box_half_px;
+    const int half = settings.box_half_px;
 
     for (const auto& pred : predictions) {
         ProfileFittedReflection r;
@@ -132,13 +134,13 @@ std::vector<ProfileFittedReflection> ProfileFitter::fit(
             detector, pred.x_mm, pred.y_mm, col0, row0
         );
 
-        double best_sigma = request.sigma_px;
+        double best_sigma = settings.sigma_px;
         FitResult best = fit_fixed_sigma(image, col0, row0, half, best_sigma);
 
-        if (request.refine_sigma && best.ok) {
+        if (settings.refine_sigma && best.ok) {
             // Coarse search around nominal σ.
-            const double lo = std::max(0.5, request.sigma_px * 0.5);
-            const double hi = request.sigma_px * 2.0;
+            const double lo = std::max(0.5, settings.sigma_px * 0.5);
+            const double hi = settings.sigma_px * 2.0;
             for (int i = 0; i <= 10; ++i) {
                 const double s = lo + (hi - lo) * (static_cast<double>(i) / 10.0);
                 const FitResult trial = fit_fixed_sigma(image, col0, row0, half, s);
@@ -163,7 +165,7 @@ std::vector<ProfileFittedReflection> ProfileFitter::fit(
         r.sigma = std::sqrt(
             std::max(1.0, std::fabs(best.intensity) + std::fabs(best.B) * best.npix)
         );
-        if (request.apply_lp) {
+        if (settings.apply_lp) {
             apply_lp_inplace(detector, r.x_mm, r.y_mm, r.intensity, r.sigma);
         }
         r.ok = true;

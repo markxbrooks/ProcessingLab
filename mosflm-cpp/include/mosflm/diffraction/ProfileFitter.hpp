@@ -5,6 +5,7 @@
 #include "mosflm/geometry/DetectorGeometry.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
 
+#include <span>
 #include <vector>
 
 namespace mosflm::diffraction {
@@ -30,7 +31,8 @@ struct ProfileFittedReflection {
     bool ok{false};
 };
 
-struct ProfileFitRequest {
+/// Algorithm options for 2D Gaussian profile fit.
+struct ProfileFitSettings {
     int box_half_px{5};
     /// Fixed isotropic σ in pixels (free-σ fit deferred).
     double sigma_px{1.5};
@@ -40,14 +42,19 @@ struct ProfileFitRequest {
     bool apply_lp{false};
 };
 
+/// Inputs for one profile-fit call (refs must outlive the call).
+struct ProfileFitRequest {
+    const image::DiffractionImage& image;
+    const DetectorGeometry& detector;
+    std::span<const PredictedReflection> reflections;
+    ProfileFitSettings settings{};
+};
+
 /// Box-local 2D Gaussian profile fitter (peak centre fixed at prediction).
 class ProfileFitter {
 public:
     [[nodiscard]] std::vector<ProfileFittedReflection> fit(
-        const image::DiffractionImage& image,
-        const DetectorGeometry& detector,
-        const std::vector<PredictedReflection>& predictions,
-        const ProfileFitRequest& request = {}
+        const ProfileFitRequest& request
     ) const;
 };
 

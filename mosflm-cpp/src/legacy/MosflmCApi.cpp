@@ -1,42 +1,77 @@
 #include "mosflm/legacy/MosflmCApi.h"
 
-#include "mosflm/crystal/CrystalMetadata.hpp"
+#include "MosflmCApiInternal.hpp"
+
 #include "mosflm/diffraction/LpCorrection.hpp"
-#include "mosflm/diffraction/ReflectionPredictor.hpp"
 #include "mosflm/diffraction/SummationIntegrator.hpp"
-#include "mosflm/geometry/DetectorGeometry.hpp"
 #include "mosflm/geometry/OrientationMatrix.hpp"
+#include "mosflm/geometry/Rotmat.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <vector>
 
 namespace {
 
-mosflm::UnitCell to_cell(const mosflm_cell6& c) {
-    return mosflm::UnitCell{
-        c.a, c.b, c.c, c.alpha_deg, c.beta_deg, c.gamma_deg
-    };
+bool finite_triple(const double v[3]) {
+    return v && std::isfinite(v[0]) && std::isfinite(v[1]) &&
+           std::isfinite(v[2]);
 }
 
-mosflm::DetectorGeometry to_det(const mosflm_detector_c& d) {
-    mosflm::DetectorGeometry g;
-    g.distance_mm = d.distance_mm;
-    g.beam_x_mm = d.beam_x_mm;
-    g.beam_y_mm = d.beam_y_mm;
-    g.pixel_size_x_mm = d.pixel_size_x_mm;
-    g.pixel_size_y_mm = d.pixel_size_y_mm;
-    g.nfast = d.nfast;
-    g.nslow = d.nslow;
-    g.wavelength_A = d.wavelength_A;
-    return g;
+void fill_ub9(const Eigen::Matrix3d& M, mosflm_ub9* out) {
+    out->m[0] = M(0, 0);
+    out->m[1] = M(0, 1);
+    out->m[2] = M(0, 2);
+    out->m[3] = M(1, 0);
+    out->m[4] = M(1, 1);
+    out->m[5] = M(1, 2);
+    out->m[6] = M(2, 0);
+    out->m[7] = M(2, 1);
+    out->m[8] = M(2, 2);
 }
 
 }  // namespace
+
+extern "C" int mosflm_ub_from_psi(
+    const mosflm_cell6* cell,
+    const double psi_deg[3],
+    mosflm_ub9* out
+) {
+    if (!cell || !out || !finite_triple(psi_deg) ||
+        !mosflm::legacy::capi::finite6(*cell)) {
+        return MOSFLM_ERROR_INVALID_ARGUMENT;
+    }
+    try {
+        const mosflm::UnitCell uc{
+            cell->a, cell->b, cell->c, cell->alpha_deg, cell->beta_deg,
+            cell->gamma_deg};
+        const Eigen::Matrix3d R = mosflm::rotmat_from_missetting(
+            psi_deg[0], psi_deg[1], psi_deg[2], true
+        );
+        const auto om =
+            mosflm::OrientationMatrix::from_cell_and_rotation(uc, R);
+        fill_ub9(om.ub(), out);
+        return MOSFLM_SUCCESS;
+    } catch (...) {
+        return MOSFLM_ERROR_INTERNAL;
+    }
+}
+
+extern "C" int mosflm_ub_from_matrix9(const double m[9], mosflm_ub9* out) {
+    if (!m || !out) {
+        return MOSFLM_ERROR_INVALID_ARGUMENT;
+    }
+    for (int i = 0; i < 9; ++i) {
+        if (!std::isfinite(m[i])) {
+            return MOSFLM_ERROR_INVALID_ARGUMENT;
+        }
+        out->m[i] = m[i];
+    }
+    return MOSFLM_SUCCESS;
+}
 
 extern "C" void mosflm_analytical_still_fixture(
     mosflm_cell6* cell,
@@ -45,40 +80,38 @@ extern "C" void mosflm_analytical_still_fixture(
     double* dmin_A,
     double* ewald_tol
 ) {
-    const auto req =
-        mosflm::diffraction::ReflectionPredictor::analytical_still_fixture();
-    if (cell) {
-        cell->a = req.crystal.cell.a;
-        cell->b = req.crystal.cell.b;
-        cell->c = req.crystal.cell.c;
-        cell->alpha_deg = req.crystal.cell.alpha;
-        cell->beta_deg = req.crystal.cell.beta;
-        cell->gamma_deg = req.crystal.cell.gamma;
+    try {
+        mosflm::legacy::capi::fill_cell_det_from_analytical_still(
+            cell, det, phi_deg, dmin_A, ewald_tol
+        );
+    } catch (...) {
+        // Fixtures are best-effort; leave outputs untouched on failure.
     }
-    if (det) {
-        det->distance_mm = req.detector.distance_mm;
-        det->beam_x_mm = req.detector.beam_x_mm;
-        det->beam_y_mm = req.detector.beam_y_mm;
-        det->pixel_size_x_mm = req.detector.pixel_size_x_mm;
-        det->pixel_size_y_mm = req.detector.pixel_size_y_mm;
-        det->nfast = req.detector.nfast;
-        det->nslow = req.detector.nslow;
-        det->wavelength_A = req.detector.wavelength_A;
-    }
-    if (phi_deg) {
-        *phi_deg = req.phi_start_deg;
-    }
-    if (dmin_A) {
-        *dmin_A = req.dmin_A;
-    }
-    if (ewald_tol) {
-        *ewald_tol = req.ewald_tolerance_Ainv;
+}
+
+extern "C" void mosflm_analytical_osc_fixture(
+    mosflm_cell6* cell,
+    mosflm_detector_c* det,
+    double* phi_start_deg,
+    double* phi_end_deg,
+    double* dmin_A,
+    double* ewald_tol,
+    double* phi_step_deg
+) {
+    try {
+        mosflm::legacy::capi::fill_cell_det_from_analytical_osc(
+            cell, det, phi_start_deg, phi_end_deg, dmin_A, ewald_tol,
+            phi_step_deg
+        );
+    } catch (...) {
     }
 }
 
 extern "C" int mosflm_predict_still(
     const mosflm_cell6* cell,
     const mosflm_detector_c* det,
+    const mosflm_ub9* ub,
+    const char* spacegroup,
     double phi_deg,
     double dmin_A,
     double ewald_tol,
@@ -86,42 +119,49 @@ extern "C" int mosflm_predict_still(
     int out_cap,
     int* out_n
 ) {
-    if (!cell || !det || !out || !out_n || out_cap <= 0) {
-        return 1;
+    mosflm::legacy::capi::zero_out_n(out_n);
+    if (!out_n || !cell || !det ||
+        !mosflm::legacy::capi::valid_predict_buffers(out, out_cap)) {
+        return MOSFLM_ERROR_INVALID_ARGUMENT;
     }
-    *out_n = 0;
     try {
-        mosflm::diffraction::PredictRequest req;
-        const mosflm::UnitCell uc = to_cell(*cell);
-        req.crystal =
-            mosflm::crystal::CrystalMetadata::from_mosflm_cell(uc, "P 1");
-        req.orientation = mosflm::OrientationMatrix::from_cell_and_rotation(uc);
-        req.detector = to_det(*det);
-        req.phi_start_deg = phi_deg;
-        req.phi_end_deg = phi_deg;
-        req.dmin_A = dmin_A;
-        req.ewald_tolerance_Ainv = ewald_tol > 0.0 ? ewald_tol : 0.0025;
-
-        const auto spots =
-            mosflm::diffraction::ReflectionPredictor{}.predict(req);
-        const int n = static_cast<int>(
-            std::min(spots.size(), static_cast<std::size_t>(out_cap))
+        return mosflm::legacy::capi::run_predict(
+            *cell, *det, ub, spacegroup, phi_deg, phi_deg, dmin_A, ewald_tol,
+            0.0, out, out_cap, out_n
         );
-        for (int i = 0; i < n; ++i) {
-            out[i].h = spots[static_cast<std::size_t>(i)].h;
-            out[i].k = spots[static_cast<std::size_t>(i)].k;
-            out[i].l = spots[static_cast<std::size_t>(i)].l;
-            out[i].x_mm = spots[static_cast<std::size_t>(i)].x_mm;
-            out[i].y_mm = spots[static_cast<std::size_t>(i)].y_mm;
-            out[i].phi_begin_deg =
-                spots[static_cast<std::size_t>(i)].phi_begin_deg;
-            out[i].phi_end_deg = spots[static_cast<std::size_t>(i)].phi_end_deg;
-            out[i].full = spots[static_cast<std::size_t>(i)].full ? 1 : 0;
-        }
-        *out_n = n;
-        return (spots.size() > static_cast<std::size_t>(out_cap)) ? 2 : 0;
     } catch (...) {
-        return 3;
+        *out_n = 0;
+        return MOSFLM_ERROR_INTERNAL;
+    }
+}
+
+extern "C" int mosflm_predict_osc(
+    const mosflm_cell6* cell,
+    const mosflm_detector_c* det,
+    const mosflm_ub9* ub,
+    const char* spacegroup,
+    double phi_start_deg,
+    double phi_end_deg,
+    double dmin_A,
+    double ewald_tol,
+    double phi_step_deg,
+    mosflm_predicted_c* out,
+    int out_cap,
+    int* out_n
+) {
+    mosflm::legacy::capi::zero_out_n(out_n);
+    if (!out_n || !cell || !det ||
+        !mosflm::legacy::capi::valid_predict_buffers(out, out_cap)) {
+        return MOSFLM_ERROR_INVALID_ARGUMENT;
+    }
+    try {
+        return mosflm::legacy::capi::run_predict(
+            *cell, *det, ub, spacegroup, phi_start_deg, phi_end_deg, dmin_A,
+            ewald_tol, phi_step_deg, out, out_cap, out_n
+        );
+    } catch (...) {
+        *out_n = 0;
+        return MOSFLM_ERROR_INTERNAL;
     }
 }
 
@@ -130,18 +170,20 @@ extern "C" double mosflm_lp_factor(
     double x_mm,
     double y_mm
 ) {
-    if (!det || !(det->distance_mm > 0.0)) {
+    try {
+        if (!det || !mosflm::legacy::capi::finite_detector(*det)) {
+            return 1.0;
+        }
+        if (!mosflm::legacy::capi::finite_scalar(x_mm) ||
+            !mosflm::legacy::capi::finite_scalar(y_mm)) {
+            return 1.0;
+        }
+        return mosflm::diffraction::lp_factor(
+            mosflm::legacy::capi::to_det(*det), x_mm, y_mm
+        );
+    } catch (...) {
         return 1.0;
     }
-    const double dx = x_mm - det->beam_x_mm;
-    const double dy = y_mm - det->beam_y_mm;
-    const double r = std::sqrt(dx * dx + dy * dy);
-    const double two_theta = std::atan2(r, det->distance_mm);
-    const double c2 = std::cos(two_theta);
-    const double s2 = std::sin(two_theta);
-    const double P = 0.5 * (1.0 + c2 * c2);  // unpolarized
-    const double L = (std::fabs(s2) > 1e-8) ? (1.0 / std::fabs(s2)) : 1.0;
-    return L * P;
 }
 
 extern "C" int mosflm_integrate_summation(
@@ -158,11 +200,14 @@ extern "C" int mosflm_integrate_summation(
     int out_cap,
     int* out_n
 ) {
-    if (!det || !pixels || !preds || !out || !out_n || nfast <= 0 || nslow <= 0 ||
-        n_preds < 0 || out_cap <= 0) {
-        return 1;
+    mosflm::legacy::capi::zero_out_n(out_n);
+    if (!out_n || !det || !pixels || !out || out_cap <= 0 || n_preds < 0 ||
+        (n_preds > 0 && !preds) || box_half_px < 0 || bg_frame_px < 0 ||
+        !mosflm::legacy::capi::valid_integrate_dims(nfast, nslow) ||
+        !mosflm::legacy::capi::finite_detector(*det) ||
+        !mosflm::legacy::capi::dims_match_detector(*det, nfast, nslow)) {
+        return MOSFLM_ERROR_INVALID_ARGUMENT;
     }
-    *out_n = 0;
     try {
         mosflm::image::DiffractionImage image;
         image.metadata.width = nfast;
@@ -174,7 +219,7 @@ extern "C" int mosflm_integrate_summation(
             image.pixels[i] = static_cast<std::int32_t>(pixels[i]);
         }
 
-        mosflm::DetectorGeometry g = to_det(*det);
+        mosflm::DetectorGeometry g = mosflm::legacy::capi::to_det(*det);
         g.nfast = nfast;
         g.nslow = nslow;
 
@@ -193,15 +238,15 @@ extern "C" int mosflm_integrate_summation(
             pred_v.push_back(p);
         }
 
-        mosflm::diffraction::IntegrateRequest ireq;
-        ireq.box_half_px = box_half_px;
-        ireq.bg_frame_px = bg_frame_px;
-        ireq.apply_lp = apply_lp != 0;
+        mosflm::diffraction::IntegrationSettings settings;
+        settings.box_half_px = box_half_px;
+        settings.bg_frame_px = bg_frame_px;
+        settings.apply_lp = apply_lp != 0;
+        const mosflm::diffraction::IntegrationRequest ireq{
+            image, g, pred_v, settings};
 
         const auto integrated =
-            mosflm::diffraction::SummationIntegrator{}.integrate(
-                image, g, pred_v, ireq
-            );
+            mosflm::diffraction::SummationIntegrator{}.integrate(ireq);
         const int n = static_cast<int>(
             std::min(integrated.size(), static_cast<std::size_t>(out_cap))
         );
@@ -217,8 +262,11 @@ extern "C" int mosflm_integrate_summation(
             out[i].ok = r.ok ? 1 : 0;
         }
         *out_n = n;
-        return (integrated.size() > static_cast<std::size_t>(out_cap)) ? 2 : 0;
+        return (integrated.size() > static_cast<std::size_t>(out_cap))
+                   ? MOSFLM_ERROR_BUFFER_TOO_SMALL
+                   : MOSFLM_SUCCESS;
     } catch (...) {
-        return 3;
+        *out_n = 0;
+        return MOSFLM_ERROR_INTERNAL;
     }
 }

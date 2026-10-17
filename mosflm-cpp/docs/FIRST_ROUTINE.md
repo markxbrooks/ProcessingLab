@@ -53,7 +53,8 @@ inside the amalgamation; when porting, extract:
 | Inputs | [`testdata/oracle/predict_still.inputs.txt`](../testdata/oracle/predict_still.inputs.txt) |
 | Generators | [`predict_still_oracle.py`](../tools/predict_still_oracle.py), [`predict_osc_oracle.py`](../tools/predict_osc_oracle.py) |
 | C++ API | `ReflectionPredictor` + `LegacyMosflmAdapter::predict_still` / `integrate_summation` |
-| C / Fortran ABI | `MosflmCApi.h` + [`fortran/mosflm_c_bind.f90`](../fortran/mosflm_c_bind.f90) (`predict_still_cpp`) |
+| C / Fortran ABI | `MosflmCApi.h` + [`fortran/mosflm_c_bind.f90`](../fortran/mosflm_c_bind.f90) + F77 `predict_still_cpp_` |
+| Amalgamation hook | Near `CALL PREDICT(PSI, IFLAGPR)` (~194120) → `CALL PREDICT_CPP_STILL_PSI(...)` ([`PHASE_C_SPLICE.md`](PHASE_C_SPLICE.md)) |
 | Dump lines | `PREDICT_DUMP n=N` then `h k l x_mm y_mm phi_beg phi_end full(0\|1)` |
 
 A full `bin/ipmosflm` PREDICT capture still needs a known-indexed image set
@@ -79,6 +80,8 @@ Do **not** require bit-identical floats.
 4. Differential test comparing C++ vs oracle dump.
 5. Route one stills caller through `predict_still_cpp` / `MosflmCApi` (Fortran bridge +
    `fortran_c_api` CTest already exercise the analytical fixture path).
+6. Amalgamation splice recipe (ifdef, not yet applied): [`PHASE_C_SPLICE.md`](PHASE_C_SPLICE.md);
+   bridge `predict_cpp_still` + CTest `predict_cpp_bridge`.
 
 ## Non-goals for the first replacement
 

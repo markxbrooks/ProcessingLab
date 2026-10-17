@@ -30,7 +30,14 @@ testdata/oracle/known_indexed/
 
 ## Capture oracle results
 
-Prefer the scaffold script (creates `images/known_indexed/` README if missing):
+Synthetic corpus (analytical C++ dumps, no real images yet):
+
+```bash
+./tools/generate_synthetic_known_indexed.sh
+```
+
+Prefer the scaffold script for a future real `ipmosflm` capture (creates
+`images/known_indexed/` README if missing):
 
 ```bash
 ./tools/capture_ipmosflm_oracle.sh

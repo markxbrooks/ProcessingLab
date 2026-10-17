@@ -98,7 +98,9 @@ add_library(mosflm_geometry
     src/geometry/Clcalc.cpp
     src/geometry/Matset.cpp
     src/legacy/LegacyMosflmAdapter.cpp
+    src/legacy/MosflmCApiValidation.cpp
     src/legacy/MosflmCApi.cpp
+    src/legacy/MosflmFortranAdapters.cpp
     src/image/CbfImageReader.cpp
     src/crystal/CrystalMetadata.cpp
     src/crystal/SpaceGroupInfo.cpp
@@ -310,6 +312,18 @@ if(BUILD_TESTING)
     target_link_libraries(test_c_api_lp PRIVATE mosflm_geometry)
     add_test(NAME c_api_lp COMMAND test_c_api_lp)
 
+    add_executable(test_c_api_contract
+        tests/unit/test_c_api_contract.cpp
+    )
+    target_link_libraries(test_c_api_contract PRIVATE mosflm_geometry)
+    add_test(NAME c_api_contract COMMAND test_c_api_contract)
+
+    add_executable(test_ub_from_psi
+        tests/unit/test_ub_from_psi.cpp
+    )
+    target_link_libraries(test_ub_from_psi PRIVATE mosflm_geometry)
+    add_test(NAME ub_from_psi COMMAND test_ub_from_psi)
+
     if(MOSFLM_HAS_FORTRAN)
         add_executable(test_fortran_c_api
             fortran/mosflm_c_bind.f90
@@ -326,7 +340,60 @@ if(BUILD_TESTING)
             target_link_libraries(test_fortran_c_api PRIVATE gfortran)
         endif()
         add_test(NAME fortran_c_api COMMAND test_fortran_c_api)
+
+        # Fixed-form F77 call into predict_still_cpp_ (amalgamation-style).
+        add_executable(test_predict_still_f77
+            fortran/test_predict_still_f77.f
+        )
+        set_source_files_properties(fortran/test_predict_still_f77.f
+            PROPERTIES Fortran_FORMAT FIXED
+        )
+        target_link_libraries(test_predict_still_f77 PRIVATE mosflm_geometry)
+        set_target_properties(test_predict_still_f77 PROPERTIES
+            LINKER_LANGUAGE CXX
+        )
+        if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(test_predict_still_f77 PRIVATE gfortran)
+        endif()
+        add_test(NAME predict_still_f77 COMMAND test_predict_still_f77)
+
+        # Amalgamation-named PREDICT_CPP_STILL bridge.
+        add_executable(test_predict_cpp_bridge
+            fortran/predict_cpp_bridge.f90
+            fortran/test_predict_cpp_bridge.f90
+        )
+        target_link_libraries(test_predict_cpp_bridge PRIVATE mosflm_geometry)
+        set_target_properties(test_predict_cpp_bridge PROPERTIES
+            LINKER_LANGUAGE CXX
+        )
+        if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(test_predict_cpp_bridge PRIVATE gfortran)
+        endif()
+        add_test(NAME predict_cpp_bridge COMMAND test_predict_cpp_bridge)
+
+        add_executable(test_predict_cpp_psi
+            fortran/predict_cpp_bridge.f90
+            fortran/test_predict_cpp_psi.f90
+        )
+        target_link_libraries(test_predict_cpp_psi PRIVATE mosflm_geometry)
+        set_target_properties(test_predict_cpp_psi PROPERTIES
+            LINKER_LANGUAGE CXX
+        )
+        if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(test_predict_cpp_psi PRIVATE gfortran)
+        endif()
+        add_test(NAME predict_cpp_psi COMMAND test_predict_cpp_psi)
     endif()
+
+    add_executable(test_known_indexed_oracle
+        tests/differential/test_known_indexed_oracle.cpp
+    )
+    target_link_libraries(test_known_indexed_oracle PRIVATE mosflm_geometry)
+    add_test(
+        NAME known_indexed_oracle
+        COMMAND test_known_indexed_oracle
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 
     if(MOSFLM_HAS_DPS_BRAVAIS)
         add_executable(test_bravais_classifier
