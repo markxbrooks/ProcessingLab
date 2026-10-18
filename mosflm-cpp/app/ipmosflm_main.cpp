@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -57,6 +58,65 @@ void print_no_run_and_end() {
 
 void print_end() {
     std::cout << "\n *********** END OF PROCESSING *****************\n";
+}
+
+/// Machine-readable AUTOINDEX dump for DiffractionLab (and CLI users).
+void emit_autoindex_dump(const mosflm::control::ControlState& state) {
+    if (!state.has_cell || !state.has_matrix) {
+        return;
+    }
+    const auto& c = state.cell;
+    const auto& A = state.amat;
+    std::cout << std::setprecision(10);
+    std::cout << "INTEGRATIONLAB_CELL " << c.a << " " << c.b << " " << c.c
+              << " " << c.alpha_deg << " " << c.beta_deg << " " << c.gamma_deg
+              << '\n';
+    std::cout << "INTEGRATIONLAB_MATRIX";
+    for (int r = 0; r < 3; ++r) {
+        for (int col = 0; col < 3; ++col) {
+            std::cout << " " << A(r, col);
+        }
+    }
+    std::cout << '\n';
+    if (!state.autoindex_system.empty()) {
+        std::cout << "INTEGRATIONLAB_SYSTEM " << state.autoindex_system << '\n';
+    }
+    if (state.autoindex_character > 0) {
+        std::cout << "INTEGRATIONLAB_CHARACTER " << state.autoindex_character
+                  << '\n';
+    }
+    if (state.autoindex_n_spots > 0) {
+        std::cout << "INTEGRATIONLAB_NSPOTS " << state.autoindex_n_spots << '\n';
+    }
+
+    // Sidecar next to cwd for tools that prefer files over stdout.
+    try {
+        std::ofstream out("integrationlab_index.txt");
+        if (out) {
+            out << std::setprecision(10);
+            out << "CELL " << c.a << " " << c.b << " " << c.c << " "
+                << c.alpha_deg << " " << c.beta_deg << " " << c.gamma_deg
+                << '\n';
+            out << "MATRIX";
+            for (int r = 0; r < 3; ++r) {
+                for (int col = 0; col < 3; ++col) {
+                    out << " " << A(r, col);
+                }
+            }
+            out << '\n';
+            if (!state.autoindex_system.empty()) {
+                out << "SYSTEM " << state.autoindex_system << '\n';
+            }
+            if (state.autoindex_character > 0) {
+                out << "CHARACTER " << state.autoindex_character << '\n';
+            }
+            if (state.autoindex_n_spots > 0) {
+                out << "NSPOTS " << state.autoindex_n_spots << '\n';
+            }
+        }
+    } catch (...) {
+        // Best-effort sidecar; stdout dump is enough for DiffractionLab.
+    }
 }
 
 }  // namespace
@@ -142,6 +202,7 @@ int main(int argc, char** argv) {
         for (const auto& r : runs) {
             if (r.ran_autoindex) {
                 std::cout << "  AUTOINDEX: " << r.message << '\n';
+                emit_autoindex_dump(session.state());
                 continue;
             }
             if (r.ran_strategy) {

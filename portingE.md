@@ -33,3 +33,11 @@ export DYLD_LIBRARY_PATH=/Applications/ccp4-9/lib
 `integrationlab`, `control_session`, `control_autoindex` (if DPS), `image_io`,
 `imosflm_socket`, `cbf_process_compare` (F77 vs C++ CBF PROCESS; soft-skip),
 plus existing insulin PROCESS suite.
+
+## DiffractionLab
+
+Sibling app [`DiffractionLab`](../DiffractionLab) can drive `IntegrationLab` via
+CONTROL scripts (`diffraction_lab/processinglab_client.py`). After AUTOINDEX,
+`IntegrationLab` prints `INTEGRATIONLAB_CELL` / `INTEGRATIONLAB_MATRIX` (and
+writes `integrationlab_index.txt`). Set `DIFFRACTIONLAB_BACKEND=processinglab`
+or `DIFFRACTIONLAB_PREFER_PROCESSINGLAB=1`.

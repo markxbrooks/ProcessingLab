@@ -84,6 +84,10 @@ struct ControlState {
 
     bool autoindex_pending{false};
     AutoIndexControlSettings autoindex{};
+    /// Filled by AUTOINDEX runner for DiffractionLab / machine-readable dump.
+    std::string autoindex_system;
+    int autoindex_character{0};
+    std::size_t autoindex_n_spots{0};
 
     /// Multi-lattice: additional orientation matrices (first is ``amat``).
     std::vector<Eigen::Matrix3d> extra_lattices;

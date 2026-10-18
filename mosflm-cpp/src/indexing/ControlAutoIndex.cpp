@@ -50,6 +50,9 @@ void run_autoindex(control::ControlState& state) {
     state.has_cell = true;
     state.amat = result.amat;
     state.has_matrix = true;
+    state.autoindex_system = result.selected_system;
+    state.autoindex_character = result.selected_character;
+    state.autoindex_n_spots = result.n_spots_used;
 }
 
 }  // namespace
