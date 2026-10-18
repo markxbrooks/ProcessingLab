@@ -1,5 +1,5 @@
 /**
- * ``IntegrationLab`` — ProcessingLab C++ CONTROL driver (Phase D / E).
+ * ``ProcessingLab`` — ProcessingLab C++ CONTROL driver (Phase D / E).
  *
  * Default release binary: CONTROL → C++ science path.
  * Does **not** link the Fortran amalgamation. F77 oracle remains ``ipmosflm``:
@@ -43,11 +43,11 @@ void print_banner() {
     // Fortran-compatible lead line + C++ core note (Phase E / E0).
     std::cout
         << "\n"
-        << " ************ Mosflm version 7.4.0 for IP, CCD and PAD data"
+        << " ************ ProcessingLab version 0.1.0 for IP, CCD, CBF, HD5, I22 and PAD data"
            " (C++ core) ***********\n"
-        << " IntegrationLab — CONTROL → C++ PROCESS/AUTOINDEX\n"
-        << " Andrew Leslie and Harry Powell, MRC Laboratory of Molecular Biology\n"
-        << " F77 oracle (ipmosflm): make fortran-oracle\n"
+        << " ProcessingLab — CONTROL → C++ PROCESS/AUTOINDEX\n"
+        << " Mark Brooks"
+        << " make ProcessingLab\n"
         << "--------------------------------------------------------------------------------\n";
 }
 
@@ -139,7 +139,7 @@ int main(int argc, char** argv) {
         }
         if (a == "--image") {
             if (i + 1 >= argc) {
-                std::cerr << "IntegrationLab: --image needs a path\n";
+                std::cerr << "ProcessingLab: --image needs a path\n";
                 return 2;
             }
             image = argv[++i];
@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
         }
         if (a == "HKLOUT" || a == "hklout") {
             if (i + 1 >= argc) {
-                std::cerr << "IntegrationLab: HKLOUT needs a path\n";
+                std::cerr << "ProcessingLab: HKLOUT needs a path\n";
                 return 2;
             }
             hklout = argv[++i];
@@ -161,13 +161,13 @@ int main(int argc, char** argv) {
             script = argv[i];
             continue;
         }
-        std::cerr << "IntegrationLab: unexpected argument '" << a << "'\n";
+        std::cerr << "ProcessingLab: unexpected argument '" << a << "'\n";
         return 2;
     }
 
     if (want_help) {
         std::cerr
-            << "Usage: IntegrationLab [HKLOUT out.mtz] [--image img] [script.in]\n"
+            << "Usage: ProcessingLab [HKLOUT out.mtz] [--image img] [script.in]\n"
             << "  Reads CONTROL from script or stdin (GO/RUN → C++ science).\n"
             << "  MOSFLM_IMAGE / CCP4 used when IMAGE/TEMPLATE unset.\n"
             << "  F77 ipmosflm oracle: make fortran-oracle\n";
@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
         }
         return 0;
     } catch (const std::exception& ex) {
-        std::cerr << "IntegrationLab: " << ex.what() << '\n';
+        std::cerr << "ProcessingLab: " << ex.what() << '\n';
         return 1;
     }
 }

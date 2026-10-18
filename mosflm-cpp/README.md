@@ -6,7 +6,7 @@ C++ computational core for **ProcessingLab** (MOSFLM port). See
 **Status (Phase D Done / D6):** geometry + Gemmi crystal + miniCBF + **SMV** I/O
 + DPS Bravais façade + stills/oscillation `PREDICT` + **MEAS** boxes +
 **Rossmann standard-profile** + Stage 2 **`PostRefiner`** + CONTROL
-**`ControlSession`** + **`IntegrationLab`** (default release binary; no
+**`ControlSession`** + **`ProcessingLab`** (default release binary; no
 amalgamation; `.exe` on Windows) + LP + C ABI + MTZ + pure-C++ `ProcessPipeline`.
 F77 oracle remains `ipmosflm` (`make fortran-oracle`). Oracle splice library
 `mosflm_predict_hook` only with `-DMOSFLM_FORTRAN_ORACLE=ON`. CTests include
@@ -25,7 +25,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 #   cmake -S . -B build -DMOSFLM_FORTRAN_ORACLE=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
-# Install IntegrationLab + mosflm_cpp_cli:
+# Install ProcessingLab + mosflm_cpp_cli:
 #   cmake --install build --prefix /path/to/prefix
 ```
 
@@ -50,8 +50,8 @@ configure (FetchContent: Eigen, Gemmi). DPS Bravais tests need
 # Keyword-driven PROCESS (D5):
 ./build/mosflm_cpp_cli run testdata/images/known_indexed/cpp_process.in \
   --image /path/to/insulin_1_001.img /tmp/control.mtz
-# Default release binary (D6/E; IntegrationLab.exe on Windows):
-./build/IntegrationLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
+# Default release binary (D6/E; ProcessingLab.exe on Windows):
+./build/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   testdata/images/known_indexed/cpp_process.in
 # Wall-time vs F77 ipmosflm (CCP4 default /apps/ccp4/ccp4-9/bin/ipmosflm):
 ./tools/bench_ipmosflm_perf.sh

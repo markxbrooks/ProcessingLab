@@ -176,10 +176,10 @@ int main() {
               << result.mtz_reflections.size() << '\n';
 
     CHECK_MSG(n_sigma_ok == result.mtz_reflections.size(), "non-positive SIGI");
-    // Soft gates (profile parity is D3).
-    CHECK_MSG(med_ratio > 0.05 && med_ratio < 20.0, "median I ratio out of soft band");
-    CHECK_MSG(frac_ratio_ok > 0.40, "too few ratios in [0.1, 10]");
-    CHECK_MSG(frac_soft_z > 0.70, "too many |ΔI|/σ_oracle outliers");
+    // Tightened soft gates (E8 PROCESS parity vs F77 oracle).
+    CHECK_MSG(med_ratio > 0.3 && med_ratio < 5.0, "median I ratio out of band");
+    CHECK_MSG(frac_ratio_ok > 0.55, "too few ratios in [0.1, 10]");
+    CHECK_MSG(frac_soft_z > 0.75, "too many |ΔI|/σ_oracle outliers");
 
     return mosflm_test::finish("insulin_isi");
 }

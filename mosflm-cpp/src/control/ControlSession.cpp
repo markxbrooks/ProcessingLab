@@ -588,6 +588,11 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         det.pixel_size_x_mm = state_.pixel_x_mm;
         det.pixel_size_y_mm = state_.pixel_y_mm;
     }
+    // Match ProcessPipeline::known_indexed_insulin detector frame.
+    det.yscale = state_.yscale;
+    det.tilt_mrad = state_.tilt_mrad;
+    det.twist_mrad = state_.twist_mrad;
+    det.use_rotmat2 = state_.use_rotmat2;
 
     diffraction::ScanRange scan;
     scan.phi_start_deg = state_.process_start_phi_deg;
@@ -596,11 +601,31 @@ diffraction::ProcessRequest ControlSession::make_process_request(
 
     diffraction::PredictionSettings prediction;
     prediction.mosaic_spread_deg = state_.mosaic_deg;
-    prediction.divh_deg = state_.divh_deg;
-    prediction.divv_deg = state_.divv_deg;
+    prediction.divh_deg = state_.has_divergence ? state_.divh_deg : 0.0;
+    prediction.divv_deg = state_.has_divergence ? state_.divv_deg : 0.0;
     prediction.dmin_A = state_.dmin_A;
+    prediction.dmax_A = state_.dmax_A;
+    prediction.phi_step_deg = state_.phi_step_deg;
+    prediction.apply_systematic_absences = true;
+    // REEK-style gates tuned for insulin PROCESS (~1680 gen target).
+    prediction.exclude_ice_rings = false;
+    prediction.exclude_cusp = true;
+    prediction.cusp_fraction = 0.035;
+    prediction.max_phi_width_deg = 5.0;
+    prediction.apply_reek_detector_margin = true;
+    prediction.detector_margin_px = 24.0;
+    prediction.widen_ewald_with_mosaic = true;
+    prediction.mosaic_ewald_scale = 0.55;
 
     diffraction::IntegrationSettings integration;
+    integration.box_half_px = 3;
+    integration.bg_frame_px = 2;
+    integration.apply_lp = true;
+    integration.mosflm_detector_axes = true;
+    integration.image_beam_x_mm =
+        state_.has_beam ? state_.beam_x_mm : image.metadata.beam_x_mm;
+    integration.image_beam_y_mm =
+        state_.has_beam ? state_.beam_y_mm : image.metadata.beam_y_mm;
 
     diffraction::MeasurementBoxSettings measurement;
     measurement.separation_x_mm = state_.separation_x_mm;

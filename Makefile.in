@@ -1,6 +1,6 @@
 # ProcessingLab top-level Makefile.in (Phase D / E).
 #
-# Default: C++ core + IntegrationLab (no Fortran amalgamation).
+# Default: C++ core + ProcessingLab (no Fortran amalgamation).
 # Oracle:  make fortran-oracle  → bin/ipmosflm (F77)
 #-----------------------------------------------------------------------------
 prefix =  @prefix@
@@ -17,7 +17,7 @@ ifeq ($(OS),Windows_NT)
 else
   EXEEXT =
 endif
-INTEGRATIONLAB = IntegrationLab$(EXEEXT)
+INTEGRATIONLAB = ProcessingLab$(EXEEXT)
 bin_PROGRAMS = $(INTEGRATIONLAB)
 
 .PHONY: all cpp cbf-lib dps-lib fortran-oracle libs force install uninstall clean \
@@ -39,11 +39,11 @@ dps-lib:
 cpp: cbf-lib dps-lib
 	cmake -S mosflm-cpp -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
 		-DMOSFLM_FORTRAN_ORACLE=OFF
-	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli IntegrationLab
+	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli ProcessingLab
 	mkdir -p bin
 	cp -f $(CPP_BUILD)/$(INTEGRATIONLAB) bin/$(INTEGRATIONLAB)
 	cp -f $(CPP_BUILD)/mosflm_cpp_cli$(EXEEXT) bin/mosflm_cpp_cli$(EXEEXT)
-	@echo "Installed thin binaries under bin/ (IntegrationLab; no amalgamation)."
+	@echo "Installed thin binaries under bin/ (ProcessingLab; no amalgamation)."
 
 test: cpp
 	ctest --test-dir $(CPP_BUILD) --output-on-failure
@@ -60,7 +60,7 @@ force:
 	${MAKE} cpp
 
 ipmosflm: cpp
-IntegrationLab: cpp
+ProcessingLab: cpp
 
 bin/$(INTEGRATIONLAB): cpp
 

@@ -236,23 +236,23 @@ target_link_libraries(mosflm_cpp_cli
 )
 
 # Default release binary (C++ CONTROL). Distinct from F77 ``ipmosflm`` oracle.
-# On Windows, CMake appends ``.exe`` → IntegrationLab.exe.
-add_executable(IntegrationLab
+# On Windows, CMake appends ``.exe`` → ProcessingLab.exe.
+add_executable(ProcessingLab
     app/ipmosflm_main.cpp
 )
-target_link_libraries(IntegrationLab
+target_link_libraries(ProcessingLab
     PRIVATE
         mosflm_geometry
 )
 if(TARGET mosflm_indexing AND MOSFLM_HAS_DPS_INDEXER)
-    target_link_libraries(IntegrationLab PRIVATE mosflm_indexing)
-    target_compile_definitions(IntegrationLab PRIVATE MOSFLM_HAS_INDEXING=1)
+    target_link_libraries(ProcessingLab PRIVATE mosflm_indexing)
+    target_compile_definitions(ProcessingLab PRIVATE MOSFLM_HAS_INDEXING=1)
 endif()
-set_target_properties(IntegrationLab PROPERTIES
-    OUTPUT_NAME IntegrationLab
+set_target_properties(ProcessingLab PROPERTIES
+    OUTPUT_NAME ProcessingLab
 )
 
-install(TARGETS mosflm_cpp_cli IntegrationLab
+install(TARGETS mosflm_cpp_cli ProcessingLab
     RUNTIME DESTINATION bin
 )
 install(TARGETS mosflm_geometry
@@ -464,6 +464,29 @@ if(BUILD_TESTING)
     set_tests_properties(cbf_process_compare PROPERTIES
         ENVIRONMENT
             "MOSFLM_IPMOSFLM=${MOSFLM_IPMOSFLM_ROOT}/bin/ipmosflm.oracle"
+    )
+
+    # F77 ipmosflm vs ProcessingLab CLI on known-indexed insulin SMV PROCESS.
+    # Compares MTZ cell/SG + ASU-aware HKL recall (soft-skip if missing).
+    add_executable(test_smv_process_compare
+        tests/differential/test_smv_process_compare.cpp
+    )
+    target_link_libraries(test_smv_process_compare PRIVATE mosflm_geometry)
+    add_dependencies(test_smv_process_compare ProcessingLab)
+    add_test(
+        NAME smv_process_compare
+        COMMAND test_smv_process_compare
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    if(DEFINED ENV{CCP4} AND NOT "$ENV{CCP4}" STREQUAL "")
+        set(_MOSFLM_SMV_CCP4 "$ENV{CCP4}")
+    else()
+        set(_MOSFLM_SMV_CCP4 "/Applications/ccp4-9")
+    endif()
+    set_tests_properties(smv_process_compare PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${MOSFLM_IPMOSFLM_ROOT}/bin/ipmosflm.oracle;CCP4=${_MOSFLM_SMV_CCP4}"
+        TIMEOUT 300
     )
 
     add_executable(test_profile_fitter
@@ -740,7 +763,7 @@ if(BUILD_TESTING)
     add_executable(test_integrationlab
         tests/differential/test_ipmosflm_thin.cpp
     )
-    add_dependencies(test_integrationlab IntegrationLab)
+    add_dependencies(test_integrationlab ProcessingLab)
     add_test(
         NAME integrationlab
         COMMAND test_integrationlab
@@ -748,15 +771,15 @@ if(BUILD_TESTING)
     )
     set_tests_properties(integrationlab PROPERTIES
         ENVIRONMENT
-            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/IntegrationLab${CMAKE_EXECUTABLE_SUFFIX}"
+            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX}"
     )
 
-    # Wall-time: IntegrationLab (C++) vs F77 ipmosflm on known-indexed PROCESS.
+    # Wall-time: ProcessingLab (C++) vs F77 ipmosflm on known-indexed PROCESS.
     # Soft-skips inside the binary if either side is missing / wrong arch.
     add_executable(test_ipmosflm_perf
         tests/differential/test_ipmosflm_perf.cpp
     )
-    add_dependencies(test_ipmosflm_perf IntegrationLab)
+    add_dependencies(test_ipmosflm_perf ProcessingLab)
     add_test(
         NAME ipmosflm_perf
         COMMAND test_ipmosflm_perf
@@ -769,7 +792,7 @@ if(BUILD_TESTING)
     endif()
     set_tests_properties(ipmosflm_perf PROPERTIES
         ENVIRONMENT
-            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/IntegrationLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${_MOSFLM_PERF_CCP4}/bin/ipmosflm;CCP4=${_MOSFLM_PERF_CCP4}"
+            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${_MOSFLM_PERF_CCP4}/bin/ipmosflm;CCP4=${_MOSFLM_PERF_CCP4}"
         TIMEOUT 600
     )
 

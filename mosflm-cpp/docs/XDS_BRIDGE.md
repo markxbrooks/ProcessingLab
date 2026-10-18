@@ -24,6 +24,6 @@ Follow the [XDSwiki Installation](https://wiki.uni-konstanz.de/xds/index.php/Ins
 ## Explicit non-goals
 
 - Do **not** vendor XDS binaries into this repository.
-- Do **not** add Neggia/Durin as link-time dependencies of `bin/IntegrationLab`,
+- Do **not** add Neggia/Durin as link-time dependencies of `bin/ProcessingLab`,
   `bin/ipmosflm` (oracle), or `mosflm-cpp`.
 - Do **not** treat `2cbf` as a runtime requirement for every image open.

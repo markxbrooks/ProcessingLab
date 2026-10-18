@@ -34,6 +34,8 @@ struct ScanRange {
 /// Algorithm controls for reflection prediction.
 struct PredictionSettings {
     double dmin_A{1.5};
+    /// Low-resolution cutoff (Å); spots with ``d > dmax`` are skipped.
+    double dmax_A{200.0};
     /// Accept reflections with ``||s1| - 1/λ| ≤`` this (Å⁻¹).
     double ewald_tolerance_Ainv{0.0025};
     /// Predictor angular search increment (not physical oscillation width).
@@ -53,6 +55,22 @@ struct PredictionSettings {
     /// If true (default), skip Miller indices systematically absent for
     /// ``PredictionRequest::crystal.spacegroup``.
     bool apply_systematic_absences{true};
+    /// Reject spots whose observed φ interval exceeds this width (NWMAX-like).
+    /// Zero disables. F77 insulin rejects ~12 "too wide in φ".
+    double max_phi_width_deg{0.0};
+    /// Reject near-spindle (cusp) reflections: ``|q_x| / |q| < cusp_fraction``.
+    bool exclude_cusp{false};
+    double cusp_fraction{0.05};
+    /// Shrink the on-detector acceptance by this many pixels (REEK margin).
+    bool apply_reek_detector_margin{false};
+    double detector_margin_px{8.0};
+    /// If false, Ewald acceptance uses ``ewald_tolerance_Ainv`` only; mosaic
+    /// still affects partiality via the observed φ interval. REEK PROCESS
+    /// paths set this false to avoid over-predicting.
+    bool widen_ewald_with_mosaic{true};
+    /// Scale applied to mosaic+divergence when widening the Ewald gate
+    /// (1 = full; 0.5 ≈ REEK-like PROCESS for insulin).
+    double mosaic_ewald_scale{1.0};
 };
 
 /// Cohesive inputs for stills or oscillation PREDICT.

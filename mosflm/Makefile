@@ -52,7 +52,7 @@ LOCALLIBS   = ${DPSLIB}/libdps_index.a ${DPSLIB}/DPSLIB.a ${DPSLIB}/libfftpack.a
 #   cmake --build ../mosflm-cpp/build --target mosflm_predict_hook
 #   make MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm
 # Default ProcessingLab binary (no amalgamation):
-#   cmake --build ../mosflm-cpp/build --target IntegrationLab
+#   cmake --build ../mosflm-cpp/build --target ProcessingLab
 MOSFLM_CPP_DIR = ../mosflm-cpp
 MOSFLM_CPP_BUILD = $(MOSFLM_CPP_DIR)/build
 # Link flags (must not pass gfortran-only FFLAGS to g++).
@@ -74,8 +74,8 @@ ifeq ($(MOSFLM_FORTRAN_ORACLE),1)
 else
 	@echo "Phase D / D6: Fortran amalgamation is opt-in."
 	@echo "  make MOSFLM_FORTRAN_ORACLE=1 ipmosflm"
-	@echo "Default C++ CONTROL binary (IntegrationLab):"
-	@echo "  cmake --build $(MOSFLM_CPP_BUILD) --target IntegrationLab"
+	@echo "Default C++ CONTROL binary (ProcessingLab):"
+	@echo "  cmake --build $(MOSFLM_CPP_BUILD) --target ProcessingLab"
 	@echo "  # or: make -C .. cpp"
 	@false
 endif
