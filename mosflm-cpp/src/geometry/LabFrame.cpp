@@ -14,4 +14,19 @@ Eigen::Matrix3d mosflm_amat_to_cpp_ub(const Eigen::Matrix3d& A_mosflm) {
     return mosflm_lab_to_cpp() * A_mosflm;
 }
 
+void cpp_mm_to_mosflm_xdet(
+    double x_mm,
+    double y_mm,
+    double beam_x_mm,
+    double beam_y_mm,
+    double pixel_size_x_mm,
+    double pixel_size_y_mm,
+    double& xdet_px,
+    double& ydet_px
+) {
+    // XG ↔ +y_mm, YG ↔ +x_mm (see LabFrame.hpp).
+    xdet_px = beam_x_mm / pixel_size_x_mm + y_mm / pixel_size_x_mm;
+    ydet_px = beam_y_mm / pixel_size_y_mm + x_mm / pixel_size_y_mm;
+}
+
 }  // namespace mosflm

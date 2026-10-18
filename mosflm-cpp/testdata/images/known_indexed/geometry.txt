@@ -37,6 +37,11 @@
 # is antiparallel), spindle +Z; C++ photons +Z, spindle +X. Map
 # R=[[0,0,1],[0,-1,0],[1,0,0]] so UB_cpp = R * A. CTest insulin_hkl_overlap:
 # ASU-aware recall 100% vs insulin_1_001.mtz (exact HKL may differ by SG/Friedel).
-# Next: XDET/YDET positional differential (GENDATA XG∥lab Y, YG∥lab Z).
+#
+# Detector pixels (mosflm::cpp_mm_to_mosflm_xdet): GENDATA XG∥lab Y, YG∥lab Z;
+# after R, insulin match is XDET = BEAM_x/px + y_mm/px, YDET = BEAM_y/px + x_mm/px
+# (BEAM 94.0, 94.7 mm). CTest insulin_xdet: exact-HKL median ~37 px (~3 mm);
+# inliers lack TILT/TWIST/YSCALE. Hook GENDATA still 1:1 until PHASE_C_SPLICE
+# adopts this swap.
 # Experimental Autotools splice: make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
 # (requires mosflm_predict_hook; see mosflm-cpp/docs/PHASE_C_SPLICE.md).

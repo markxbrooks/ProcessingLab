@@ -31,4 +31,28 @@ namespace mosflm {
  */
 [[nodiscard]] Eigen::Matrix3d mosflm_amat_to_cpp_ub(const Eigen::Matrix3d& A_mosflm);
 
+/**
+ * Map C++ predictor detector millimetres (beam-relative, from
+ * :meth:`DetectorGeometry::lab_to_detector_mm`) to MOSFLM ``XDET``/``YDET``
+ * pixel coordinates (origin = image lower-left).
+ *
+ * GENDATA: ``XG`` ∥ lab Y, ``YG`` ∥ lab Z. After :func:`mosflm_lab_to_cpp`,
+ * insulin known-indexed matching gives ``XG ↔ +y_mm``, ``YG ↔ +x_mm``
+ * (XG sense is empirical; YG follows Z→X).
+ *
+ * ``beam_x_mm`` / ``beam_y_mm`` are the direct-beam position in the image
+ * frame (SMV ``BEAM`` / MOSFLM ``XCEN``/``YCEN``), not the C++ predictor's
+ * beam-centred origin.
+ */
+void cpp_mm_to_mosflm_xdet(
+    double x_mm,
+    double y_mm,
+    double beam_x_mm,
+    double beam_y_mm,
+    double pixel_size_x_mm,
+    double pixel_size_y_mm,
+    double& xdet_px,
+    double& ydet_px
+);
+
 }  // namespace mosflm

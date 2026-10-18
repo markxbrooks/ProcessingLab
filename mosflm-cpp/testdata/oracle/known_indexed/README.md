@@ -26,10 +26,10 @@ are **not** from `ipmosflm`.
 | ---- | -------------- |
 | `known_indexed_oracle` | Synthetic analytical dumps still match C++ fixtures |
 | `insulin_hkl_overlap` | C++ PREDICT vs `insulin_1_001.mtz` after `mosflm_amat_to_cpp_ub`; ASU/Friedel-aware recall |
+| `insulin_xdet` | Exact-HKL `XDET`/`YDET` residuals via `cpp_mm_to_mosflm_xdet` |
 
-**Baseline (2026-10-17):** ASU-aware recall **100%** (1463 / 1463) with
-`R = [[0,0,1],[0,-1,0],[1,0,0]]` (`mosflm_lab_to_cpp`), dmin=1.45 Å, φ∈[0,1]°.
-Exact-index recall is lower (~22%) because MOSFLM and C++ may pick different
-symmetry equivalents. Predictor still emits extras (SG absences / Ewald window).
-Next: positional `XDET`/`YDET` differential — see
-`../images/known_indexed/geometry.txt`.
+**Baseline (2026-10-17):** ASU-aware HKL recall **100%** (1463 / 1463) with
+`R = [[0,0,1],[0,-1,0],[1,0,0]]`. Exact-index recall ~22% (SG/Friedel choice).
+`XDET`/`YDET`: `XDET↔y_mm`, `YDET↔x_mm` relative to BEAM (94.0, 94.7) mm;
+exact-HKL median residual ~**37 px** (~3 mm), inlier RMS ~38 px (no TILT/TWIST).
+See `../images/known_indexed/geometry.txt`.

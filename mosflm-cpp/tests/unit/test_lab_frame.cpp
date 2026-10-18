@@ -32,5 +32,14 @@ int main() {
     );
     CHECK_CLOSE((Ub - R).norm(), 0.0, 1e-12);
 
+    // Detector: XDET↔y_mm, YDET↔x_mm relative to BEAM
+    double xdet = 0.0;
+    double ydet = 0.0;
+    mosflm::cpp_mm_to_mosflm_xdet(
+        10.0, -5.0, 94.0, 94.7, 0.0816, 0.0816, xdet, ydet
+    );
+    CHECK_CLOSE(xdet, 94.0 / 0.0816 - 5.0 / 0.0816, 1e-9);
+    CHECK_CLOSE(ydet, 94.7 / 0.0816 + 10.0 / 0.0816, 1e-9);
+
     return mosflm_test::finish("lab_frame");
 }

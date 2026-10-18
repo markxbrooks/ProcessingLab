@@ -6,6 +6,8 @@
 ! Unit conventions (from mosflm/inc/gendata.f comments):
 !   XG, YG  — virtual detector coords in **10 micron units**, beam-relative
 !             (mm * 100). C++ bridge uses millimetres.
+!   Axis map (insulin XDET differential / docs/PHASE_C_SPLICE.md):
+!             XG ↔ C++ y_mm,  YG ↔ C++ x_mm.
 !   IMG     — 0 = full; non-zero = partial (1..100 in legacy REEK).
 !   PHIG    — phi begin (degrees); PHIWG — phi width (end - begin).
 
@@ -96,8 +98,9 @@ contains
       ihg(i) = h(i)
       ikg(i) = k(i)
       ilg(i) = l(i)
-      xg(i) = mosflm_mm_to_10um(x_mm(i))
-      yg(i) = mosflm_mm_to_10um(y_mm(i))
+      ! XG ∥ lab Y ↔ C++ y_mm; YG ∥ lab Z ↔ C++ x_mm.
+      xg(i) = mosflm_mm_to_10um(y_mm(i))
+      yg(i) = mosflm_mm_to_10um(x_mm(i))
       phig(i) = real(phi_beg(i), kind=c_float)
       phiwg(i) = real(phi_end(i) - phi_beg(i), kind=c_float)
       if (ifull(i) /= 0_c_int) then

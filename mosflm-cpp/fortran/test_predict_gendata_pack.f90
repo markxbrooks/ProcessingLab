@@ -54,7 +54,7 @@ program test_predict_gendata_pack
     stop 1
   end if
 
-  ! Direct unpack smoke: 1 mm → XG = 100 (10 µm units).
+  ! Direct unpack smoke: XG↔y_mm, YG↔x_mm (10 µm = mm*100).
   block
     integer(c_int) :: h1(1), k1(1), l1(1), if1(1), n_out, flg
     real(c_double) :: xm(1), ym(1), pb(1), pe(1)
@@ -71,10 +71,10 @@ program test_predict_gendata_pack
       write (*, '(A)') 'FAIL: unpack indices'
       stop 1
     end if
-    if (abs(real(xg1(1), kind=c_double) - 150.0_c_double) > 1.0e-3_c_double &
-        .or. abs(real(yg1(1), kind=c_double) + 200.0_c_double) > &
+    if (abs(real(xg1(1), kind=c_double) + 200.0_c_double) > 1.0e-3_c_double &
+        .or. abs(real(yg1(1), kind=c_double) - 150.0_c_double) > &
         1.0e-3_c_double) then
-      write (*, '(A)') 'FAIL: unpack XG/YG scale (expect mm*100)'
+      write (*, '(A)') 'FAIL: unpack XG/YG (expect XG=y*100, YG=x*100)'
       stop 1
     end if
     if (im1(1) /= 0_c_int) then
