@@ -25,6 +25,8 @@ make test         # ctest in mosflm-cpp/build
 ./bin/mosflm_cpp_cli process-insulin
 ./bin/IntegrationLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   mosflm-cpp/testdata/images/known_indexed/cpp_process.in
+# C++ vs F77 PROCESS wall-time (CCP4 ipmosflm by default):
+./mosflm-cpp/tools/bench_ipmosflm_perf.sh
 ```
 
 If configuring `mosflm-cpp` directly, build CBFlib first: `make -C cbf`.

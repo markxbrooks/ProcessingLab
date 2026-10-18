@@ -1,13 +1,25 @@
-# known_indexed image set (placeholder)
+# known_indexed image set
 
-Place a small already-indexed dataset here, then create `ipmosflm.in` with
-WAVE / DISTANCE / BEAM / CELL / MATRIX / IMAGE / GO keywords.
+Real CCP4 example frame `insulin_1_001.img` (see `geometry.txt`). Scripts:
 
-Then re-run:
+| File | Role |
+| ---- | ---- |
+| `cpp_process.in` | C++ `IntegrationLab` / `ControlSession` PROCESS (inline MATRIX) |
+| `ipmosflm_process.in` | F77 `ipmosflm` PROCESS-only peer (no AUTOINDEX) |
+| `insulin_1.mat` | NEWMAT-format orientation for F77 `MATRIX` keyword |
+| `ipmosflm.in` | Full F77 oracle capture (spot search + autoindex + PROCESS) |
+
+Performance comparison (C++ vs F77 wall time):
+
+```bash
+./tools/bench_ipmosflm_perf.sh
+# MOSFLM_IPMOSFLM=/apps/ccp4/ccp4-9/bin/ipmosflm MOSFLM_PERF_REPEATS=5 ./tools/bench_ipmosflm_perf.sh
+```
+
+Oracle capture (spot list + MTZ dumps):
 
 ```bash
 ./tools/capture_ipmosflm_oracle.sh
 ```
 
-Outputs land in `testdata/oracle/known_indexed/` (log, MTZ, and — once
-instrumented — a PREDICT dump matching `PREDICT_DUMP` format).
+Outputs land in `testdata/oracle/known_indexed/`.

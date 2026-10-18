@@ -10,7 +10,7 @@ C++ computational core for **ProcessingLab** (MOSFLM port). See
 amalgamation; `.exe` on Windows) + LP + C ABI + MTZ + pure-C++ `ProcessPipeline`.
 F77 oracle remains `ipmosflm` (`make fortran-oracle`). Oracle splice library
 `mosflm_predict_hook` only with `-DMOSFLM_FORTRAN_ORACLE=ON`. CTests include
-`control_session`, `insulin_control`, `integrationlab`.
+`control_session`, `insulin_control`, `integrationlab`, `ipmosflm_perf`.
 
 Phase A–D table and vertical-slice checklist: [`../porting.md`](../porting.md)
 (section *Current status* and §3 / §5).
@@ -53,6 +53,9 @@ configure (FetchContent: Eigen, Gemmi). DPS Bravais tests need
 # Default release binary (D6/E; IntegrationLab.exe on Windows):
 ./build/IntegrationLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   testdata/images/known_indexed/cpp_process.in
+# Wall-time vs F77 ipmosflm (CCP4 default /apps/ccp4/ccp4-9/bin/ipmosflm):
+./tools/bench_ipmosflm_perf.sh
+# or: ctest --test-dir build -R ipmosflm_perf --output-on-failure
 ```
 
 ## Layout
