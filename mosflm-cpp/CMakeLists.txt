@@ -751,6 +751,28 @@ if(BUILD_TESTING)
             "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/IntegrationLab${CMAKE_EXECUTABLE_SUFFIX}"
     )
 
+    # Wall-time: IntegrationLab (C++) vs F77 ipmosflm on known-indexed PROCESS.
+    # Soft-skips inside the binary if either side is missing / wrong arch.
+    add_executable(test_ipmosflm_perf
+        tests/differential/test_ipmosflm_perf.cpp
+    )
+    add_dependencies(test_ipmosflm_perf IntegrationLab)
+    add_test(
+        NAME ipmosflm_perf
+        COMMAND test_ipmosflm_perf
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    if(DEFINED ENV{CCP4} AND NOT "$ENV{CCP4}" STREQUAL "")
+        set(_MOSFLM_PERF_CCP4 "$ENV{CCP4}")
+    else()
+        set(_MOSFLM_PERF_CCP4 "/apps/ccp4/ccp4-9")
+    endif()
+    set_tests_properties(ipmosflm_perf PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/IntegrationLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${_MOSFLM_PERF_CCP4}/bin/ipmosflm;CCP4=${_MOSFLM_PERF_CCP4}"
+        TIMEOUT 600
+    )
+
     if(MOSFLM_HAS_DPS_BRAVAIS)
         add_executable(test_bravais_classifier
             tests/differential/test_bravais_classifier.cpp
