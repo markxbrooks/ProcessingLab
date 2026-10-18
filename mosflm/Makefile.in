@@ -45,7 +45,23 @@ LOCALLIBS   = ${DPSLIB}/libdps_index.a ${DPSLIB}/DPSLIB.a ${DPSLIB}/libfftpack.a
 .f.o:
 	${F77} ${FFLAGS} -o $@ $<
 
-ipmosflm:	${OBJS}
+# Phase D / D6: amalgamation opt-in via MOSFLM_FORTRAN_ORACLE=1.
+# Default ProcessingLab binary is the C++ thin ipmosflm (mosflm-cpp/).
+MOSFLM_CPP_DIR = ../mosflm-cpp
+MOSFLM_CPP_BUILD = $(MOSFLM_CPP_DIR)/build
+
+ipmosflm:
+	@if [ "$(MOSFLM_FORTRAN_ORACLE)" = "1" ]; then \
+	  $(MAKE) ipmosflm-oracle; \
+	else \
+	  echo "Phase D / D6: Fortran amalgamation is opt-in."; \
+	  echo "  make MOSFLM_FORTRAN_ORACLE=1 ipmosflm"; \
+	  echo "Default thin ipmosflm (C++ CONTROL):"; \
+	  echo "  cmake --build $(MOSFLM_CPP_BUILD) --target ipmosflm"; \
+	  false; \
+	fi
+
+ipmosflm-oracle:	${OBJS}
 		mkdir -p ${DPSBIN}
 		${FLINK} ${ipmosflm_LDFLAGS} ${FFLAGS} ${OBJS} ${LOCALLIBS} ${LIBS} \
                 -o ${DPSBIN}/ipmosflm ${LDFLAGS}

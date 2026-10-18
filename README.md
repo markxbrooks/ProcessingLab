@@ -1,37 +1,48 @@
 # ProcessingLab
 
-Progressive C++ port of the MOSFLM diffraction-processing core, plus the
-legacy Autotools `ipmosflm` tree used as the scientific oracle.
+Progressive C++ port of the MOSFLM diffraction-processing core.
+
+**Phase D Done:** default build/install is the C++ core. The CCP4-compatible
+name `ipmosflm` is a thin CONTROL → PROCESS driver that does **not** link the
+Fortran amalgamation. Autotools `mosflm/` remains an optional scientific oracle.
 
 | Path | Role |
 | ---- | ---- |
-| [`mosflm-cpp/`](mosflm-cpp/) | C++ geometry, PREDICT, integration, C ABI, CTest |
-| [`mosflm/`](mosflm/) | Amalgamated Fortran (oracle / Phase C splice) |
+| [`mosflm-cpp/`](mosflm-cpp/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
+| [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle**) |
 | [`porting.md`](porting.md) | Migration roadmap and current status |
-| `bin/ipmosflm` | Legacy keyword-driven binary (Autotools) |
+| `bin/ipmosflm` | Thin C++ CONTROL binary (default) |
+| `bin/mosflm_cpp_cli` | Full C++ CLI |
 
-## Quick start (C++ port)
+## Quick start (default)
 
 ```bash
-cmake -S mosflm-cpp -B mosflm-cpp/build -DCMAKE_BUILD_TYPE=Release
-cmake --build mosflm-cpp/build
-ctest --test-dir mosflm-cpp/build --output-on-failure
-./mosflm-cpp/build/mosflm_cpp_cli version
+make cpp          # builds cbf/lib/libcbf.a then mosflm-cpp
+make test         # ctest in mosflm-cpp/build
+./bin/ipmosflm version
+./bin/mosflm_cpp_cli process-insulin
+./bin/ipmosflm HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
+  mosflm-cpp/testdata/images/known_indexed/cpp_process.in
 ```
+
+If configuring `mosflm-cpp` directly, build CBFlib first: `make -C cbf`.
 
 Top-level CMake (`-S .`) adds `mosflm-cpp` when `PROCESSINGLAB_BUILD_CPP=ON`
 (default).
 
-## Legacy Autotools oracle
+## Optional Fortran oracle
 
 Requires CCP4. See [`porting.md`](porting.md) for macOS notes.
 
 ```bash
-./configure --with-ccp4-prefix=/Applications/ccp4-9
-make -C mosflm
-# Experimental C++ stills PREDICT splice:
+make fortran-oracle
+# or:
+#   ./configure --with-ccp4-prefix=/Applications/ccp4-9
+#   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm
+# Experimental C++ PREDICT splice into the oracle:
+#   cmake -S mosflm-cpp -B mosflm-cpp/build -DMOSFLM_FORTRAN_ORACLE=ON
 #   cmake --build mosflm-cpp/build --target mosflm_predict_hook
-#   make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
+#   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm
 ```
 
 ## License

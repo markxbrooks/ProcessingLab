@@ -2,17 +2,20 @@
 
 #include "mosflm/crystal/CrystalMetadata.hpp"
 #include "mosflm/crystal/MtzAdapter.hpp"
+#include "mosflm/diffraction/MeasurementBox.hpp"
 #include "mosflm/diffraction/ReflectionPredictor.hpp"
+#include "mosflm/diffraction/StandardProfile.hpp"
 #include "mosflm/diffraction/SummationIntegrator.hpp"
 #include "mosflm/geometry/OrientationMatrix.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
+#include "mosflm/refinement/PostRefinement.hpp"
 
 #include <filesystem>
 #include <vector>
 
 namespace mosflm::diffraction {
 
-/// Inputs for a pure-C++ known-indexed PROCESS (predict → sum → MTZ).
+/// Inputs for a pure-C++ known-indexed PROCESS (predict → MEAS → MTZ).
 ///
 /// ``image`` is referenced (not copied) and must outlive :meth:`ProcessPipeline::run`.
 struct ProcessRequest {
@@ -23,6 +26,19 @@ struct ProcessRequest {
     ScanRange scan;
     PredictionSettings prediction{};
     IntegrationSettings integration{};
+    /// MEAS-style measurement box / overlap / background (D2).
+    MeasurementBoxSettings measurement{};
+    /// Standard-profile (INTEG3/4) options (D3).
+    StandardProfileSettings profile{};
+    /// If true (default), use :class:`StandardProfileFitter` (MEAS + Rossmann).
+    /// If false and ``use_meas``, use :class:`MeasIntegrator` only.
+    bool use_profile{true};
+    /// If true and not ``use_profile``, use :class:`MeasIntegrator`.
+    bool use_meas{true};
+    /// Stage 2 post-refinement (D4). Off by default until oracle gates pass
+    /// for the calling workflow; see CTest ``insulin_postref``.
+    bool enable_postrefinement{false};
+    refinement::PostRefinementSettings postrefinement{};
     const image::DiffractionImage& image;
 };
 
@@ -30,7 +46,12 @@ struct ProcessRequest {
 struct ProcessResult {
     std::vector<PredictedReflection> predictions;
     std::vector<IntegratedReflection> integrated;
+    std::vector<MeasObservation> meas_observations;
+    std::vector<ProfileObservation> profile_observations;
     std::vector<crystal::SimpleReflection> mtz_reflections;
+    std::size_t n_overlapped{0};
+    std::size_t n_profile_ok{0};
+    refinement::PostRefinementResult postrefinement{};
 };
 
 /// Own the known-indexed pipeline without Fortran GENERATE / REEK / PROCESS.

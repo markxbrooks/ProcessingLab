@@ -65,11 +65,10 @@ Orientation: `UB_cpp = mosflm_lab_to_cpp() * AMAT`. Detector: `XG↔y_mm`,
 
 ## Limits vs full REEK
 
-C++ path is fine-sliced Ewald prediction with mosaic shell width and systematic
-absences. Still missing: beam divergence, ice rings, full ROTMAT2 detector
-normal (TILT/TWIST fields exist; first-order coupling does not yet beat flat
-on insulin XDET). Expect residual PROCESS differences until those are ported
-(Phase D).
+C++ path is fine-sliced Ewald prediction with mosaic shell width, systematic
+absences, beam divergence / ice rings (REEK E0), and ``ROTMAT2`` TILT/TWIST
+(``DetectorGeometry::use_rotmat2``). Insulin XDET median ~23 px with refined
+fiducials; further closure needs POSTREFL orientation.
 
 ## Verification
 

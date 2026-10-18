@@ -6,6 +6,10 @@ const gemmi::SpaceGroup* SpaceGroupInfo::find_by_name(const char* name) {
     return gemmi::find_spacegroup_by_name(name);
 }
 
+const gemmi::SpaceGroup* SpaceGroupInfo::find_by_number(int number) {
+    return gemmi::find_spacegroup_by_number(number);
+}
+
 std::string SpaceGroupInfo::hall(const gemmi::SpaceGroup* sg) {
     if (sg == nullptr) {
         return {};

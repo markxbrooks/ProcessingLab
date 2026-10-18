@@ -1,6 +1,8 @@
 #include "mosflm/geometry/DetectorGeometry.hpp"
 #include "test_util.hpp"
 
+#include <cmath>
+
 using mosflm::DetectorGeometry;
 
 int main() {
@@ -51,12 +53,40 @@ int main() {
     CHECK_CLOSE(xf, 200.0, 1e-12);
     CHECK_CLOSE(yf, 100.0, 1e-12);
 
-    // First-order TWIST couples YG into XG (→ C++ y_mm).
+    // Old MMTOPX: TWIST scales YG via DXTOF = XTOFRA + TWIST*Y (Y in 10 µm).
+    // Ray → xg=0, yg=100; ITWIST=1000 → DXTOF = 1 + 1000*DTOR/(10000*100)*10000.
     det.yscale = 1.0;
-    det.twist_mrad = 1000.0;  // 1 rad
+    det.twist_mrad = 1000.0;
+    CHECK((det.lab_to_detector_mm({0.5, 0.0, 0.5}, x, y)));
+    {
+        constexpr double kDtor = 0.0174532925;
+        const double fdist = kDtor / (100.0 * 100.0 * 100.0);
+        const double dxtof = 1.0 + 1000.0 * fdist * 10000.0;
+        CHECK_CLOSE(x, dxtof * 100.0, 1e-9);
+        CHECK_CLOSE(y, 0.0, 1e-9);
+    }
+
+    // ROTMAT2 flat normal.
+    {
+        const Eigen::Vector3d n = mosflm::rotmat2_detnor(0.0, 0.0);
+        CHECK_CLOSE(n.x(), 0.0, 1e-15);
+        CHECK_CLOSE(n.y(), 0.0, 1e-15);
+        CHECK_CLOSE(n.z(), 1.0, 1e-15);
+    }
+
+    // NEWT path with zero tilt matches flat (xtofra=1).
+    det.twist_mrad = 0.0;
+    det.use_rotmat2 = true;
     CHECK((det.lab_to_detector_mm({0.5, 0.0, 0.5}, x, y)));
     CHECK_CLOSE(x, 100.0, 1e-9);
-    CHECK_CLOSE(y, 100.0, 1e-9);
+    CHECK_CLOSE(y, 0.0, 1e-9);
+
+    // XTOFRA scales ideal mm.
+    det.use_rotmat2 = false;
+    det.xtofra = 1.1;
+    CHECK((det.lab_to_detector_mm({0.5, 0.0, 0.5}, x, y)));
+    CHECK_CLOSE(x, 110.0, 1e-9);
+    CHECK_CLOSE(y, 0.0, 1e-9);
 
     return mosflm_test::finish("detector");
 }

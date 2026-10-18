@@ -5,12 +5,54 @@ namespace mosflm::diffraction {
 ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
     ProcessResult out;
 
+    crystal::CrystalMetadata crystal = request.crystal;
+    OrientationMatrix orientation = request.orientation;
+    PredictionSettings prediction = request.prediction;
+
+    if (request.enable_postrefinement) {
+        // Build φ observations from a first-pass prediction (mid φ).
+        PredictionRequest probe = {
+            crystal,
+            orientation,
+            request.detector,
+            request.scan,
+            prediction
+        };
+        const auto probe_spots =
+            ReflectionPredictor{}.predict(probe).reflections;
+        std::vector<refinement::PostRefObservation> obs;
+        obs.reserve(probe_spots.size());
+        for (const auto& s : probe_spots) {
+            refinement::PostRefObservation o;
+            o.h = s.h;
+            o.k = s.k;
+            o.l = s.l;
+            o.phi_obs_deg = 0.5 * (s.phi_begin_deg + s.phi_end_deg);
+            o.weight = s.full ? 0.5 : 1.5;
+            obs.push_back(o);
+        }
+        out.postrefinement = refinement::PostRefiner{}.refine(
+            crystal,
+            orientation,
+            request.detector.wavelength_A,
+            prediction.mosaic_spread_deg,
+            obs,
+            request.postrefinement
+        );
+        if (out.postrefinement.ok) {
+            orientation = out.postrefinement.orientation;
+            prediction.mosaic_spread_deg =
+                out.postrefinement.parameters.mosaic_spread_deg;
+            // Keep crystal metadata; isotropic scale is in orientation UB.
+        }
+    }
+
     PredictionRequest pred_req;
-    pred_req.crystal = request.crystal;
-    pred_req.orientation = request.orientation;
+    pred_req.crystal = crystal;
+    pred_req.orientation = orientation;
     pred_req.detector = request.detector;
     pred_req.scan = request.scan;
-    pred_req.settings = request.prediction;
+    pred_req.settings = prediction;
     out.predictions = ReflectionPredictor{}.predict(pred_req).reflections;
 
     IntegrationRequest ireq{
@@ -19,7 +61,37 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         out.predictions,
         request.integration
     };
-    out.integrated = SummationIntegrator{}.integrate(ireq);
+
+    if (request.use_profile) {
+        StandardProfileSettings ps = request.profile;
+        // Keep box settings in sync with ProcessRequest::measurement.
+        ps.box = request.measurement;
+        out.profile_observations = StandardProfileFitter{}.fit(ireq, ps);
+        out.integrated.reserve(out.profile_observations.size());
+        out.meas_observations.reserve(out.profile_observations.size());
+        for (const auto& p : out.profile_observations) {
+            if (p.overlapped) {
+                ++out.n_overlapped;
+            }
+            if (p.profile_ok) {
+                ++out.n_profile_ok;
+            }
+            out.meas_observations.push_back(p);
+            out.integrated.push_back(p);
+        }
+    } else if (request.use_meas) {
+        out.meas_observations =
+            MeasIntegrator{}.integrate(ireq, request.measurement);
+        out.integrated.reserve(out.meas_observations.size());
+        for (const auto& m : out.meas_observations) {
+            if (m.overlapped) {
+                ++out.n_overlapped;
+            }
+            out.integrated.push_back(m);
+        }
+    } else {
+        out.integrated = SummationIntegrator{}.integrate(ireq);
+    }
 
     out.mtz_reflections.reserve(out.integrated.size());
     for (const auto& r : out.integrated) {
@@ -50,7 +122,6 @@ ProcessRequest ProcessPipeline::known_indexed_insulin(
         0.001492, -0.011185, -0.005426;
 
     DetectorGeometry det = image.metadata.to_detector_geometry();
-    // Predictor uses beam-relative mm.
     det.beam_x_mm = 0.0;
     det.beam_y_mm = 0.0;
     if (det.distance_mm <= 0.0) {
@@ -88,6 +159,28 @@ ProcessRequest ProcessPipeline::known_indexed_insulin(
     integration.image_beam_x_mm = image.metadata.beam_x_mm;
     integration.image_beam_y_mm = image.metadata.beam_y_mm;
 
+    MeasurementBoxSettings measurement;
+    measurement.separation_x_mm = 0.57;
+    measurement.separation_y_mm = 0.57;
+    measurement.bg_rim_px = 2;
+    measurement.bg_reject_nsigma = 3.0;
+    measurement.mark_overlaps = true;
+    measurement.integrate_overlaps = true;
+
+    StandardProfileSettings profile;
+    profile.box = measurement;
+    profile.learn_min_isigi = 5.0;
+    profile.min_learners = 8;
+    profile.fallback_sigma_px = 1.5;
+    profile.prefer_profile = true;
+    // MOSFLM default above 2.5 Å: 25 standard profiles (5×5 tiling).
+    profile.n_bins_x = 5;
+    profile.n_bins_y = 5;
+
+    refinement::PostRefinementSettings postref;
+    // Opt-in only — CTest insulin_postref exercises the kernel directly.
+    const bool enable_postref = false;
+
     return ProcessRequest{
         crystal::CrystalMetadata::from_parameters(
             78.190, 78.190, 78.190, 90.0, 90.0, 90.0, "I 2 3"
@@ -97,6 +190,12 @@ ProcessRequest ProcessPipeline::known_indexed_insulin(
         scan,
         prediction,
         integration,
+        measurement,
+        profile,
+        true,
+        true,
+        enable_postref,
+        postref,
         image
     };
 }

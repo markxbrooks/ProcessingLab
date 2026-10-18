@@ -1360,9 +1360,11 @@ int  gen_direct_lattice_vectors(int max_tvectors, int numvectref,
        in the refinement recursion. For this purpose we
        have to recalculate the directions and do the FFT. */
     get_projections_unsorted(xyz, *number_xyz, work_vector, proj);
-    /* In this stage, use the more robust peakmode=1 algorithm to find first maximum in FFT */
-    /* Dumping FFTs to a file is usually done here, controlled by final argument */
-    peakmode=1;
+    /* MOSFLM uses peakmode=1 (findlen_) here; that path is rejecting all
+       vectors (d_exp==0) when called from mosflm-cpp AutoIndexer on the
+       insulin oracle .spt even though peakmode=0 already found ~78Å cells.
+       Keep peakmode=0 for the final FFT peak pick until findlen parity is fixed. */
+    peakmode=0;
     get_fitting(5.0f, 1.0f, xyz, *number_xyz, d_max,d_min, &work_vector, proj, &d_exp,
 		&n_fit, peakmode, npkfftmin, nmultfft, dumpfft[2]);
 

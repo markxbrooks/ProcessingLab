@@ -1,10 +1,8 @@
 /**
  * Known-indexed XDET/YDET: C++ PREDICT vs insulin MTZ pixel coordinates.
  *
- * Matches on exact HKL. Uses flat detector + input BEAM; YSCALE enters as
- * slow-axis pixel aspect in ``cpp_mm_to_mosflm_xdet``. TILT/TWIST fields are
- * wired on DetectorGeometry but first-order coupling does not yet beat flat
- * on this frame (full ROTMAT2 still ahead).
+ * Matches on exact HKL. Applies MOSFLM ``ROTMAT2`` detector normal with
+ * refined TILT/TWIST/YSCALE/XCEN/YCEN from the oracle PROCESS log.
  */
 
 #include "mosflm/crystal/CrystalMetadata.hpp"
@@ -84,9 +82,10 @@ PredictionRequest insulin_request() {
     req.detector.nfast = 2304;
     req.detector.nslow = 2304;
     req.detector.wavelength_A = 0.9790;
-    req.detector.yscale = 1.0;
-    req.detector.tilt_mrad = 0.0;
-    req.detector.twist_mrad = 0.0;
+    req.detector.yscale = 0.9921;
+    req.detector.tilt_mrad = -83.0;
+    req.detector.twist_mrad = -140.0;
+    req.detector.use_rotmat2 = true;
     req.scan.phi_start_deg = 0.0;
     req.scan.phi_end_deg = 1.0;
     req.settings.dmin_A = 1.45;
@@ -106,7 +105,8 @@ int main() {
     const auto refs = read_mtz_xdet(mtz);
     CHECK_MSG(refs.size() > 100, "MTZ too small");
 
-    const auto spots = ReflectionPredictor{}.predict(insulin_request()).reflections;
+    const auto req = insulin_request();
+    const auto spots = ReflectionPredictor{}.predict(req).reflections;
     std::map<Hkl, std::pair<double, double>> pred_mm;
     for (const auto& s : spots) {
         const Hkl key{s.h, s.k, s.l};
@@ -115,14 +115,10 @@ int main() {
         }
     }
 
-    // Input BEAM from capture geometry (refined XCEN/YCEN alone does not beat
-    // this until ROTMAT2 TILT/TWIST is ported).
-    constexpr double kBeamXmm = 94.0;
-    constexpr double kBeamYmm = 94.7;
+    constexpr double kBeamXmm = 94.07;
+    constexpr double kBeamYmm = 95.22;
     constexpr double kPixel = 0.0816;
-    // Refined YSCALE from ipmosflm.log → slow-axis pixel pitch.
-    constexpr double kYscale = 0.9921;
-    const double pixel_y = kPixel / kYscale;
+    const double pixel_y = kPixel / req.detector.yscale;
 
     std::vector<double> residuals;
     residuals.reserve(refs.size());
@@ -170,10 +166,10 @@ int main() {
               << " inlier<100frac=" << inlier_frac
               << " inlier_rms_px=" << inlier_rms << '\n';
 
-    // Soft gates with YSCALE pixel aspect; TILT/TWIST ROTMAT2 still ahead.
-    CHECK_MSG(median < 45.0, "median XDET residual above 45 px");
+    // ROTMAT2 + refined TILT/TWIST (was ~40 px flat).
+    CHECK_MSG(median < 30.0, "median XDET residual above 30 px");
     CHECK_MSG(inlier_frac > 0.70, "inlier fraction below 0.70");
-    CHECK_MSG(inlier_rms < 45.0, "inlier RMS above 45 px");
+    CHECK_MSG(inlier_rms < 35.0, "inlier RMS above 35 px");
 
     return mosflm_test::finish("insulin_xdet");
 }

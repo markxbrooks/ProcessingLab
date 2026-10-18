@@ -36,6 +36,23 @@ bool on_detector(const DetectorGeometry& det, double x_mm, double y_mm) {
            std::fabs(yf) < 0.5 * static_cast<double>(det.nslow);
 }
 
+/// MOSFLM DPSCHOOSE / REEK ice-ring resolution bands (Å), high→low inclusive.
+bool in_ice_ring_shell(double d_A) {
+    static constexpr double kBands[][2] = {
+        {3.940, 3.860}, {3.705, 3.635}, {3.465, 3.415}, {2.690, 2.650},
+        {2.265, 2.235}, {2.090, 2.070}, {1.960, 1.940}, {1.925, 1.915},
+        {1.895, 1.885}, {1.730, 1.720}, {1.532, 1.522}, {1.480, 1.470},
+        {1.450, 1.440}, {1.380, 1.365}, {1.305, 1.298}, {1.267, 1.260},
+        {1.228, 1.222}, {1.175, 1.170}, {1.128, 1.124},
+    };
+    for (const auto& b : kBands) {
+        if (d_A <= b[0] && d_A >= b[1]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 struct EvalPhi {
     bool ok{false};
     double x_mm{0.0};
@@ -127,12 +144,16 @@ PredictionResult ReflectionPredictor::predict(
                            request.scan.phi_end_deg - request.scan.phi_start_deg
                        ) < 1e-12;
 
-    // Mosaic spread widens the Ewald shell (Å⁻¹ ≈ mosaic_rad / λ).
-    const double mosaic_rad =
-        request.settings.mosaic_spread_deg * (3.14159265358979323846 / 180.0);
-    const double mosaic_tol = mosaic_rad * inv_lambda;
+    // Mosaic + beam divergence widen the Ewald shell (Å⁻¹ ≈ angle_rad / λ).
+    // MOSFLM REEK combines η with DIVH/DIVV; E0 uses isotropic max(DIVH,DIVV).
+    constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
+    const double mosaic_rad = request.settings.mosaic_spread_deg * kDeg2Rad;
+    const double div_rad =
+        std::max(request.settings.divh_deg, request.settings.divv_deg) *
+        kDeg2Rad;
+    const double angle_tol = (mosaic_rad + div_rad) * inv_lambda;
     const double ewald_tol = std::max(
-        request.settings.ewald_tolerance_Ainv, mosaic_tol
+        request.settings.ewald_tolerance_Ainv, angle_tol
     );
 
     gemmi::GroupOps gops;
@@ -177,7 +198,12 @@ PredictionResult ReflectionPredictor::predict(
                     gops.is_systematically_absent({h, k, l})) {
                     continue;
                 }
-                if (recip.d_spacing(h, k, l) < request.settings.dmin_A) {
+                const double d_A = recip.d_spacing(h, k, l);
+                if (d_A < request.settings.dmin_A) {
+                    continue;
+                }
+                if (request.settings.exclude_ice_rings &&
+                    in_ice_ring_shell(d_A)) {
                     continue;
                 }
                 const Eigen::Vector3d q0 = UB * Eigen::Vector3d(h, k, l);

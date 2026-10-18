@@ -1,8 +1,8 @@
 # Porting ProcessingLab (MOSFLM) to C++: a practical roadmap
 
-**Repository:** ProcessingLab (formerly `ipmosflm`). The Autotools binary remains
-named `ipmosflm` for CCP4 keyword compatibility; the C++ port lives in
-`mosflm-cpp/`.
+**Repository:** ProcessingLab (formerly `ipmosflm`). Default `bin/ipmosflm` is the
+thin C++ CONTROL driver (Phase D / D6); the Autotools amalgamation is an optional
+oracle (`make fortran-oracle`). The C++ port lives in `mosflm-cpp/`.
 
 I would approach this as a progressive reimplementation of MOSFLM's computational core, with a C++ interface and a compatibility layer around the existing crystallographic algorithms—not as a line-by-line translation of the entire repository.
 
@@ -17,10 +17,12 @@ Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there 
 | Topic | Status |
 | ----- | ------ |
 | C++ vertical slice | Geometry, miniCBF I/O, stills + oscillation `PREDICT`, box summation, 2D Gaussian profile fit, MTZ write — covered by CTest and `mosflm_cpp_cli` |
-| PREDICT oracles | Analytical dumps + real insulin capture under `mosflm-cpp/testdata/oracle/known_indexed/`. CTest `insulin_hkl_overlap`: ASU-aware recall **100%** (`mosflm_lab_to_cpp`); `insulin_xdet`: median ~**40 px** (`XG↔y_mm`, `YG↔x_mm`, YSCALE pixel aspect); `insulin_process_mtz`: exact-HKL recall ≥ 0.85 |
-| Legacy `bin/ipmosflm` | Autotools binary; `MOSFLM_CPP_PREDICT=1` splices GENERATE+REFLFIND through C++ osc PREDICT (AMAT lab map). Insulin PROCESS MTZ vs Fortran oracle exact-HKL recall **~89%** (`testdata/oracle/known_indexed_cpp_predict/`) |
+| PREDICT oracles | Analytical dumps + real insulin capture under `mosflm-cpp/testdata/oracle/known_indexed/`. CTest `insulin_hkl_overlap`: ASU-aware recall **100%** (`mosflm_lab_to_cpp`); `insulin_xdet`: median ~**23 px** (`ROTMAT2` + refined TILT/TWIST/YSCALE); `insulin_process_mtz`: exact-HKL recall ≥ 0.85 |
+| Default `bin/ipmosflm` | **Thin C++** CONTROL → PROCESS (D6); no amalgamation link. Oracle Autotools: `make fortran-oracle` / `MOSFLM_FORTRAN_ORACLE=1`; optional `MOSFLM_CPP_PREDICT=1` splice ~89% exact-HKL (`known_indexed_cpp_predict/`) |
 | Phase C | **Done** — lab-frame map, HKL/XDET differentials, mosaicity + absences in predictor, YSCALE/TILT/TWIST fields, PROCESS splice + MTZ CTest |
 | Phase D / D1 | **Done** — pure C++ `ProcessPipeline` (SMV → predict → sum → MTZ); CTest `insulin_cpp_process` ASU recall ≥ 0.85 (no amalgamation hook) |
+| Phase D / D2 | **Done** — `MeasIntegrator` (SEPARATION boxes, overlap, bg sigma-clip); CTest `insulin_isi` soft I/SIGI vs oracle; no Fortran MEAS |
+| Phase D / D3 | **Done** — `StandardProfileFitter` (learned Rossmann profile); CTest `insulin_profile`; INTEG3 row = parity (global; not NMASKS) |
 
 Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-languages). Package layout and CLI: [`mosflm-cpp/README.md`](mosflm-cpp/README.md).
 
@@ -46,9 +48,11 @@ Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-language
 | `CLCALC` | `mosflm_all_ip_inc_noX.f` | 23322 | `cell_from_metric_tensor` |
 | `MATSET` | `mosflm_all_ip_inc_noX.f` | 117930 | Thin `matset` (no COMMON derivatives) |
 | `INTEG` / `INTEG2` | `unoptimizable.f` | 22256 / 20799 | Box summation integrator |
-| `INTEG3` | `mosflm_all_ip_inc_noX.f` | 97457 | Gaussian `ProfileFitter` stand-in (not full parity) |
-| `MEAS` | `mosflm_all_ip_inc_noX.f` | 119120 | Not ported |
-| `PROCESS` | `unoptimizable.f` | 25854 | Not ported |
+| `INTEG3` | `mosflm_all_ip_inc_noX.f` | 97457 | **Parity (global profile)** — `StandardProfileFitter` (Rossmann); Gaussian `ProfileFitter` kept for smoke tests |
+| `MEAS` | `mosflm_all_ip_inc_noX.f` | 119120 | `MeasIntegrator` (SEPARATION boxes / overlap / bg clip; not full stripe buffer) |
+| `PROCESS` | `unoptimizable.f` | 25854 | `ProcessPipeline` (predict → profile → MTZ; optional `PostRefiner`) |
+| `POSTREFL` | amalgamation | ~168264 | **Stage 2** — `PostRefiner` (misset + cell scale + mosaic from φ; off by default in PROCESS) |
+| `CONTROL` | `control.f` / amalgamation | — | **D5 subset** — `ControlSession` (CELL…EXIT → PROCESS); CLI `run` |
 | `METRIC` / `INVCEL` | `torefix_noX.f` | 182 / 130 | `UnitCell` (+ differential test) |
 
 Modular C oracles (good early differential targets): `src/dps/util/vector_math.c`, `cryst_matrix.c`, `mat_inversion.c`.
@@ -122,7 +126,7 @@ MOSFLM's documented workflow has three major stages:
 
 **Stage 1 — Autoindexing** — lattice, unit cell, orientation from spots.
 
-**Stage 2 — Post-refinement** — cell, orientation, mosaic spread from partials.
+**Stage 2 — Post-refinement** — **Done** — `PostRefiner` (cell scale, missetting, mosaic from φ residuals); CTests `post_refinement`, `insulin_postref` (not default-on in PROCESS).
 
 **Stage 3 — Integration** — predict, measure intensities, write reflections.
 
@@ -137,15 +141,15 @@ Staged migration with **current status**:
 | Phase | Intent | Status (Oct 2026) |
 | ----- | ------ | ----------------- |
 | **A** | Hybrid CMake build; narrow Fortran/C++ adapters | **Done** — `mosflm_geometry`, `LegacyMosflmAdapter` (CELL(6), predict, summation, profile), optional `mosflm_indexing` |
-| **B** | Replace isolated kernels; keep Fortran as oracle | **Done** (advanced) — geometry, Gemmi crystal, miniCBF, stills+osc `PREDICT`, summation + profile fit, MTZ, Bravais façade. Domain API: `PredictionRequest` / `IntegrationRequest` (`mosflm-cpp/docs/DOMAIN_API.md`). Post-refinement remains Phase D |
-| **C** | Switch implementation behind interfaces after differential tests pass | **Done** — `MOSFLM_CPP_PREDICT` splices GENERATE + REFLFIND; insulin PROCESS ~89% exact-HKL recall; CTests `insulin_hkl_overlap` / `insulin_xdet` / `insulin_process_mtz`. Full ROTMAT2 detector normal + REEK divergence still Phase D (`docs/PHASE_C_SPLICE.md`) |
-| **D** | Retire Fortran only when all callers migrated | **Not started** |
+| **B** | Replace isolated kernels; keep Fortran as oracle | **Done** (advanced) — geometry, Gemmi crystal, miniCBF, stills+osc `PREDICT`, summation + profile fit, MTZ, Bravais façade, Stage 2 `PostRefiner`. Domain API: `docs/DOMAIN_API.md` |
+| **C** | Switch implementation behind interfaces after differential tests pass | **Done** — `MOSFLM_CPP_PREDICT` splices GENERATE + REFLFIND; insulin PROCESS ~89% exact-HKL recall; CTests `insulin_hkl_overlap` / `insulin_xdet` / `insulin_process_mtz`. REEK divergence + ``ROTMAT2`` are in Phase D (`docs/PHASE_C_SPLICE.md`) |
+| **D** | Retire Fortran only when all callers migrated | **Done** — D0–D6; default release is C++ core + thin `ipmosflm`; amalgamation opt-in oracle |
 
 Keep COMMON blocks, column-major layout, and mangling inside `include/mosflm/legacy/`.
 
 ## 4. Design the C++ domain model before porting algorithms
 
-Layout under `mosflm-cpp/` (populated): `geometry`, `diffraction`, `crystal`, `image`, `indexing`, `legacy`; CMake + CTest; Eigen + Gemmi via FetchContent. A `refinement/` tree is **deferred** (Stage 2). Optional CCTBX remains a standalone evaluator (`docs/CCTBX_EVAL.md`), not a hard dependency.
+Layout under `mosflm-cpp/` (populated): `geometry`, `diffraction`, `crystal`, `image`, `indexing`, `refinement`, `control`, `legacy`; CMake + CTest; Eigen + Gemmi via FetchContent. Optional CCTBX remains a standalone evaluator (`docs/CCTBX_EVAL.md`), not a hard dependency.
 
 ## 5. Build a vertical slice, not a collection of translated functions
 
@@ -154,7 +158,7 @@ Layout under `mosflm-cpp/` (populated): `geometry`, `diffraction`, `crystal`, `i
 | 1 | Read diffraction image + metadata | **Done** — `CbfImageReader` (CBFlib + miniCBF `#` comments) |
 | 2 | Experimental geometry | **Done** — `UnitCell` / `OrientationMatrix` / `DetectorGeometry` (+ Dstar, Rotmat, Clcalc, Matset) |
 | 3 | Predict reflections (`PREDICT`) | **Done** — stills + oscillation; analytical oracles; see [`FIRST_ROUTINE.md`](mosflm-cpp/docs/FIRST_ROUTINE.md) |
-| 4 | Summation integrate | **Done** — `SummationIntegrator`. Profile stand-in: **Done** — `ProfileFitter` (not full `INTEG3`) |
+| 4 | Summation integrate | **Done** — `SummationIntegrator` + `MeasIntegrator`. Profile: **Done** — `StandardProfileFitter` (INTEG3 Rossmann global profile) |
 | 5 | Write MTZ; compare with numeric tolerances | **Done** — synthetic / CBF smoke + CTest `insulin_process_mtz` (cpp_predict vs Fortran oracle, exact-HKL recall ≥ 0.85) |
 
 ## First Fortran routine to replace: `PREDICT`
@@ -177,5 +181,5 @@ Day 5: Document first legacy routine to replace (`PREDICT`).
 
 1. Real known-indexed images — **done** (`capture_ipmosflm_oracle.sh` → `testdata/oracle/known_indexed/`).
 2. **Phase C** — **Done** (D0 closed): HKL/XDET/MTZ CTests, mosaicity + absences, YSCALE pixel aspect + TILT/TWIST fields, PROCESS splice ~89% exact-HKL recall.
-3. **Phase D / D1** — **Done**: `SmvImageReader` + `ProcessPipeline` + CLI `process-insulin`; CTest `insulin_cpp_process` (ASU recall ~100%). Next: D2 MEAS boxes (see [`portingD.md`](portingD.md)).
-4. Post-refinement (Stage 2) and full `INTEG3` parity beyond the Gaussian profile stand-in.
+3. **Phase D / D1–D6** — **Done**: SMV + `ProcessPipeline` + MEAS + Rossmann profile + Stage 2 `PostRefiner` + CONTROL + thin `ipmosflm` / `make cpp`; amalgamation behind `MOSFLM_FORTRAN_ORACLE`. CTests include `insulin_control`, `ipmosflm_thin`. See [`portingD.md`](portingD.md).
+4. Out of Phase D: full AUTOINDEX/STRATEGY, REEK divergence/NADD, NMASKS, iMosflm sockets.

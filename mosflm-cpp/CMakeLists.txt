@@ -23,6 +23,11 @@ option(MOSFLM_WITH_FORTRAN
     ON
 )
 
+option(MOSFLM_FORTRAN_ORACLE
+    "Build mosflm_predict_hook for Autotools amalgamation splice (opt-in; D6)"
+    OFF
+)
+
 # Phase C: Fortran → C ABI smoke (optional if no Fortran compiler).
 set(MOSFLM_HAS_FORTRAN OFF)
 if(MOSFLM_WITH_FORTRAN)
@@ -89,16 +94,22 @@ if(NOT EXISTS "${MOSFLM_CBF_LIB}")
     message(FATAL_ERROR "CBFlib not found at ${MOSFLM_CBF_LIB}")
 endif()
 
-# Prebuilt DPS Bravais (Cambridge 5-arg API).
+# Prebuilt DPS (Cambridge Bravais + FFT indexer).
 set(MOSFLM_DPS_INDEX_LIB "${MOSFLM_IPMOSFLM_ROOT}/lib/dps_index.a")
 set(MOSFLM_DPS_UTIL_LIB "${MOSFLM_IPMOSFLM_ROOT}/lib/libdps.a")
+set(MOSFLM_DPS_INDEXER_LIB "${MOSFLM_IPMOSFLM_ROOT}/lib/libdps_index.a")
+set(MOSFLM_DPS_FFTPACK_LIB "${MOSFLM_IPMOSFLM_ROOT}/lib/libfftpack.a")
 if(NOT EXISTS "${MOSFLM_DPS_INDEX_LIB}" OR NOT EXISTS "${MOSFLM_DPS_UTIL_LIB}")
     message(WARNING
         "DPS libraries missing (${MOSFLM_DPS_INDEX_LIB}); "
-        "BravaisClassifier tests will be skipped until index/ is built")
+        "BravaisClassifier / AutoIndexer tests skipped until index/ is built")
     set(MOSFLM_HAS_DPS_BRAVAIS OFF)
 else()
     set(MOSFLM_HAS_DPS_BRAVAIS ON)
+endif()
+set(MOSFLM_HAS_DPS_INDEXER OFF)
+if(MOSFLM_HAS_DPS_BRAVAIS AND EXISTS "${MOSFLM_DPS_INDEXER_LIB}")
+    set(MOSFLM_HAS_DPS_INDEXER ON)
 endif()
 
 add_library(mosflm_geometry
@@ -123,8 +134,12 @@ add_library(mosflm_geometry
     src/diffraction/ReflectionPredictor.cpp
     src/diffraction/SummationIntegrator.cpp
     src/diffraction/ProcessPipeline.cpp
+    src/diffraction/MeasurementBox.cpp
+    src/diffraction/StandardProfile.cpp
     src/diffraction/ProfileFitter.cpp
     src/diffraction/LpCorrection.cpp
+    src/refinement/PostRefinement.cpp
+    src/control/ControlSession.cpp
     ${gemmi_SOURCE_DIR}/src/mtz.cpp
     ${gemmi_SOURCE_DIR}/src/sprintf.cpp
     ${gemmi_SOURCE_DIR}/src/gz.cpp
@@ -153,9 +168,14 @@ target_compile_definitions(mosflm_geometry
 )
 
 if(MOSFLM_HAS_DPS_BRAVAIS)
-    add_library(mosflm_indexing
+    set(MOSFLM_INDEXING_SOURCES
         src/indexing/BravaisClassifier.cpp
+        src/indexing/SpotList.cpp
     )
+    if(MOSFLM_HAS_DPS_INDEXER)
+        list(APPEND MOSFLM_INDEXING_SOURCES src/indexing/AutoIndexer.cpp)
+    endif()
+    add_library(mosflm_indexing ${MOSFLM_INDEXING_SOURCES})
     target_include_directories(mosflm_indexing
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -163,6 +183,8 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             ${MOSFLM_IPMOSFLM_ROOT}/util
             ${MOSFLM_IPMOSFLM_ROOT}/index
             ${MOSFLM_IPMOSFLM_ROOT}/include
+            ${MOSFLM_IPMOSFLM_ROOT}/src/dps/index
+            ${MOSFLM_IPMOSFLM_ROOT}/src/dps/util
     )
     target_link_libraries(mosflm_indexing
         PUBLIC
@@ -172,6 +194,31 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             ${MOSFLM_DPS_UTIL_LIB}
             m
     )
+    if(MOSFLM_HAS_DPS_INDEXER)
+        target_link_libraries(mosflm_indexing PRIVATE
+            ${MOSFLM_DPS_INDEXER_LIB}
+        )
+        if(EXISTS "${MOSFLM_DPS_FFTPACK_LIB}")
+            target_link_libraries(mosflm_indexing PRIVATE
+                ${MOSFLM_DPS_FFTPACK_LIB}
+            )
+        endif()
+        # findlen.f is required by ind_gen_direct but not in libdps_index.a.
+        set(MOSFLM_FINDLEN_F "${MOSFLM_IPMOSFLM_ROOT}/src/dps/index/findlen.f")
+        if(MOSFLM_HAS_FORTRAN AND EXISTS "${MOSFLM_FINDLEN_F}")
+            target_sources(mosflm_indexing PRIVATE ${MOSFLM_FINDLEN_F})
+            set_source_files_properties(${MOSFLM_FINDLEN_F}
+                PROPERTIES Fortran_FORMAT FIXED
+            )
+            if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+                target_link_libraries(mosflm_indexing PRIVATE gfortran)
+            endif()
+        else()
+            message(WARNING
+                "AutoIndexer needs findlen.f + Fortran compiler; "
+                "insulin_autoindex may fail to link")
+        endif()
+    endif()
 endif()
 
 add_executable(mosflm_cpp_cli
@@ -181,6 +228,26 @@ add_executable(mosflm_cpp_cli
 target_link_libraries(mosflm_cpp_cli
     PRIVATE
         mosflm_geometry
+)
+
+# Thin CCP4-compatible name (default release binary; no amalgamation).
+add_executable(ipmosflm
+    app/ipmosflm_main.cpp
+)
+target_link_libraries(ipmosflm
+    PRIVATE
+        mosflm_geometry
+)
+set_target_properties(ipmosflm PROPERTIES
+    OUTPUT_NAME ipmosflm
+)
+
+install(TARGETS mosflm_cpp_cli ipmosflm
+    RUNTIME DESTINATION bin
+)
+install(TARGETS mosflm_geometry
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
 )
 
 if(MOSFLM_WITH_CCTBX)
@@ -256,6 +323,39 @@ if(BUILD_TESTING)
     add_test(
         NAME smv_image_reader
         COMMAND test_smv_image_reader
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_measurement_box
+        tests/unit/test_measurement_box.cpp
+    )
+    target_link_libraries(test_measurement_box PRIVATE mosflm_geometry)
+    add_test(NAME measurement_box COMMAND test_measurement_box)
+
+    add_executable(test_standard_profile
+        tests/unit/test_standard_profile.cpp
+    )
+    target_link_libraries(test_standard_profile PRIVATE mosflm_geometry)
+    add_test(NAME standard_profile COMMAND test_standard_profile)
+
+    add_executable(test_post_refinement
+        tests/unit/test_post_refinement.cpp
+    )
+    target_link_libraries(test_post_refinement PRIVATE mosflm_geometry)
+    add_test(NAME post_refinement COMMAND test_post_refinement)
+    add_executable(test_prediction_divergence
+        tests/unit/test_prediction_divergence.cpp
+    )
+    target_link_libraries(test_prediction_divergence PRIVATE mosflm_geometry)
+    add_test(NAME prediction_divergence COMMAND test_prediction_divergence)
+
+    add_executable(test_control_session
+        tests/unit/test_control_session.cpp
+    )
+    target_link_libraries(test_control_session PRIVATE mosflm_geometry)
+    add_test(
+        NAME control_session
+        COMMAND test_control_session
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_tests_properties(cbf_image_reader PROPERTIES
@@ -491,8 +591,11 @@ if(BUILD_TESTING)
         add_test(NAME predict_cpp_from_common COMMAND test_predict_cpp_from_common)
     endif()
 
-    if(MOSFLM_HAS_FORTRAN)
-        # Static archive for Autotools ``make MOSFLM_CPP_PREDICT=1 ipmosflm``.
+    # Amalgamation splice library — opt-in (Phase D / D6). Default builds do
+    # not produce artifacts that link mosflm_all_ip_inc_noX.o.
+    if(MOSFLM_HAS_FORTRAN AND MOSFLM_FORTRAN_ORACLE)
+        # Static archive for Autotools
+        # ``make MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm``.
         add_library(mosflm_predict_hook STATIC
             fortran/predict_cpp_bridge.f90
             fortran/predict_gendata_pack.f90
@@ -504,6 +607,11 @@ if(BUILD_TESTING)
             Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_hook_lib_mods
             POSITION_INDEPENDENT_CODE ON
         )
+        message(STATUS "MOSFLM_FORTRAN_ORACLE=ON: building mosflm_predict_hook")
+    elseif(MOSFLM_FORTRAN_ORACLE AND NOT MOSFLM_HAS_FORTRAN)
+        message(WARNING
+            "MOSFLM_FORTRAN_ORACLE=ON but no Fortran compiler; "
+            "skipping mosflm_predict_hook")
     endif()
 
     add_executable(test_known_indexed_oracle
@@ -556,11 +664,87 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
+    add_executable(test_insulin_isi
+        tests/differential/test_insulin_isi.cpp
+    )
+    target_link_libraries(test_insulin_isi PRIVATE mosflm_geometry)
+    add_test(
+        NAME insulin_isi
+        COMMAND test_insulin_isi
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_insulin_profile
+        tests/differential/test_insulin_profile.cpp
+    )
+    target_link_libraries(test_insulin_profile PRIVATE mosflm_geometry)
+    add_test(
+        NAME insulin_profile
+        COMMAND test_insulin_profile
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_insulin_postref
+        tests/differential/test_insulin_postref.cpp
+    )
+    target_link_libraries(test_insulin_postref PRIVATE mosflm_geometry)
+    add_test(
+        NAME insulin_postref
+        COMMAND test_insulin_postref
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_insulin_control
+        tests/differential/test_insulin_control.cpp
+    )
+    target_link_libraries(test_insulin_control PRIVATE mosflm_geometry)
+    add_test(
+        NAME insulin_control
+        COMMAND test_insulin_control
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_ipmosflm_thin
+        tests/differential/test_ipmosflm_thin.cpp
+    )
+    add_dependencies(test_ipmosflm_thin ipmosflm)
+    add_test(
+        NAME ipmosflm_thin
+        COMMAND test_ipmosflm_thin
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(ipmosflm_thin PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_THIN_IPMOSFLM=${CMAKE_CURRENT_BINARY_DIR}/ipmosflm"
+    )
+
     if(MOSFLM_HAS_DPS_BRAVAIS)
         add_executable(test_bravais_classifier
             tests/differential/test_bravais_classifier.cpp
         )
         target_link_libraries(test_bravais_classifier PRIVATE mosflm_indexing)
         add_test(NAME bravais_classifier COMMAND test_bravais_classifier)
+
+        add_executable(test_spot_list
+            tests/unit/test_spot_list.cpp
+        )
+        target_link_libraries(test_spot_list PRIVATE mosflm_indexing)
+        add_test(
+            NAME spot_list
+            COMMAND test_spot_list
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endif()
+
+    if(MOSFLM_HAS_DPS_INDEXER)
+        add_executable(test_insulin_autoindex
+            tests/differential/test_insulin_autoindex.cpp
+        )
+        target_link_libraries(test_insulin_autoindex PRIVATE mosflm_indexing)
+        add_test(
+            NAME insulin_autoindex
+            COMMAND test_insulin_autoindex
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
     endif()
 endif()

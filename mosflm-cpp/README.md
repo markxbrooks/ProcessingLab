@@ -3,13 +3,13 @@
 C++ computational core for **ProcessingLab** (MOSFLM port). See
 [`../porting.md`](../porting.md) for strategy and legacy build notes.
 
-**Status (Phase D / D1 Done):** geometry + Gemmi crystal + miniCBF + **SMV** I/O
-+ DPS Bravais façade + stills/oscillation `PREDICT` (mosaicity / absences) +
-box summation + **2D Gaussian profile fit** + LP correction + C ABI + MTZ write
-+ amalgamation `MOSFLM_CPP_PREDICT` hook + pure-C++ `ProcessPipeline`
-(`process-insulin`). Known-indexed CTests: `insulin_hkl_overlap`,
-`insulin_xdet`, `insulin_process_mtz`, `insulin_cpp_process`. Next: D2 MEAS
-(`../portingD.md`).
+**Status (Phase D Done / D6):** geometry + Gemmi crystal + miniCBF + **SMV** I/O
++ DPS Bravais façade + stills/oscillation `PREDICT` + **MEAS** boxes +
+**Rossmann standard-profile** + Stage 2 **`PostRefiner`** + CONTROL
+**`ControlSession`** + thin **`ipmosflm`** (default release name; no
+amalgamation) + LP + C ABI + MTZ + pure-C++ `ProcessPipeline`. Oracle splice
+library `mosflm_predict_hook` only with `-DMOSFLM_FORTRAN_ORACLE=ON`. CTests
+include `control_session`, `insulin_control`, `ipmosflm_thin`.
 
 Phase A–D table and vertical-slice checklist: [`../porting.md`](../porting.md)
 (section *Current status* and §3 / §5).
@@ -20,13 +20,18 @@ Phase A–D table and vertical-slice checklist: [`../porting.md`](../porting.md)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 # Optional CCTBX Python POC (Phenix cctbx.python):
 #   cmake -S . -B build -DMOSFLM_WITH_CCTBX=ON
+# Optional amalgamation splice archive (Autotools oracle only):
+#   cmake -S . -B build -DMOSFLM_FORTRAN_ORACLE=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
+# Install thin ipmosflm + mosflm_cpp_cli:
+#   cmake --install build --prefix /path/to/prefix
 ```
 
-Requires CMake ≥ 3.24, a C++20 compiler, ZLIB, vendored `../cbf/lib/libcbf.a`,
-and network access on first configure (FetchContent: Eigen, Gemmi). DPS Bravais
-tests need `../lib/dps_index.a` and `../lib/libdps.a`.
+Requires CMake ≥ 3.24, a C++20 compiler, ZLIB, vendored `../cbf/lib/libcbf.a`
+(`make -C ../cbf` or top-level `make cpp`), and network access on first
+configure (FetchContent: Eigen, Gemmi). DPS Bravais tests need
+`../lib/dps_index.a` and `../lib/libdps.a`.
 
 ## CLI
 
@@ -41,6 +46,12 @@ tests need `../lib/dps_index.a` and `../lib/libdps.a`.
 # Requires CCP4 insulin SMV (or MOSFLM_IMAGE / CCP4 env):
 ./build/mosflm_cpp_cli process-insulin   # → insulin_cpp_process.mtz
 ./build/mosflm_cpp_cli process-insulin /path/to/insulin_1_001.img /tmp/out.mtz
+# Keyword-driven PROCESS (D5):
+./build/mosflm_cpp_cli run testdata/images/known_indexed/cpp_process.in \
+  --image /path/to/insulin_1_001.img /tmp/control.mtz
+# Thin CCP4-compatible name (D6; default release binary):
+./build/ipmosflm HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
+  testdata/images/known_indexed/cpp_process.in
 ```
 
 ## Layout
@@ -51,6 +62,8 @@ tests need `../lib/dps_index.a` and `../lib/libdps.a`.
 | `include/mosflm/crystal` | Gemmi CrystalMetadata / SpaceGroup / MtzAdapter |
 | `include/mosflm/image` | `CbfImageReader`, `SmvImageReader` (ADSC insulin) |
 | `include/mosflm/diffraction` | Predict / integrate / `ProcessPipeline`; see `docs/DOMAIN_API.md` |
+| `include/mosflm/refinement` | Stage 2 `PostRefiner` (POSTREFL-class φ LS) |
+| `include/mosflm/control` | CONTROL keyword subset → `ProcessPipeline` |
 | `include/mosflm/indexing` | BravaisClassifier (DPS façade) |
 | `include/mosflm/legacy` | CELL(6) + hardened `MosflmCApi.h` (see `docs/C_ABI.md`) |
 | `fortran/` | `iso_c_binding` mirror + `predict_still_cpp` (Phase C; needs gfortran) |

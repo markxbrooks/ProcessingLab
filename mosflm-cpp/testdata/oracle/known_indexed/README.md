@@ -30,10 +30,11 @@ are **not** from `ipmosflm`.
 
 **Baseline (2026-10-17 / D0):** ASU-aware HKL recall **100%** (1463 / 1463) with
 `R = [[0,0,1],[0,-1,0],[1,0,0]]`. Exact-index recall ~22% (SG/Friedel choice).
-`XDET`/`YDET`: `XDET↔y_mm`, `YDET↔x_mm` relative to BEAM (94.0, 94.7) mm;
-YSCALE as slow-axis pixel aspect; exact-HKL median residual ~**40 px**, inlier
-RMS ~37 px (flat detector; first-order TILT/TWIST not yet better than flat —
-ROTMAT2 ahead). See `../images/known_indexed/geometry.txt`.
+`XDET`/`YDET`: `XDET↔y_mm`, `YDET↔x_mm` relative to refined XCEN/YCEN;
+YSCALE as slow-axis pixel aspect; ``ROTMAT2`` detector normal with refined
+TILT/TWIST (−83/−140 mrad) → exact-HKL median residual ~**23 px** (was ~40 px
+flat). Remaining gap vs ~0.25 mm refine residual is mostly orientation /
+POSTREFL. See `../images/known_indexed/geometry.txt`.
 
 **PROCESS splice:** `make MOSFLM_CPP_PREDICT=1 ipmosflm` then capture →
 `../known_indexed_cpp_predict/` (~89% exact-HKL recall vs this oracle MTZ).

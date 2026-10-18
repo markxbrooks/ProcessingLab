@@ -52,7 +52,7 @@ Phase C splice: MOSFLM_CPP_PREDICT=1 on GENERATE/REFLFIND; insulin PROCESS ~89% 
 
 
 
-Still Fortran-owned: CONTROL, PROCESS, REEK, MEAS, full INTEG3, post-refinement, SMV I/O.
+Phase D science path is C++-owned (SMV, PROCESS, MEAS, Rossmann profile, Stage 2 post-refinement, CONTROL subset, thin `ipmosflm`). Out of Phase D DoD (still Fortran / future): full CONTROL (AUTOINDEX/STRATEGY/…), REEK divergence / NADD, multi-region NMASKS, iMosflm sockets. Amalgamation remains an optional oracle (`MOSFLM_FORTRAN_ORACLE=1`).
 
 Essential Fortran OBJS today ([mosflm/Makefile](mosflm/Makefile)): control.o, unoptimizable.o, mosflm_all_ip_inc_noX.o, torefix_noX.o.
 
@@ -240,7 +240,7 @@ Predictor mosaicity / Ewald width so spot counts approach REEK (η, divergence s
 
 
 
-Detector TILT/TWIST/YSCALE; tighten insulin_xdet toward ~0.25 mm refine residual.
+Detector TILT/TWIST/YSCALE + ``ROTMAT2`` (insulin_xdet ~23 px); remaining gap to ~0.25 mm refine residual is POSTREFL orientation.
 
 
 
@@ -308,53 +308,23 @@ Differentials on profile-related MTZ columns / flags.
 
 Exit: porting.md INTEG3 row = parity, not stand-in.
 
-D4 — Post-refinement Stage 2 (1–2 months)
+D4 — Post-refinement Stage 2 (1–2 months) — **Done**
 
-
-
-
-
-New mosflm-cpp/src/refinement/ (cell, missetting, mosaic from partials); port POSTREFL-class behavior (~168264).
-
-
-
-Capture/extend oracles; differentials before enabling by default.
+`mosflm-cpp/src/refinement/PostRefinement.cpp`: Ewald φ (spindle +X), coordinate-descent missetting + isotropic cell scale, mosaic from MAD of φ residuals, optional XDET/YDET positional cost (`refine_against_detector`). Opt-in via `ProcessRequest::enable_postrefinement` (default false). CTests `post_refinement`, `insulin_postref`. Multi-image NADD / IDXREF-style joint refine still deferred.
 
 Exit: Stage 2 checklist Done in porting.md.
 
-D5 — CONTROL keyword subset
+D5 — CONTROL keyword subset — **Done**
 
-
-
-
-
-Batch keywords for known-indexed script: CELL, SYMMETRY, BEAM, DISTANCE, WAVELENGTH, PIXEL, MATRIX/AMAT, PROCESS, GO, EXIT.
-
-
-
-Run equivalent of [ipmosflm.in](mosflm-cpp/testdata/images/known_indexed/ipmosflm.in) on Cdriver (thin CONTROL or pure C parser).
+`ControlSession` (`mosflm-cpp/src/control/`): CELL, SYMMETRY, BEAM, DISTANCE, WAVELENGTH, PIXEL, MATRIX/AMAT, MOSAIC, SEPARATION, DIRECTORY, TEMPLATE, IMAGE, PROCESS, GO, EXIT. Unknown lines (AUTOINDEX, GENFILE, …) ignored. Script [`cpp_process.in`](mosflm-cpp/testdata/images/known_indexed/cpp_process.in) drives PROCESS with geometry.txt MATRIX; CLI `mosflm_cpp_cli run`. CTests `control_session`, `insulin_control` (ASU recall ≥ 0.85).
 
 Exit: Keyword-driven C++ PROCESS without Fortran CONTROL for this corpus.
 
-D6 — Drop amalgamation (Phase D complete)
+D6 — Drop amalgamation (Phase D complete) — **Done**
 
+Default build/install is the C++ core: `make` / `make cpp` builds `mosflm_cpp_cli` + thin `bin/ipmosflm` (CONTROL → PROCESS; no `mosflm_all_ip_inc_noX.o` / science `unoptimizable.o`). CMake option `MOSFLM_FORTRAN_ORACLE` (OFF) gates `mosflm_predict_hook`. Autotools amalgamation: `make fortran-oracle` or `make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm`. CTest `ipmosflm_thin`.
 
-
-
-
-Default build/install is C++ core (+ thin ipmosflm name for CCP4 if needed).
-
-
-
-Amalgamation behind MOSFLM_FORTRAN_ORACLE=1 (or similar), CI optional/nightly.
-
-
-
-Default binary links without mosflm_all_ip_inc_noX.o / science unoptimizable.o.
-
-
-
-Mark Phase D Done in porting.md.
+Exit: Phase D Done in porting.md.
 
 Out of Phase D DoD
 

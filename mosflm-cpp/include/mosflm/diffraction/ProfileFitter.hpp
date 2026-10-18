@@ -12,9 +12,8 @@ namespace mosflm::diffraction {
 
 /// One profile-fitted observation (2D Gaussian + flat background).
 ///
-/// This is a first C++ stand-in for MOSFLM ``INTEG3``/``INTEG4`` style fitting —
-/// not a line port. Intensity is the discrete sum ``A · Σ w`` over the peak box
-/// with ``w = exp(−r² / (2 σ²))``.
+/// Kept for synthetic / CBF smoke tests. Known-indexed PROCESS uses
+/// :class:`StandardProfileFitter` (Rossmann standard profile; Phase D / D3).
 struct ProfileFittedReflection {
     int h{};
     int k{};

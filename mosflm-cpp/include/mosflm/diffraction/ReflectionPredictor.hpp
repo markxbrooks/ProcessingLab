@@ -42,6 +42,14 @@ struct PredictionSettings {
     /// ``mosaic_rad / λ`` (Å⁻¹), standing in for REEK η until a full rocking
     /// model exists. Zero ⇒ use ``ewald_tolerance_Ainv`` alone.
     double mosaic_spread_deg{0.0};
+    /// Beam divergence full-angles (degrees), MOSFLM ``DIVH`` / ``DIVV``.
+    /// Combined with mosaic as ``(η + max(DIVH,DIVV)) / λ`` in Å⁻¹ (REEK E0
+    /// isotropic stand-in; not yet a full anisotropic rocking curve).
+    double divh_deg{0.0};
+    double divv_deg{0.0};
+    /// Skip predictions whose d-spacing falls in MOSFLM ice-ring shells
+    /// (REEK / DPSCHOOSE ``RINGTEST=1`` bands).
+    bool exclude_ice_rings{false};
     /// If true (default), skip Miller indices systematically absent for
     /// ``PredictionRequest::crystal.spacegroup``.
     bool apply_systematic_absences{true};
