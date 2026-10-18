@@ -1,5 +1,5 @@
 /**
- * Phase D / D5: CONTROL keyword parser unit tests.
+ * Phase D / E: CONTROL keyword parser unit tests.
  */
 
 #include "mosflm/control/ControlSession.hpp"
@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <sstream>
+#include <stdexcept>
 
 using mosflm::control::ControlSession;
 
@@ -52,13 +53,44 @@ int main() {
     }
 
     {
-        // Unknown keywords ignored; EXIT sets flag.
+        // Unknown keywords warn; AUTOINDEX sets pending; EXIT sets flag.
         ControlSession s;
         s.parse_line("GENFILE gen.dat");
-        s.parse_line("autoindex dps threshold 20");
+        s.parse_line("autoindex dps threshold 20 file insulin_1.spt");
+        CHECK(s.state().autoindex_pending);
+        CHECK(std::fabs(s.state().autoindex.min_isigi - 20.0f) < 1e-6);
         s.parse_line("EXIT");
         CHECK(s.exit_requested());
         CHECK(!s.state().has_matrix);
+    }
+
+    {
+        ControlSession s;
+        bool threw = false;
+        try {
+            s.parse_line("REFIX");
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        CHECK(threw);
+    }
+
+    {
+        ControlSession s;
+        s.parse_line("NMASKS 5 5");
+        CHECK_EQ(s.state().nmasks_x, 5);
+        CHECK_EQ(s.state().nmasks_y, 5);
+        s.parse_line("POSTREFINE");
+        CHECK(s.state().enable_postrefinement);
+        s.parse_line("NADD 3");
+        CHECK_EQ(s.state().nadd, 3);
+        s.parse_line("STRATEGY ANGLE 45");
+        CHECK(s.state().strategy_pending);
+        auto r = s.go();
+        CHECK(r.ran_strategy);
+        CHECK(s.strategy_done());
+        CHECK(s.done_run());
+        CHECK(!s.needs_no_run_warning());
     }
 
     {
@@ -69,7 +101,9 @@ int main() {
         CHECK(s.state().has_symmetry);
         CHECK_EQ(s.state().symmetry_number, 197);
         CHECK(s.exit_requested());
-        // No MATRIX in Fortran script — orientation comes from AUTOINDEX.
+        // AUTOINDEX was parsed (pending cleared only on GO via run_stream).
+        // parse_file does not execute GO, so pending may remain true after
+        // the AUTOINDEX line; CELL follows later GO in the file as keywords.
         CHECK(!s.state().has_matrix);
     }
 
@@ -80,8 +114,30 @@ int main() {
         CHECK(s.state().has_cell);
         CHECK_EQ(s.state().symmetry_number, 197);
         CHECK(s.exit_requested());
-        // GO was not executed by parse_file — only keyword state.
         CHECK(s.state().process_pending);
+    }
+
+    {
+        // RUN alias executes PROCESS via run_stream.
+        ControlSession s;
+        std::istringstream in(
+            "CELL 78 78 78 90 90 90\n"
+            "SYMMETRY 1\n"
+            "AMAT -0.01 0 0 0 -0.01 0 0 0 -0.01\n"
+            "PROCESS 1 to 1\n"
+            "RUN\n"
+            "EXIT\n"
+        );
+        // GO without image will throw; only verify RUN is recognized as go.
+        // Use empty process path with STRATEGY instead:
+    }
+    {
+        ControlSession s;
+        std::istringstream in("STRATEGY ANGLE 90\nRUN\nEXIT\n");
+        const auto runs = s.run_stream(in);
+        CHECK_EQ(static_cast<int>(runs.size()), 1);
+        CHECK(runs[0].ran_strategy);
+        CHECK(s.done_run());
     }
 
     return mosflm_test::finish("control_session");

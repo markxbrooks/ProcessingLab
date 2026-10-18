@@ -1,0 +1,62 @@
+#include "mosflm/indexing/ControlAutoIndex.hpp"
+
+#include "mosflm/control/ControlSession.hpp"
+#include "mosflm/indexing/AutoIndexer.hpp"
+#include "mosflm/indexing/SpotList.hpp"
+
+#include <filesystem>
+#include <stdexcept>
+
+namespace mosflm::indexing {
+namespace {
+
+void run_autoindex(control::ControlState& state) {
+    std::filesystem::path spt = state.autoindex.spot_file;
+    if (spt.empty()) {
+        throw std::runtime_error(
+            "CONTROL AUTOINDEX: FILE spot-list path is required"
+        );
+    }
+    if (!spt.is_absolute()) {
+        spt = state.directory / spt;
+    }
+    const SpotList spots = SpotList::read_spt(spt);
+
+    AutoIndexGeometry geo;
+    geo.distance_mm = state.distance_mm;
+    geo.wavelength_A = state.wavelength_A;
+    geo.beam_x_mm = state.beam_x_mm;
+    geo.beam_y_mm = state.beam_y_mm;
+    geo.pixel_mm = state.pixel_x_mm;
+    geo.dmax_A = state.dmax_A;
+
+    AutoIndexSettings settings;
+    settings.min_isigi = state.autoindex.min_isigi;
+    settings.hkldev = state.autoindex.hkldev;
+    settings.nvect = state.autoindex.nvect;
+    settings.nvref = state.autoindex.nvref;
+    settings.prefer_character = state.autoindex.prefer_character;
+    settings.prefer_system = state.autoindex.prefer_system;
+
+    const AutoIndexResult result = AutoIndexer{}.index(spots, geo, settings);
+    if (!result.ok || result.ierr != 0) {
+        throw std::runtime_error(
+            "CONTROL AUTOINDEX failed (ierr=" + std::to_string(result.ierr) +
+            ")"
+        );
+    }
+
+    state.cell = result.cell;
+    state.has_cell = true;
+    state.amat = result.amat;
+    state.has_matrix = true;
+}
+
+}  // namespace
+
+/// Called once from ipmosflm / tests to enable CONTROL AUTOINDEX.
+void register_control_autoindex() {
+    control::ControlSession::register_autoindex_runner(run_autoindex);
+}
+
+}  // namespace mosflm::indexing

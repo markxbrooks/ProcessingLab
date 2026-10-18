@@ -128,6 +128,8 @@ add_library(mosflm_geometry
     src/legacy/MosflmFortranAdapters.cpp
     src/image/CbfImageReader.cpp
     src/image/SmvImageReader.cpp
+    src/image/ImageIO.cpp
+    src/imosflm/ImosflmSocket.cpp
     src/crystal/CrystalMetadata.cpp
     src/crystal/SpaceGroupInfo.cpp
     src/crystal/MtzAdapter.cpp
@@ -173,7 +175,10 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
         src/indexing/SpotList.cpp
     )
     if(MOSFLM_HAS_DPS_INDEXER)
-        list(APPEND MOSFLM_INDEXING_SOURCES src/indexing/AutoIndexer.cpp)
+        list(APPEND MOSFLM_INDEXING_SOURCES
+            src/indexing/AutoIndexer.cpp
+            src/indexing/ControlAutoIndex.cpp
+        )
     endif()
     add_library(mosflm_indexing ${MOSFLM_INDEXING_SOURCES})
     target_include_directories(mosflm_indexing
@@ -238,6 +243,10 @@ target_link_libraries(ipmosflm
     PRIVATE
         mosflm_geometry
 )
+if(TARGET mosflm_indexing AND MOSFLM_HAS_DPS_INDEXER)
+    target_link_libraries(ipmosflm PRIVATE mosflm_indexing)
+    target_compile_definitions(ipmosflm PRIVATE MOSFLM_HAS_INDEXING=1)
+endif()
 set_target_properties(ipmosflm PROPERTIES
     OUTPUT_NAME ipmosflm
 )
@@ -358,6 +367,14 @@ if(BUILD_TESTING)
         COMMAND test_control_session
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
+
+    add_executable(test_image_io tests/unit/test_image_io.cpp)
+    target_link_libraries(test_image_io PRIVATE mosflm_geometry)
+    add_test(NAME image_io COMMAND test_image_io)
+
+    add_executable(test_imosflm_socket tests/unit/test_imosflm_socket.cpp)
+    target_link_libraries(test_imosflm_socket PRIVATE mosflm_geometry)
+    add_test(NAME imosflm_socket COMMAND test_imosflm_socket)
     set_tests_properties(cbf_image_reader PROPERTIES
         ENVIRONMENT
             "MOSFLM_CBF_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/cbf/sample_minicbf.cbf"
@@ -744,6 +761,16 @@ if(BUILD_TESTING)
         add_test(
             NAME insulin_autoindex
             COMMAND test_insulin_autoindex
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_control_autoindex
+            tests/differential/test_control_autoindex.cpp
+        )
+        target_link_libraries(test_control_autoindex PRIVATE mosflm_indexing)
+        add_test(
+            NAME control_autoindex
+            COMMAND test_control_autoindex
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

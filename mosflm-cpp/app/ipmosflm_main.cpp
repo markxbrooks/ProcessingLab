@@ -1,19 +1,17 @@
 /**
- * Thin ``ipmosflm`` CCP4-compatible name (Phase D / D6).
+ * Thin ``ipmosflm`` CCP4-compatible name (Phase D / E).
  *
- * Default ProcessingLab release binary: CONTROL keyword subset → C++ PROCESS.
- * Does **not** link the Fortran amalgamation. Rebuild the Autotools oracle with
- * ``make MOSFLM_FORTRAN_ORACLE=1`` (see ``../portingD.md``).
- *
- * Usage::
- *
- *   ipmosflm [HKLOUT out.mtz] [--image img] [script.in]
- *   ipmosflm HKLOUT out.mtz < script.in
- *   ipmosflm          # banner + read CONTROL from stdin until EXIT
+ * Default ProcessingLab release binary: CONTROL → C++ science path.
+ * Does **not** link the Fortran amalgamation. Oracle:
+ * ``make fortran-oracle`` (see ``../portingE.md``).
  */
 
 #include "mosflm/control/ControlSession.hpp"
 #include "mosflm/diffraction/ProcessPipeline.hpp"
+
+#if defined(MOSFLM_HAS_INDEXING)
+#include "mosflm/indexing/ControlAutoIndex.hpp"
+#endif
 
 #include <cstdlib>
 #include <filesystem>
@@ -41,15 +39,33 @@ std::filesystem::path default_insulin_img() {
 }
 
 void print_banner() {
+    // Fortran-compatible lead line + C++ core note (Phase E / E0).
     std::cout
-        << " ProcessingLab / Mosflm C++ core 0.1.0\n"
-        << "  (thin ipmosflm — CONTROL subset; no Fortran amalgamation)\n"
-        << "  Full oracle: make MOSFLM_FORTRAN_ORACLE=1 -C mosflm ipmosflm\n";
+        << "\n"
+        << " ************ Mosflm version 7.4.0 for IP, CCD and PAD data"
+           " (C++ core) ***********\n"
+        << " ProcessingLab thin ipmosflm — CONTROL → C++ PROCESS/AUTOINDEX\n"
+        << " Andrew Leslie and Harry Powell, MRC Laboratory of Molecular Biology\n"
+        << " Oracle amalgamation: make fortran-oracle\n"
+        << "--------------------------------------------------------------------------------\n";
+}
+
+void print_no_run_and_end() {
+    std::cout << "\n\n *** WARNING **   NO \"RUN\" CARD GIVEN\n\n\n";
+    std::cout << " *********** END OF PROCESSING *****************\n";
+}
+
+void print_end() {
+    std::cout << "\n *********** END OF PROCESSING *****************\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(MOSFLM_HAS_INDEXING)
+    mosflm::indexing::register_control_autoindex();
+#endif
+
     std::optional<std::filesystem::path> image;
     std::optional<std::filesystem::path> hklout;
     std::optional<std::filesystem::path> script;
@@ -81,7 +97,6 @@ int main(int argc, char** argv) {
             print_banner();
             return 0;
         }
-        // First non-option positional: script path.
         if (!script) {
             script = argv[i];
             continue;
@@ -93,7 +108,7 @@ int main(int argc, char** argv) {
     if (want_help) {
         std::cerr
             << "Usage: ipmosflm [HKLOUT out.mtz] [--image img] [script.in]\n"
-            << "  Reads CONTROL from script or stdin (GO → C++ PROCESS).\n"
+            << "  Reads CONTROL from script or stdin (GO/RUN → C++ science).\n"
             << "  MOSFLM_IMAGE / CCP4 used when IMAGE/TEMPLATE unset.\n";
         return 0;
     }
@@ -103,14 +118,11 @@ int main(int argc, char** argv) {
     try {
         mosflm::control::ControlSession session;
         if (hklout) {
-            session.parse_line(
-                std::string("HKLOUT ") + hklout->string()
-            );
+            session.parse_line(std::string("HKLOUT ") + hklout->string());
         }
 
         std::optional<std::filesystem::path> img_override = image;
         if (!img_override) {
-            // Prefer env / CCP4 when scripts omit IMAGE (known-indexed corpus).
             const auto fallback = default_insulin_img();
             if (std::filesystem::exists(fallback)) {
                 img_override = fallback;
@@ -127,6 +139,14 @@ int main(int argc, char** argv) {
         const auto out_mtz = hklout ? *hklout : session.state().hklout;
         std::size_t n_proc = 0;
         for (const auto& r : runs) {
+            if (r.ran_autoindex) {
+                std::cout << "  AUTOINDEX: " << r.message << '\n';
+                continue;
+            }
+            if (r.ran_strategy) {
+                std::cout << "  STRATEGY: " << r.message << '\n';
+                continue;
+            }
             if (!r.ran_process) {
                 continue;
             }
@@ -138,12 +158,17 @@ int main(int argc, char** argv) {
                       << " preds=" << r.process.predictions.size()
                       << " integrated=" << r.process.mtz_reflections.size()
                       << " → " << out_mtz << '\n';
-        }
-        if (n_proc == 0 && !session.exit_requested()) {
-            // EXIT-only smoke (no PROCESS) is success.
-            if (runs.empty()) {
-                std::cout << "  (no PROCESS GO)\n";
+            if (!session.state().extra_lattices.empty()) {
+                std::cout << "  MULTILATTICE: "
+                          << session.state().extra_lattices.size()
+                          << " extra lattice(s) stored\n";
             }
+        }
+
+        if (session.needs_no_run_warning()) {
+            print_no_run_and_end();
+        } else {
+            print_end();
         }
         return 0;
     } catch (const std::exception& ex) {

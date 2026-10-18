@@ -7,15 +7,29 @@
 #include <Eigen/Dense>
 
 #include <filesystem>
+#include <functional>
 #include <iosfwd>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace mosflm::control {
 
-/// Keyword state accumulated by a thin MOSFLM CONTROL subset (Phase D / D5).
+/// AUTOINDEX settings accumulated from CONTROL (Phase E / E1).
+struct AutoIndexControlSettings {
+    std::filesystem::path spot_file;
+    float min_isigi{20.0f};
+    float hkldev{0.3f};
+    int nvect{30};
+    int nvref{30};
+    int prefer_character{0};
+    std::string prefer_system;
+    int image_number{1};
+};
+
+/// Keyword state accumulated by MOSFLM CONTROL (Phase D / E).
 struct ControlState {
     bool has_distance{false};
     bool has_wavelength{false};
@@ -41,6 +55,7 @@ struct ControlState {
     double separation_x_mm{0.57};
     double separation_y_mm{0.57};
     double dmin_A{1.45};
+    double dmax_A{200.0};
 
     UnitCell cell{78.19, 78.19, 78.19, 90.0, 90.0, 90.0};
     int symmetry_number{1};
@@ -59,49 +74,70 @@ struct ControlState {
     double process_start_phi_deg{0.0};
     double process_angle_deg{1.0};
 
+    /// Standard-profile detector tiling (MOSFLM NMASKS / XLINES×YLINES).
+    int nmasks_x{5};
+    int nmasks_y{5};
+    /// Opt-in Stage 2 post-refinement on PROCESS.
+    bool enable_postrefinement{false};
+    /// Multi-image NADD window (1 = single image; >1 reserved for joint refine).
+    int nadd{1};
+
+    bool autoindex_pending{false};
+    AutoIndexControlSettings autoindex{};
+
+    /// Multi-lattice: additional orientation matrices (first is ``amat``).
+    std::vector<Eigen::Matrix3d> extra_lattices;
+
+    bool strategy_pending{false};
+    bool strategy_done{false};
+    double strategy_osc_range_deg{90.0};
+    double strategy_completeness_est{0.0};
+
+    bool done_run{false};
     bool exit_requested{false};
 };
 
-/// Outcome of one ``GO`` that ran PROCESS.
+/// Outcome of one ``GO`` / ``RUN``.
 struct ControlGoResult {
     bool ran_process{false};
+    bool ran_autoindex{false};
+    bool ran_strategy{false};
     diffraction::ProcessResult process{};
     crystal::CrystalMetadata crystal{};
     std::filesystem::path image_used{};
     std::string message;
 };
 
-/// Pure-C++ CONTROL driver for the known-indexed keyword subset.
+/// Hook that runs AUTOINDEX and writes CELL/MATRIX into ``state``.
+using AutoIndexRunner = std::function<void(ControlState& state)>;
+
+/// Pure-C++ CONTROL driver (Phase D subset + Phase E extensions).
 ///
-/// Supported keywords: ``CELL``, ``SYMMETRY``, ``BEAM``, ``DISTANCE``,
-/// ``WAVELENGTH``, ``PIXEL``, ``MATRIX`` / ``AMAT``, ``MOSAIC``,
-/// ``DIVERGENCE``, ``SEPARATION``, ``DIRECTORY``, ``TEMPLATE``, ``IMAGE``,
-/// ``HKLOUT``, ``PROCESS``, ``GO``, ``EXIT``. Unknown lines (``AUTOINDEX``,
-/// ``GENFILE``, …) are ignored so a trimmed ``ipmosflm.in`` remains readable.
+/// Supported: geometry keywords, ``PROCESS``, ``GO``/``RUN``, ``EXIT``,
+/// ``AUTOINDEX`` (when a runner is registered), ``STRATEGY``, ``NMASKS``,
+/// ``POSTREFINE``, ``NADD``, ``MULTILATTICE``. Unimplemented major verbs
+/// (``REFIX``, …) throw. Other unknown keywords warn once then continue.
 class ControlSession {
 public:
+    /// Register DPS AUTOINDEX implementation (from ``mosflm_indexing``).
+    static void register_autoindex_runner(AutoIndexRunner runner);
+
     /// Parse one logical line (comments stripped). Throws on malformed
-    /// known keywords.
+    /// known keywords or unimplemented major verbs.
     void parse_line(std::string_view line);
 
     /// Parse a whole script file.
     void parse_file(const std::filesystem::path& path);
 
-    /// Execute ``GO``: if ``PROCESS`` is pending, load the image and run
-    /// :class:`diffraction::ProcessPipeline`.
-    ///
-    /// ``image_override`` replaces ``IMAGE`` / ``TEMPLATE`` resolution (tests
-    /// and CLI ``--image``).
+    /// Execute ``GO``/``RUN``: AUTOINDEX, STRATEGY, and/or PROCESS.
     [[nodiscard]] ControlGoResult go(
         const std::optional<std::filesystem::path>& image_override = std::nullopt
     );
 
-    /// Build a :struct:`diffraction::ProcessRequest` from keyword state + image.
     [[nodiscard]] diffraction::ProcessRequest make_process_request(
         const image::DiffractionImage& image
     ) const;
 
-    /// Resolve the SMV path for the pending / last PROCESS frame.
     [[nodiscard]] std::filesystem::path resolve_image_path(
         const std::optional<std::filesystem::path>& image_override =
             std::nullopt
@@ -109,15 +145,20 @@ public:
 
     [[nodiscard]] const ControlState& state() const { return state_; }
     [[nodiscard]] bool exit_requested() const { return state_.exit_requested; }
+    [[nodiscard]] bool done_run() const { return state_.done_run; }
+    [[nodiscard]] bool strategy_done() const { return state_.strategy_done; }
 
-    /// Parse an input stream and run every ``GO`` until ``EXIT`` (or EOF).
+    /// True when EOF should emit Fortran-style no-RUN warning.
+    [[nodiscard]] bool needs_no_run_warning() const {
+        return !state_.done_run && !state_.strategy_done;
+    }
+
     [[nodiscard]] std::vector<ControlGoResult> run_stream(
         std::istream& in,
         const std::optional<std::filesystem::path>& image_override =
             std::nullopt
     );
 
-    /// Parse file and run every ``GO`` until ``EXIT`` (or EOF).
     [[nodiscard]] std::vector<ControlGoResult> run_script(
         const std::filesystem::path& script,
         const std::optional<std::filesystem::path>& image_override =
@@ -126,13 +167,14 @@ public:
 
 private:
     ControlState state_;
-    /// Numbers still needed to finish a multi-line ``MATRIX``.
     int matrix_needed_{0};
     std::vector<double> matrix_buf_;
+    std::set<std::string> warned_unknown_;
 
     void apply_keyword(const std::string& key, const std::vector<std::string>& args);
     void ingest_matrix_numbers(const std::vector<double>& vals);
     void finish_matrix_if_ready();
+    void parse_autoindex_args(const std::vector<std::string>& args);
 };
 
 }  // namespace mosflm::control

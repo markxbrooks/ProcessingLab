@@ -1,6 +1,6 @@
 /**
- * Phase D / D6: thin ipmosflm (C++ CONTROL) without Fortran amalgamation.
- * EXIT-only smoke + optional PROCESS when insulin SMV is available.
+ * Phase D / E: thin ipmosflm (C++ CONTROL) without Fortran amalgamation.
+ * Empty-stdin golden lines + EXIT smoke + optional PROCESS.
  */
 
 #include "test_util.hpp"
@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -51,11 +52,17 @@ int run_cmd(const std::string& cmd) {
     if (rc == -1) {
         return 127;
     }
-    // POSIX: wait status; low byte 0 ⇒ exit code in high byte.
     if ((rc & 0xff) == 0) {
         return (rc >> 8) & 0xff;
     }
     return rc;
+}
+
+std::string slurp(const fs::path& path) {
+    std::ifstream in(path);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
 }
 
 }  // namespace
@@ -64,7 +71,24 @@ int main() {
     const fs::path bin = find_ipmosflm();
     CHECK_MSG(fs::exists(bin), "missing thin ipmosflm binary in build/");
 
-    // EXIT-only smoke (no amalgamation, no image).
+    // Empty stdin → Mosflm-like banner + NO RUN CARD + END OF PROCESSING.
+    {
+        const fs::path out =
+            fs::temp_directory_path() / "mosflm_e0_empty.out";
+        const std::string cmd =
+            bin.string() + " </dev/null >" + out.string() + " 2>/dev/null";
+        CHECK_EQ(run_cmd(cmd), 0);
+        const std::string text = slurp(out);
+        CHECK_MSG(text.find("Mosflm version 7.4.0") != std::string::npos,
+                  "missing Mosflm 7.4.0 banner");
+        CHECK_MSG(text.find("NO \"RUN\" CARD GIVEN") != std::string::npos,
+                  "missing NO RUN CARD warning");
+        CHECK_MSG(text.find("END OF PROCESSING") != std::string::npos,
+                  "missing END OF PROCESSING");
+        std::cout << "ipmosflm_thin: empty-stdin golden ok\n";
+    }
+
+    // EXIT-only smoke (no amalgamation, no image) — still "ran" EXIT without RUN.
     {
         const fs::path script =
             fs::temp_directory_path() / "mosflm_d6_exit.in";
@@ -72,12 +96,36 @@ int main() {
             std::ofstream out(script);
             out << "EXIT\n";
         }
-        const std::string cmd =
-            bin.string() + " " + script.string() + " >/dev/null";
+        const fs::path out =
+            fs::temp_directory_path() / "mosflm_e0_exit.out";
+        const std::string cmd = bin.string() + " " + script.string() + " >" +
+                                out.string() + " 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
+        const std::string text = slurp(out);
+        CHECK_MSG(text.find("NO \"RUN\" CARD GIVEN") != std::string::npos,
+                  "EXIT-only should still warn no RUN");
     }
 
-    // PROCESS path when SMV is present (same gate family as insulin_control).
+    // STRATEGY RUN clears no-RUN warning.
+    {
+        const fs::path script =
+            fs::temp_directory_path() / "mosflm_e3_strategy.in";
+        {
+            std::ofstream out(script);
+            out << "STRATEGY ANGLE 90\nRUN\nEXIT\n";
+        }
+        const fs::path out =
+            fs::temp_directory_path() / "mosflm_e3_strategy.out";
+        const std::string cmd = bin.string() + " " + script.string() + " >" +
+                                out.string() + " 2>/dev/null";
+        CHECK_EQ(run_cmd(cmd), 0);
+        const std::string text = slurp(out);
+        CHECK_MSG(text.find("NO \"RUN\" CARD GIVEN") == std::string::npos,
+                  "STRATEGY RUN should not warn no RUN");
+        CHECK_MSG(text.find("STRATEGY") != std::string::npos,
+                  "missing STRATEGY output");
+    }
+
     const auto img = find_insulin_img();
     if (fs::exists(img)) {
         const fs::path script =
@@ -87,7 +135,7 @@ int main() {
             fs::temp_directory_path() / "mosflm_d6_thin.mtz";
         const std::string cmd = bin.string() + " HKLOUT " + mtz.string() +
                                 " --image " + img.string() + " " +
-                                script.string() + " >/dev/null";
+                                script.string() + " >/dev/null 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         CHECK_MSG(fs::exists(mtz) && fs::file_size(mtz) > 0,
                   "thin ipmosflm did not write MTZ");

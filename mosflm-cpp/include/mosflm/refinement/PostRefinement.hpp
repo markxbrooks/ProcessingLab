@@ -115,7 +115,8 @@ struct PostRefinementResult {
 ///
 /// Ports the POSTREFL parameter set (missets + cell + η) at a least-squares
 /// φ-residual level, optionally with XDET/YDET positional residuals.
-/// Multi-image NADD / IDXREF-style joint refinement remains for later.
+/// Multi-image NADD: :meth:`refine_joint` concatenates per-image observations
+/// into one refine call (IDXREF-style joint model still deferred).
 class PostRefiner {
 public:
     [[nodiscard]] PostRefinementResult refine(
@@ -126,6 +127,24 @@ public:
         const std::vector<PostRefObservation>& observations,
         const PostRefinementSettings& settings = {}
     ) const;
+
+    /// NADD scaffolding: concatenate multi-image observation lists then refine.
+    [[nodiscard]] PostRefinementResult refine_joint(
+        const crystal::CrystalMetadata& crystal,
+        const OrientationMatrix& orientation0,
+        double wavelength_A,
+        double mosaic0_deg,
+        const std::vector<std::vector<PostRefObservation>>& per_image,
+        const PostRefinementSettings& settings = {}
+    ) const {
+        std::vector<PostRefObservation> all;
+        for (const auto& img : per_image) {
+            all.insert(all.end(), img.begin(), img.end());
+        }
+        return refine(
+            crystal, orientation0, wavelength_A, mosaic0_deg, all, settings
+        );
+    }
 
     /// Apply refined missetting + cell scale to build a new UB.
     [[nodiscard]] static OrientationMatrix apply_parameters(

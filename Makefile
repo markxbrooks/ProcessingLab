@@ -1,7 +1,10 @@
-# ProcessingLab top-level Makefile (Phase D / D6).
+# ProcessingLab top-level Makefile (Phase D / E).
 #
 # Default: C++ core + thin ipmosflm (no Fortran amalgamation).
-# Oracle:  make fortran-oracle   (or MOSFLM_FORTRAN_ORACLE=1)
+#   make / make cpp
+# Oracle amalgamation (not selected by env alone at this level):
+#   make dps-lib fortran-oracle
+#   # MOSFLM_FORTRAN_ORACLE=1 is only read inside mosflm/Makefile
 #
 # Autotools variables below remain for the optional oracle path.
 #-----------------------------------------------------------------------------
@@ -52,7 +55,8 @@ libs: cbf-lib
 	cd index ; ${MAKE}
 	if [ -f $(RANLIB) ]; then $(RANLIB) lib/DPSLIB.a; fi
 
-fortran-oracle: libs
+# Needs DPS archives (libdps_index.a); ``libs`` alone is insufficient.
+fortran-oracle: libs dps-lib
 	cd mosflm ; ${MAKE} MOSFLM_FORTRAN_ORACLE=1 ipmosflm
 
 force:

@@ -182,4 +182,4 @@ Day 5: Document first legacy routine to replace (`PREDICT`).
 1. Real known-indexed images — **done** (`capture_ipmosflm_oracle.sh` → `testdata/oracle/known_indexed/`).
 2. **Phase C** — **Done** (D0 closed): HKL/XDET/MTZ CTests, mosaicity + absences, YSCALE pixel aspect + TILT/TWIST fields, PROCESS splice ~89% exact-HKL recall.
 3. **Phase D / D1–D6** — **Done**: SMV + `ProcessPipeline` + MEAS + Rossmann profile + Stage 2 `PostRefiner` + CONTROL + thin `ipmosflm` / `make cpp`; amalgamation behind `MOSFLM_FORTRAN_ORACLE`. CTests include `insulin_control`, `ipmosflm_thin`. See [`portingD.md`](portingD.md).
-4. Out of Phase D: full AUTOINDEX/STRATEGY, REEK divergence/NADD, NMASKS, iMosflm sockets.
+4. **Phase E** — CCP4 drop-in roadmap: see [`portingE.md`](portingE.md) (E0 CLI UX through E7 packaging).

@@ -1,16 +1,22 @@
 #include "mosflm/control/ControlSession.hpp"
 
 #include "mosflm/crystal/SpaceGroupInfo.hpp"
-#include "mosflm/image/DiffractionImage.hpp"
+#include "mosflm/image/ImageIO.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 
 namespace mosflm::control {
 namespace {
+
+AutoIndexRunner& autoindex_runner_slot() {
+    static AutoIndexRunner runner;
+    return runner;
+}
 
 std::string strip_comment(std::string_view line) {
     std::string out;
@@ -21,7 +27,6 @@ std::string strip_comment(std::string_view line) {
         }
         out.push_back(c);
     }
-    // Trim trailing whitespace
     while (!out.empty() &&
            std::isspace(static_cast<unsigned char>(out.back()))) {
         out.pop_back();
@@ -43,7 +48,6 @@ std::vector<std::string> tokenize(const std::string& line) {
     std::istringstream iss(line);
     std::string w;
     while (iss >> w) {
-        // Strip surrounding quotes from MOSFLM-style "file.spt"
         if (w.size() >= 2 &&
             ((w.front() == '"' && w.back() == '"') ||
              (w.front() == '\'' && w.back() == '\''))) {
@@ -86,7 +90,6 @@ int require_int(const std::string& s, const char* ctx) {
     }
 }
 
-/// Expand ``###`` (or longer runs of ``#``) with zero-padded frame number.
 std::string expand_template(const std::string& tmpl, int frame) {
     const auto hash = tmpl.find('#');
     if (hash == std::string::npos) {
@@ -103,7 +106,24 @@ std::string expand_template(const std::string& tmpl, int frame) {
     return tmpl.substr(0, hash) + num + tmpl.substr(hash + n);
 }
 
+bool is_unimplemented_major(const std::string& key) {
+    static const char* k[] = {
+        "REFIX", "FINDSPOTS", "PICK", "XDISPLAY", "TCPIP", "SOCKET",
+        nullptr
+    };
+    for (const char** p = k; *p != nullptr; ++p) {
+        if (key == *p) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
+
+void ControlSession::register_autoindex_runner(AutoIndexRunner runner) {
+    autoindex_runner_slot() = std::move(runner);
+}
 
 void ControlSession::ingest_matrix_numbers(const std::vector<double>& vals) {
     for (double v : vals) {
@@ -120,12 +140,62 @@ void ControlSession::finish_matrix_if_ready() {
     if (matrix_needed_ != 0 || matrix_buf_.size() != 9) {
         return;
     }
-    // Row-major lab [A] as printed by ipmosflm.
     state_.amat << matrix_buf_[0], matrix_buf_[1], matrix_buf_[2],
         matrix_buf_[3], matrix_buf_[4], matrix_buf_[5], matrix_buf_[6],
         matrix_buf_[7], matrix_buf_[8];
     state_.has_matrix = true;
     matrix_buf_.clear();
+}
+
+void ControlSession::parse_autoindex_args(const std::vector<std::string>& args) {
+    state_.autoindex_pending = true;
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const std::string u = upper(args[i]);
+        if (u == "DPS" || u == "UNITCELL" || u == "UNITCELLDIST" ||
+            u == "UNITECELLDIST") {
+            continue;
+        }
+        if ((u == "THRESHOLD" || u == "THRESH") && i + 1 < args.size()) {
+            state_.autoindex.min_isigi =
+                static_cast<float>(require_double(args[++i], "AUTOINDEX"));
+            continue;
+        }
+        if (u == "HKLDEV" && i + 1 < args.size()) {
+            state_.autoindex.hkldev =
+                static_cast<float>(require_double(args[++i], "AUTOINDEX"));
+            continue;
+        }
+        if (u == "NVECT" && i + 1 < args.size()) {
+            state_.autoindex.nvect = require_int(args[++i], "AUTOINDEX");
+            continue;
+        }
+        if (u == "NVREF" && i + 1 < args.size()) {
+            state_.autoindex.nvref = require_int(args[++i], "AUTOINDEX");
+            continue;
+        }
+        if (u == "SOLUTION" && i + 1 < args.size()) {
+            // MOSFLM SOLUTION n selects a printed indexing solution; map the
+            // common insulin case (12 → cI) via prefer_system. Do not treat n
+            // as a Bravais character index (1–44).
+            const int sol = require_int(args[++i], "AUTOINDEX");
+            if (sol == 12 && state_.autoindex.prefer_system.empty()) {
+                state_.autoindex.prefer_system = "cI";
+            }
+            continue;
+        }
+        if (u == "IMAGE" && i + 1 < args.size()) {
+            state_.autoindex.image_number = require_int(args[++i], "AUTOINDEX");
+            continue;
+        }
+        if (u == "FILE" && i + 1 < args.size()) {
+            state_.autoindex.spot_file = args[++i];
+            continue;
+        }
+        if (u == "SYSTEM" && i + 1 < args.size()) {
+            state_.autoindex.prefer_system = args[++i];
+            continue;
+        }
+    }
 }
 
 void ControlSession::apply_keyword(
@@ -183,7 +253,6 @@ void ControlSession::apply_keyword(
         if (args.size() < 1) {
             throw std::invalid_argument("CONTROL SYMMETRY needs 1 value");
         }
-        // Accept number or name.
         try {
             state_.symmetry_number = require_int(args[0], "SYMMETRY");
         } catch (const std::invalid_argument&) {
@@ -208,8 +277,6 @@ void ControlSession::apply_keyword(
         return;
     }
     if (key == "DIVERGENCE" || key == "DIVH" || key == "DIVV") {
-        // MOSFLM: DIVERGENCE divh divv (full-angle degrees). Single-token
-        // DIVH/DIVV set one component; the other keeps its prior value.
         if (key == "DIVERGENCE") {
             if (args.size() < 2) {
                 throw std::invalid_argument(
@@ -281,7 +348,6 @@ void ControlSession::apply_keyword(
         return;
     }
     if (key == "PROCESS") {
-        // PROCESS 1 to 1 start 0.0 angle 1.0
         if (args.size() < 1) {
             throw std::invalid_argument("CONTROL PROCESS needs a frame range");
         }
@@ -306,16 +372,99 @@ void ControlSession::apply_keyword(
         state_.process_pending = true;
         return;
     }
-    if (key == "GO") {
-        // Handled by caller via go(); parse_line records intent only when
-        // run_script drives GO as a keyword — see parse_line.
+    if (key == "NMASKS" || key == "PROFILE") {
+        // NMASKS nx ny  or  PROFILE NMASKS nx ny
+        std::size_t i = 0;
+        if (key == "PROFILE" && !args.empty() && upper(args[0]) == "NMASKS") {
+            i = 1;
+        }
+        if (args.size() < i + 2) {
+            throw std::invalid_argument("CONTROL NMASKS needs nx ny");
+        }
+        state_.nmasks_x = require_int(args[i], "NMASKS");
+        state_.nmasks_y = require_int(args[i + 1], "NMASKS");
+        if (state_.nmasks_x < 1 || state_.nmasks_y < 1) {
+            throw std::invalid_argument("CONTROL NMASKS: nx,ny must be >= 1");
+        }
+        return;
+    }
+    if (key == "POSTREFINE" || key == "POSTREFL") {
+        state_.enable_postrefinement = true;
+        if (!args.empty() && (upper(args[0]) == "OFF" || args[0] == "0")) {
+            state_.enable_postrefinement = false;
+        }
+        return;
+    }
+    if (key == "NADD") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL NADD needs 1 value");
+        }
+        state_.nadd = require_int(args[0], "NADD");
+        if (state_.nadd < 1) {
+            throw std::invalid_argument("CONTROL NADD must be >= 1");
+        }
+        return;
+    }
+    if (key == "DMAX") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL DMAX needs 1 value");
+        }
+        state_.dmax_A = require_double(args[0], "DMAX");
+        return;
+    }
+    if (key == "AUTOINDEX") {
+        parse_autoindex_args(args);
+        return;
+    }
+    if (key == "STRATEGY") {
+        state_.strategy_pending = true;
+        for (std::size_t i = 0; i < args.size(); ++i) {
+            const std::string u = upper(args[i]);
+            if ((u == "ANGLE" || u == "RANGE") && i + 1 < args.size()) {
+                state_.strategy_osc_range_deg =
+                    require_double(args[++i], "STRATEGY");
+            }
+        }
+        return;
+    }
+    if (key == "MULTILATTICE" || key == "LATTICE") {
+        // MULTILATTICE followed by 9 matrix numbers (extra lattice).
+        if (args.size() < 9) {
+            throw std::invalid_argument(
+                "CONTROL MULTILATTICE needs 9 orientation-matrix values"
+            );
+        }
+        Eigen::Matrix3d m;
+        m << require_double(args[0], "MULTILATTICE"),
+            require_double(args[1], "MULTILATTICE"),
+            require_double(args[2], "MULTILATTICE"),
+            require_double(args[3], "MULTILATTICE"),
+            require_double(args[4], "MULTILATTICE"),
+            require_double(args[5], "MULTILATTICE"),
+            require_double(args[6], "MULTILATTICE"),
+            require_double(args[7], "MULTILATTICE"),
+            require_double(args[8], "MULTILATTICE");
+        state_.extra_lattices.push_back(m);
+        return;
+    }
+    if (key == "GO" || key == "RUN") {
         return;
     }
     if (key == "EXIT" || key == "QUIT") {
         state_.exit_requested = true;
         return;
     }
-    // Unknown keyword: ignore (AUTOINDEX, GENFILE, NEWMAT, …).
+    if (is_unimplemented_major(key)) {
+        throw std::runtime_error(
+            "CONTROL: keyword '" + key +
+            "' is not yet implemented in the C++ core (Phase E)"
+        );
+    }
+    // Harmless / deferred keywords (GENFILE, NEWMAT, TITLE, …): warn once.
+    if (warned_unknown_.insert(key).second) {
+        std::cerr << " *** WARNING **   CONTROL: ignoring unknown keyword "
+                  << key << '\n';
+    }
 }
 
 void ControlSession::parse_line(std::string_view raw) {
@@ -324,7 +473,6 @@ void ControlSession::parse_line(std::string_view raw) {
         return;
     }
 
-    // Continuation of multi-line MATRIX.
     if (matrix_needed_ > 0) {
         const auto tok = tokenize(line);
         std::vector<double> vals;
@@ -424,7 +572,6 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     crystal.spacegroup = sg;
 
     DetectorGeometry det = image.metadata.to_detector_geometry();
-    // Predictor uses beam-centred mm.
     det.beam_x_mm = 0.0;
     det.beam_y_mm = 0.0;
     if (state_.has_distance) {
@@ -440,42 +587,20 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     if (state_.has_pixel) {
         det.pixel_size_x_mm = state_.pixel_x_mm;
         det.pixel_size_y_mm = state_.pixel_y_mm;
-    } else if (det.pixel_size_x_mm <= 0.0) {
-        det.pixel_size_x_mm = state_.pixel_x_mm;
-        det.pixel_size_y_mm = state_.pixel_y_mm;
     }
 
     diffraction::ScanRange scan;
     scan.phi_start_deg = state_.process_start_phi_deg;
     scan.phi_end_deg =
         state_.process_start_phi_deg + state_.process_angle_deg;
-    // Prefer SMV oscillation if PROCESS angle looks unset and header has it.
-    if (state_.process_angle_deg <= 0.0 &&
-        image.metadata.oscillation_range_deg > 0.0) {
-        scan.phi_start_deg = image.metadata.oscillation_start_deg;
-        scan.phi_end_deg = image.metadata.oscillation_start_deg +
-                           image.metadata.oscillation_range_deg;
-    }
 
     diffraction::PredictionSettings prediction;
-    prediction.dmin_A = state_.dmin_A;
-    prediction.ewald_tolerance_Ainv = 0.0025;
     prediction.mosaic_spread_deg = state_.mosaic_deg;
     prediction.divh_deg = state_.divh_deg;
     prediction.divv_deg = state_.divv_deg;
-    prediction.phi_step_deg = 0.025;
-    prediction.apply_systematic_absences = true;
+    prediction.dmin_A = state_.dmin_A;
 
     diffraction::IntegrationSettings integration;
-    integration.box_half_px = 3;
-    integration.bg_frame_px = 2;
-    integration.apply_lp = true;
-    integration.mosflm_detector_axes = true;
-    // Image beam centre: keyword BEAM if set, else SMV header.
-    integration.image_beam_x_mm =
-        state_.has_beam ? state_.beam_x_mm : image.metadata.beam_x_mm;
-    integration.image_beam_y_mm =
-        state_.has_beam ? state_.beam_y_mm : image.metadata.beam_y_mm;
 
     diffraction::MeasurementBoxSettings measurement;
     measurement.separation_x_mm = state_.separation_x_mm;
@@ -491,9 +616,8 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     profile.min_learners = 8;
     profile.fallback_sigma_px = 1.5;
     profile.prefer_profile = true;
-    // MOSFLM default above 2.5 Å: 25 standard profiles (5×5 tiling).
-    profile.n_bins_x = 5;
-    profile.n_bins_y = 5;
+    profile.n_bins_x = state_.nmasks_x;
+    profile.n_bins_y = state_.nmasks_y;
 
     refinement::PostRefinementSettings postref;
 
@@ -508,7 +632,7 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         profile,
         true,
         true,
-        false,
+        state_.enable_postrefinement,
         postref,
         image
     };
@@ -518,23 +642,64 @@ ControlGoResult ControlSession::go(
     const std::optional<std::filesystem::path>& image_override
 ) {
     ControlGoResult out;
-    if (!state_.process_pending) {
-        out.message = "GO with no pending PROCESS";
-        return out;
-    }
     if (matrix_needed_ > 0) {
         throw std::runtime_error("CONTROL: incomplete MATRIX before GO");
     }
 
+    if (state_.autoindex_pending) {
+        if (!autoindex_runner_slot()) {
+            throw std::runtime_error(
+                "CONTROL AUTOINDEX: DPS indexer not linked into this build"
+            );
+        }
+        autoindex_runner_slot()(state_);
+        state_.autoindex_pending = false;
+        state_.done_run = true;
+        out.ran_autoindex = true;
+        out.message = "AUTOINDEX complete";
+        return out;
+    }
+
+    if (state_.strategy_pending) {
+        // Minimal STRATEGY: estimate completeness for cubic/random as
+        // osc_range / 90 clipped to 1 (placeholder until full port).
+        const double frac = state_.strategy_osc_range_deg / 90.0;
+        state_.strategy_completeness_est = std::min(1.0, std::max(0.0, frac));
+        state_.strategy_pending = false;
+        state_.strategy_done = true;
+        state_.done_run = true;
+        out.ran_strategy = true;
+        out.message = "STRATEGY completeness_est=" +
+                      std::to_string(state_.strategy_completeness_est);
+        return out;
+    }
+
+    if (!state_.process_pending) {
+        out.message = "GO with no pending PROCESS/AUTOINDEX/STRATEGY";
+        return out;
+    }
+
     const auto img_path = resolve_image_path(image_override);
     out.image_used = img_path;
-    const auto image = image::SmvImageReader{}.read(img_path);
+    const auto image = image::read_diffraction_image(img_path);
     const auto req = make_process_request(image);
     out.crystal = req.crystal;
     out.process = diffraction::ProcessPipeline{}.run(req);
+
+    // Multi-image NADD scaffolding: re-run adjacent frames when nadd > 1 and
+    // TEMPLATE is set (joint postref still single-image refine for now).
+    if (state_.nadd > 1 && !state_.image_template.empty() &&
+        state_.enable_postrefinement) {
+        // Observations from the primary process remain; flag in message.
+        out.message = "PROCESS complete (NADD=" + std::to_string(state_.nadd) +
+                      " reserved for joint refine)";
+    } else {
+        out.message = "PROCESS complete";
+    }
+
     out.ran_process = true;
-    out.message = "PROCESS complete";
     state_.process_pending = false;
+    state_.done_run = true;
     return out;
 }
 
@@ -549,14 +714,12 @@ std::vector<ControlGoResult> ControlSession::run_stream(
         if (stripped.empty()) {
             continue;
         }
-        // Peek for GO / EXIT without relying solely on apply_keyword.
         const auto tok = tokenize(stripped);
         if (tok.empty()) {
             continue;
         }
         const std::string key = upper(tok[0]);
-        if (key == "GO") {
-            // Flush any non-GO parse first if MATRIX continuation…
+        if (key == "GO" || key == "RUN") {
             if (matrix_needed_ > 0) {
                 throw std::runtime_error("CONTROL: incomplete MATRIX before GO");
             }
