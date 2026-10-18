@@ -25,10 +25,11 @@ are **not** from `ipmosflm`.
 | Test | What it checks |
 | ---- | -------------- |
 | `known_indexed_oracle` | Synthetic analytical dumps still match C++ fixtures |
-| `insulin_hkl_overlap` | C++ PREDICT vs `insulin_1_001.mtz` Miller-index set, probing A-matrix axis/sign permutations |
+| `insulin_hkl_overlap` | C++ PREDICT vs `insulin_1_001.mtz` after `mosflm_amat_to_cpp_ub`; ASU/Friedel-aware recall |
 
-**Baseline (2026-10-17):** best recall ≈ **6.8%** (99 / 1463 unique MTZ HKLs)
-with axis permutation **YZX** and sign pattern **2**, dmin=2.5 Å, φ∈[0,1]°.
-Predictor still emits many extra spots (SG absences / Ewald window). Positional
-`XDET`/`YDET` comparison remains blocked on lab-frame reconciliation — see
+**Baseline (2026-10-17):** ASU-aware recall **100%** (1463 / 1463) with
+`R = [[0,0,1],[0,-1,0],[1,0,0]]` (`mosflm_lab_to_cpp`), dmin=1.45 Å, φ∈[0,1]°.
+Exact-index recall is lower (~22%) because MOSFLM and C++ may pick different
+symmetry equivalents. Predictor still emits extras (SG absences / Ewald window).
+Next: positional `XDET`/`YDET` differential — see
 `../images/known_indexed/geometry.txt`.

@@ -1,19 +1,20 @@
 /**
  * Known-indexed HKL overlap: C++ PREDICT vs real ipmosflm insulin MTZ.
  *
- * Geometry from testdata/images/known_indexed/geometry.txt (CCP4 insulin_1_001).
- * Positional (XDET) mapping is still open; this test measures Miller-index
- * set overlap and probes a few A-matrix axis/sign conventions.
+ * Applies :func:`mosflm_amat_to_cpp_ub` to the printed Orientation Matrix [A].
+ * Exact Miller indices may differ by space-group / Friedel choice; the gate is
+ * ASU-aware recall (every MTZ HKL matches a predicted equivalent).
  */
 
 #include "mosflm/crystal/CrystalMetadata.hpp"
 #include "mosflm/crystal/MtzAdapter.hpp"
 #include "mosflm/diffraction/ReflectionPredictor.hpp"
+#include "mosflm/geometry/LabFrame.hpp"
 #include "mosflm/geometry/OrientationMatrix.hpp"
 #include "test_util.hpp"
 
-#include <algorithm>
-#include <cmath>
+#include <gemmi/symmetry.hpp>
+
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -21,7 +22,6 @@
 #include <vector>
 
 using mosflm::OrientationMatrix;
-using mosflm::UnitCell;
 using mosflm::crystal::CrystalMetadata;
 using mosflm::crystal::MtzAdapter;
 using mosflm::diffraction::PredictionRequest;
@@ -49,6 +49,25 @@ std::set<Hkl> unique_hkl_pred(
     return out;
 }
 
+std::set<Hkl> expand_symmetry(
+    const std::set<Hkl>& in,
+    const gemmi::SpaceGroup* sg
+) {
+    std::set<Hkl> out;
+    const auto ops = sg->operations();
+    for (const auto& hkl : in) {
+        const gemmi::Op::Miller m{
+            std::get<0>(hkl), std::get<1>(hkl), std::get<2>(hkl)
+        };
+        for (const auto& op : ops) {
+            const gemmi::Op::Miller m2 = op.apply_to_hkl(m);
+            out.emplace(m2[0], m2[1], m2[2]);
+            out.emplace(-m2[0], -m2[1], -m2[2]);
+        }
+    }
+    return out;
+}
+
 std::size_t intersection_size(const std::set<Hkl>& a, const std::set<Hkl>& b) {
     std::size_t n = 0;
     for (const auto& h : a) {
@@ -59,25 +78,12 @@ std::size_t intersection_size(const std::set<Hkl>& a, const std::set<Hkl>& b) {
     return n;
 }
 
-Eigen::Matrix3d permute_axes(const Eigen::Matrix3d& A, int perm, int signs) {
-    // perm: 0=XYZ, 1=XZY, 2=YXZ, 3=YZX, 4=ZXY, 5=ZYX
-    static const int map[6][3] = {
-        {0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
-    Eigen::Matrix3d P = Eigen::Matrix3d::Zero();
-    for (int r = 0; r < 3; ++r) {
-        const int c = map[perm][r];
-        const double s = ((signs >> r) & 1) != 0 ? -1.0 : 1.0;
-        P(r, c) = s;
-    }
-    return P * A;
-}
-
-PredictionRequest insulin_request(const Eigen::Matrix3d& A) {
+PredictionRequest insulin_request(const Eigen::Matrix3d& Ub) {
     PredictionRequest req;
     req.crystal = CrystalMetadata::from_parameters(
         78.190, 78.190, 78.190, 90.0, 90.0, 90.0, "I 2 3"
     );
-    req.orientation = OrientationMatrix(A);
+    req.orientation = OrientationMatrix(Ub);
     req.detector.distance_mm = 160.0;
     req.detector.beam_x_mm = 0.0;
     req.detector.beam_y_mm = 0.0;
@@ -88,10 +94,17 @@ PredictionRequest insulin_request(const Eigen::Matrix3d& A) {
     req.detector.wavelength_A = 0.9790;
     req.scan.phi_start_deg = 0.0;
     req.scan.phi_end_deg = 1.0;
-    req.settings.dmin_A = 2.5;
+    req.settings.dmin_A = 1.45;
     req.settings.ewald_tolerance_Ainv = 0.01;
     req.settings.phi_step_deg = 0.05;
     return req;
+}
+
+Eigen::Matrix3d insulin_amat_mosflm() {
+    Eigen::Matrix3d A;
+    A << -0.012237, -0.000358, -0.002626, 0.002191, 0.005616, -0.010974,
+        0.001492, -0.011185, -0.005426;
+    return A;
 }
 
 }  // namespace
@@ -104,44 +117,40 @@ int main() {
     const auto mtz_hkl = unique_hkl_mtz(mtz);
     CHECK_MSG(mtz_hkl.size() > 100, "MTZ HKL set too small");
 
-    // Orientation Matrix [A] from geometry.txt (ipmosflm Crystal Parameters).
-    Eigen::Matrix3d A;
-    A << -0.012237, -0.000358, -0.002626, 0.002191, 0.005616, -0.010974,
-        0.001492, -0.011185, -0.005426;
+    const gemmi::SpaceGroup* sg = gemmi::find_spacegroup_by_name("I 2 3");
+    CHECK_MSG(sg != nullptr, "space group I 2 3 not found");
+
+    const Eigen::Matrix3d Ub =
+        OrientationMatrix::from_mosflm_orientation_matrix(insulin_amat_mosflm())
+            .ub();
 
     ReflectionPredictor pred;
-    std::size_t best_overlap = 0;
-    int best_perm = -1;
-    int best_signs = -1;
-    std::size_t best_npred = 0;
+    const auto result = pred.predict(insulin_request(Ub));
+    const auto pred_hkl = unique_hkl_pred(result.reflections);
+    const auto pred_exp = expand_symmetry(pred_hkl, sg);
 
-    for (int perm = 0; perm < 6; ++perm) {
-        for (int signs = 0; signs < 8; ++signs) {
-            const Eigen::Matrix3d Ap = permute_axes(A, perm, signs);
-            const auto result = pred.predict(insulin_request(Ap));
-            const auto pred_hkl = unique_hkl_pred(result.reflections);
-            const std::size_t ov = intersection_size(mtz_hkl, pred_hkl);
-            if (ov > best_overlap) {
-                best_overlap = ov;
-                best_perm = perm;
-                best_signs = signs;
-                best_npred = pred_hkl.size();
-            }
-        }
-    }
+    const std::size_t exact_ov = intersection_size(mtz_hkl, pred_hkl);
+    const std::size_t asu_ov = intersection_size(mtz_hkl, pred_exp);
+    const double exact_recall =
+        static_cast<double>(exact_ov) / static_cast<double>(mtz_hkl.size());
+    const double asu_recall =
+        static_cast<double>(asu_ov) / static_cast<double>(mtz_hkl.size());
 
-    const double recall =
-        static_cast<double>(best_overlap) / static_cast<double>(mtz_hkl.size());
     std::cout << "insulin_hkl_overlap: mtz_unique=" << mtz_hkl.size()
-              << " best_pred_unique=" << best_npred
-              << " overlap=" << best_overlap << " recall=" << recall
-              << " perm=" << best_perm << " signs=" << best_signs << '\n';
+              << " pred_unique=" << pred_hkl.size()
+              << " exact_overlap=" << exact_ov
+              << " exact_recall=" << exact_recall
+              << " asu_overlap=" << asu_ov << " asu_recall=" << asu_recall
+              << '\n';
 
-    // Soft gate while lab-frame mapping is unfinished (baseline ~7% recall
-    // with perm=YZX / signs=2 on 2026-10-17). Tighten when XDET matches.
-    CHECK_MSG(best_overlap > 0, "no HKL overlap for any A-matrix convention");
-    CHECK_MSG(best_npred > 0, "predictor returned empty set");
-    CHECK_MSG(recall > 0.05, "HKL recall below recorded baseline (0.05)");
+    CHECK_MSG(pred_hkl.size() > 0, "predictor returned empty set");
+    CHECK_MSG(exact_ov > 0, "no exact HKL overlap");
+    // Lab-frame map is correct when every integrated HKL is a predicted
+    // symmetry / Friedel equivalent (exact indices may differ).
+    CHECK_MSG(
+        asu_recall > 0.95,
+        "ASU-aware HKL recall below 0.95 — lab-frame map may be wrong"
+    );
 
     return mosflm_test::finish("insulin_hkl_overlap");
 }

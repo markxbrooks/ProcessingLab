@@ -106,6 +106,7 @@ add_library(mosflm_geometry
     src/geometry/ReciprocalLattice.cpp
     src/geometry/OrientationMatrix.cpp
     src/geometry/DetectorGeometry.cpp
+    src/geometry/LabFrame.cpp
     src/geometry/Rotmat.cpp
     src/geometry/Dstar.cpp
     src/geometry/Clcalc.cpp
@@ -343,6 +344,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_ub_from_psi PRIVATE mosflm_geometry)
     add_test(NAME ub_from_psi COMMAND test_ub_from_psi)
+
+    add_executable(test_lab_frame
+        tests/unit/test_lab_frame.cpp
+    )
+    target_link_libraries(test_lab_frame PRIVATE mosflm_geometry)
+    add_test(NAME lab_frame COMMAND test_lab_frame)
 
     if(MOSFLM_FORTRAN_TESTS)
         add_executable(test_fortran_c_api

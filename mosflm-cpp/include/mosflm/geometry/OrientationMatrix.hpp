@@ -20,6 +20,12 @@ public:
         const Eigen::Matrix3d& R = Eigen::Matrix3d::Identity()
     );
 
+    /// MOSFLM Orientation Matrix [A] (rows = lab X,Y,Z) → C++ predictor UB.
+    /// Applies :func:`mosflm_amat_to_cpp_ub`.
+    static OrientationMatrix from_mosflm_orientation_matrix(
+        const Eigen::Matrix3d& A_mosflm
+    );
+
     [[nodiscard]] const Eigen::Matrix3d& ub() const { return ub_; }
     [[nodiscard]] Eigen::Matrix3d ub_inverse() const;
 

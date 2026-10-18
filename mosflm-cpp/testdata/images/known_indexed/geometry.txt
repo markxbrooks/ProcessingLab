@@ -33,8 +33,10 @@
 #                          coordinates ipmosflm used for each reflection)
 #   ipmosflm.log           full ipmosflm run log
 #
-# NOTE: lab-frame mapping still open. CTest insulin_hkl_overlap probes axis
-# permutations of [A]; best so far is YZX with sign bits=2 (~7% HKL recall vs
-# the integrated MTZ). Positional XDET/YDET differential not wired yet.
+# Lab frame (mosflm::mosflm_lab_to_cpp): MOSFLM photons travel +X (S0=(-1,0,0)
+# is antiparallel), spindle +Z; C++ photons +Z, spindle +X. Map
+# R=[[0,0,1],[0,-1,0],[1,0,0]] so UB_cpp = R * A. CTest insulin_hkl_overlap:
+# ASU-aware recall 100% vs insulin_1_001.mtz (exact HKL may differ by SG/Friedel).
+# Next: XDET/YDET positional differential (GENDATA XG∥lab Y, YG∥lab Z).
 # Experimental Autotools splice: make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
 # (requires mosflm_predict_hook; see mosflm-cpp/docs/PHASE_C_SPLICE.md).

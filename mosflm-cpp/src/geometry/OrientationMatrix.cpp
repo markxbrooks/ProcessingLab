@@ -1,5 +1,7 @@
 #include "mosflm/geometry/OrientationMatrix.hpp"
 
+#include "mosflm/geometry/LabFrame.hpp"
+
 namespace mosflm {
 
 OrientationMatrix::OrientationMatrix(Eigen::Matrix3d ub) : ub_(std::move(ub)) {}
@@ -12,6 +14,12 @@ OrientationMatrix OrientationMatrix::from_cell_and_rotation(
     const Eigen::Matrix3d A = cell.orthogonalization_matrix();
     const Eigen::Matrix3d Astar = A.inverse().transpose();
     return OrientationMatrix(R * Astar);
+}
+
+OrientationMatrix OrientationMatrix::from_mosflm_orientation_matrix(
+    const Eigen::Matrix3d& A_mosflm
+) {
+    return OrientationMatrix(mosflm_amat_to_cpp_ub(A_mosflm));
 }
 
 Eigen::Matrix3d OrientationMatrix::ub_inverse() const {
