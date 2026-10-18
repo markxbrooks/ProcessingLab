@@ -29,7 +29,10 @@ namespace mosflm {
  * Convert a MOSFLM orientation / A-matrix (rows = lab X,Y,Z; columns = A*,B*,C*)
  * into the C++ predictor UB (``r*_cpp = UB_cpp * h``).
  */
-[[nodiscard]] Eigen::Matrix3d mosflm_amat_to_cpp_ub(const Eigen::Matrix3d& A_mosflm);
+[[nodiscard]] Eigen::Matrix3d mosflm_amat_to_cpp_ub(
+    const Eigen::Matrix3d& A_mosflm,
+    double wavelength_A = 1.0
+);
 
 /**
  * Map C++ predictor detector millimetres (beam-relative, from

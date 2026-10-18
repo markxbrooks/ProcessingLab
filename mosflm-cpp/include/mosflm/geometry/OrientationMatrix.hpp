@@ -23,7 +23,8 @@ public:
     /// MOSFLM Orientation Matrix [A] (rows = lab X,Y,Z) → C++ predictor UB.
     /// Applies :func:`mosflm_amat_to_cpp_ub`.
     static OrientationMatrix from_mosflm_orientation_matrix(
-        const Eigen::Matrix3d& A_mosflm
+        const Eigen::Matrix3d& A_mosflm,
+        double wavelength_A = 1.0
     );
 
     [[nodiscard]] const Eigen::Matrix3d& ub() const { return ub_; }

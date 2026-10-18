@@ -10,8 +10,14 @@ Eigen::Matrix3d mosflm_lab_to_cpp() {
     return R;
 }
 
-Eigen::Matrix3d mosflm_amat_to_cpp_ub(const Eigen::Matrix3d& A_mosflm) {
-    return mosflm_lab_to_cpp() * A_mosflm;
+Eigen::Matrix3d mosflm_amat_to_cpp_ub(
+    const Eigen::Matrix3d& A_mosflm,
+    double wavelength_A
+) {
+    if (wavelength_A <= 0.0) {
+        return mosflm_lab_to_cpp() * A_mosflm;
+    }
+    return mosflm_lab_to_cpp() * (A_mosflm / wavelength_A);
 }
 
 void cpp_mm_to_mosflm_xdet(
