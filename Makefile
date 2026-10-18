@@ -1,8 +1,8 @@
 # ProcessingLab top-level Makefile (Phase D / E).
 #
-# Default: C++ core + thin ipmosflm (no Fortran amalgamation).
+# Default: C++ core + IntegrationLab (no Fortran amalgamation).
 #   make / make cpp
-# Oracle amalgamation (not selected by env alone at this level):
+# Oracle amalgamation (F77 ipmosflm; not selected by env alone at this level):
 #   make dps-lib fortran-oracle
 #   # MOSFLM_FORTRAN_ORACLE=1 is only read inside mosflm/Makefile
 #
@@ -17,7 +17,14 @@ INSTALL = /opt/homebrew/bin/ginstall -c
 INSTALL_PROGRAM = ${INSTALL}
 
 CPP_BUILD = mosflm-cpp/build
-bin_PROGRAMS = ipmosflm
+# C++ release binary; F77 oracle remains ``ipmosflm``.
+ifeq ($(OS),Windows_NT)
+  EXEEXT = .exe
+else
+  EXEEXT =
+endif
+INTEGRATIONLAB = IntegrationLab$(EXEEXT)
+bin_PROGRAMS = $(INTEGRATIONLAB)
 
 .PHONY: all cpp cbf-lib dps-lib fortran-oracle libs force install uninstall \
 	clean distclean realclean test
@@ -37,15 +44,15 @@ dps-lib:
 	cd src/dps/util && ${MAKE}
 	cd src/dps/index && ${MAKE}
 
-# Default release artifact: mosflm-cpp CLI + thin CCP4-compatible ipmosflm.
+# Default release artifact: mosflm-cpp CLI + IntegrationLab (C++ CONTROL).
 cpp: cbf-lib dps-lib
 	cmake -S mosflm-cpp -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
 		-DMOSFLM_FORTRAN_ORACLE=OFF
-	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli ipmosflm
+	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli IntegrationLab
 	mkdir -p bin
-	cp -f $(CPP_BUILD)/ipmosflm bin/ipmosflm
-	cp -f $(CPP_BUILD)/mosflm_cpp_cli bin/mosflm_cpp_cli
-	@echo "Installed thin binaries under bin/ (no amalgamation)."
+	cp -f $(CPP_BUILD)/$(INTEGRATIONLAB) bin/$(INTEGRATIONLAB)
+	cp -f $(CPP_BUILD)/mosflm_cpp_cli$(EXEEXT) bin/mosflm_cpp_cli$(EXEEXT)
+	@echo "Installed thin binaries under bin/ (IntegrationLab; no amalgamation)."
 
 test: cpp
 	ctest --test-dir $(CPP_BUILD) --output-on-failure
@@ -56,17 +63,19 @@ libs: cbf-lib
 	if [ -f $(RANLIB) ]; then $(RANLIB) lib/DPSLIB.a; fi
 
 # Needs DPS archives (libdps_index.a); ``libs`` alone is insufficient.
+# Installs F77 oracle as bin/ipmosflm (does not overwrite IntegrationLab).
 fortran-oracle: libs dps-lib
 	cd mosflm ; ${MAKE} MOSFLM_FORTRAN_ORACLE=1 ipmosflm
 
 force:
-	rm -f bin/ipmosflm
+	rm -f bin/$(INTEGRATIONLAB)
 	${MAKE} cpp
 
-# Back-compat alias: ``make ipmosflm`` → thin C++ binary.
+# Back-compat alias: ``make ipmosflm`` → C++ IntegrationLab.
 ipmosflm: cpp
+IntegrationLab: cpp
 
-bin/ipmosflm: cpp
+bin/$(INTEGRATIONLAB): cpp
 
 distclean-generic:
 	-rm -f ${MAKE}file Makefile
@@ -82,7 +91,7 @@ clean: clean-generic
 	cd cbf ; ${MAKE} clean || true
 	cd mosflm ; ${MAKE} clean || true
 	rm -rf $(CPP_BUILD)
-	rm -f bin/ipmosflm bin/mosflm_cpp_cli
+	rm -f bin/$(INTEGRATIONLAB) bin/mosflm_cpp_cli$(EXEEXT) bin/ipmosflm
 
 distclean: distclean-generic clean
 	-rm -f config.status config.h
@@ -94,8 +103,9 @@ realclean: clean
 
 install: cpp
 	mkdir -p "$(DESTDIR)$(bindir)"
-	$(INSTALL_PROGRAM) bin/ipmosflm "$(DESTDIR)$(bindir)"
-	$(INSTALL_PROGRAM) bin/mosflm_cpp_cli "$(DESTDIR)$(bindir)"
+	$(INSTALL_PROGRAM) bin/$(INTEGRATIONLAB) "$(DESTDIR)$(bindir)"
+	$(INSTALL_PROGRAM) bin/mosflm_cpp_cli$(EXEEXT) "$(DESTDIR)$(bindir)"
 
 uninstall:
-	rm -f "$(DESTDIR)$(bindir)/ipmosflm" "$(DESTDIR)$(bindir)/mosflm_cpp_cli"
+	rm -f "$(DESTDIR)$(bindir)/$(INTEGRATIONLAB)" \
+		"$(DESTDIR)$(bindir)/mosflm_cpp_cli$(EXEEXT)"

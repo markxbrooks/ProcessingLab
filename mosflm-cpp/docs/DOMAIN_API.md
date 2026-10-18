@@ -51,10 +51,9 @@ Fortran GENERATE / REEK / MEAS / INTEG3 / PROCESS:
 DISTANCE, WAVELENGTH, PIXEL, MATRIX/AMAT, PROCESS, GO, EXIT, …) and on GO
 builds a `ProcessRequest` + runs `ProcessPipeline`. Script:
 `testdata/images/known_indexed/cpp_process.in`. CLI:
-`mosflm_cpp_cli run <script.in> [--image img] [mtz]`. Thin default binary:
-`ipmosflm` (Phase D / D6; no amalgamation). CTests: `control_session`,
-`insulin_control`, `ipmosflm_thin`. Not a line port of Fortran CONTROL
-(no AUTOINDEX / STRATEGY / iMosflm sockets).
+`mosflm_cpp_cli run <script.in> [--image img] [mtz]`. Default binary:
+`IntegrationLab` (Phase D / E; no amalgamation; `.exe` on Windows). F77 oracle:
+`ipmosflm`. CTests: `control_session`, `insulin_control`, `integrationlab`.
 
 ## Post-refinement (Phase D / D4)
 

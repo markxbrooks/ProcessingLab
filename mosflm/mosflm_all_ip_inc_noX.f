@@ -55381,7 +55381,7 @@ C
         CALL CTIMER(MOSTIMEA)
         CALL FROMHDF5(ODFILE,IMAGE,FIRSTIMG,LASTIMG,
      $       NIMAGES,CBF_INT,CBF_INT4,CBF_DOUBLE,CBF_CHAR,
-     $       PHIBEGVALS,PHIENDVALS,IMODE,IFILETYPE,IDEBUG)
+     $       PHIBEGVALS,PHIENDVALS,IMODE,IFILETYPE,IDEBUG,IERR)
         CALL CTIMER(MOSTIMEB)
         IF (DEBUG(99)) THEN
           WRITE(IOUT,FMT=6102) MOSTIMEB - MOSTIMEA
@@ -55422,7 +55422,7 @@ c
         CALL CTIMER(MOSTIMEA)
         CALL FROMHDF5(ODFILE,IMAGE2,FIRSTIMG,LASTIMG,
      $       NIMAGES,CBF_INT,CBF_INT4,CBF_DOUBLE,CBF_CHAR,
-     $       PHIBEGVALS,PHIENDVALS,IMODE,IFILETYPE,IDEBUG)
+     $       PHIBEGVALS,PHIENDVALS,IMODE,IFILETYPE,IDEBUG,IERR)
         NIMAGES = SNIMAGES
         CALL CTIMER(MOSTIMEB)
         IF (DEBUG(99)) THEN
@@ -133179,7 +133179,7 @@ C      EXTERNAL XDLF_IMAGE
      +     NXDPX1,NYDPX1,NYDPX2,IXOPIX,IYOPIX,NXDPX2,NYDPX3,NXP_CMP,
      +     IMAGE_ORDER,JIMAGE_ORDER,MINVAL,MAXVAL,MINTHR,MAXTHR,
      +     MINW,MINH,IBG,IOVLY,ICONTRAST,IDISP_NOW,IERR
-      INTEGER*2 IMAGE
+      INTEGER*2 IMAGE(*)
 C      CALL XDLF_IMAGE(IVHIMG,IVHBAS,IMG_X,IMG_Y,ICSET,IMAGE,IFTYPE,
 C     +     NXDPX1,NYDPX1,NYDPX2,IXOPIX,IYOPIX,NXDPX2,NYDPX3,NXP_CMP,
 C     +     IMAGE_ORDER,JIMAGE_ORDER,MINVAL,MAXVAL,MINTHR,MAXTHR,
@@ -133219,7 +133219,7 @@ C---- wrapper routine to allow easy replacement of XDLF_IMAGE_NEWIMG
 C
 C      EXTERNAL XDLF_IMAGE_NEWIMG
       INTEGER IVHIMG, IDISP_NOW,IERR
-      INTEGER*2 IMAGE
+      INTEGER*2 IMAGE(*)
 C      CALL XDLF_IMAGE_NEWIMG(IVHIMG, IMAGE, IDISP_NOW,IERR)
       RETURN
       END
@@ -133394,7 +133394,8 @@ C
 C---- wrapper routine to allow easy replacement of XDLF_OPEN_VIEW
 C
 C      EXTERNAL XDLF_OPEN_VIEW
-      INTEGER NUMC,NCOLORS,NPLANES,IERR
+      INTEGER NUMC,IERR
+      INTEGER NCOLORS(NUMC),NPLANES(NUMC)
 C      CALL XDLF_OPEN_VIEW(NUMC,NCOLORS,NPLANES,IERR)
       RETURN
       END
@@ -157350,9 +157351,10 @@ C
           CALLED = 'WRITE_COLOUR_JPEG'
           COMMENT = ' '
           IF (DEBUG(99)) CALL PRINTFLOW(THIS,CALLED,COMMENT,INDENT)
-          CALL WRITE_COLOUR_JPEG(SERVERFD, NREC, IYLEN, IMAGE, 
-     +        PIXMIN, PIXMAX, IMGMAX, 1, TLC, BRC, 0, 0, 0, 
-     $        BINARY,IMAGETYPE,SPOT_POSITION,0,PRED_POSITION, 
+          CALL WRITE_COLOUR_JPEG(SERVERFD, 0, NREC, IYLEN, IMAGE,
+     +        PIXMIN, PIXMAX, IMGMAX, IMGMIN, 1, 0, TLC, BRC,
+     $        0, 0, 0, 0,
+     $        BINARY,IMAGETYPE,SPOT_POSITION,0,PRED_POSITION,
      +        PRED_TYPE, IRAS(1),IRAS(2),PIXEL_INTENSITIES)
         END IF
 
@@ -205843,21 +205845,21 @@ C                   ! evaluate the (4n+2)th derivative matrix explicitly
 C
 C                    ! evaluate the (4n+3)th derivative matrix
             IF (NDER .GE. 3) THEN     
-               DO 100 J = 1, 3
-                  DO 100 I = 1, 3
+               DO J = 1, 3
+                  DO I = 1, 3
 C                    ! (4n+3)th derivative is minus (4n+1)th derivative
-100                  MATS(I,J,3) =  -  MATS(I,J,1)
-                  CONTINUE
-               CONTINUE
+                     MATS(I,J,3) =  -  MATS(I,J,1)
+                  END DO
+               END DO
 C
 C                    ! evaluate the (4n+4)th derivative matrix
                IF (NDER .GE. 4) THEN    
-                  DO 200 J = 1, 3
-                     DO 200 I = 1, 3
+                  DO J = 1, 3
+                     DO I = 1, 3
 C                       ! (4n+4)th derivative is minus (4n+2)th derivative
-200                     MATS(I,J,4) =  -  MATS(I,J,2)
-                     CONTINUE
-                  CONTINUE
+                        MATS(I,J,4) =  -  MATS(I,J,2)
+                     END DO
+                  END DO
 C
                   IF (NDER .GE. 5) THEN 
                      PRINT *, 'RTMATS: > 4 derivatives requested!'
@@ -232506,8 +232508,9 @@ C****VECTOR V REDUCED TO UNIT VECTOR
       VMOD = DBLE(V(1))**2 + DBLE(V(2))**2 + DBLE(V(3)**2)
       IF (VMOD.LE.0.0) RETURN
       VMOD=SQRT(VMOD)
-      DO 1 I=1,3
-    1 V(I)=V(I)/REAL(VMOD)
+      DO I=1,3
+         V(I)=V(I)/REAL(VMOD)
+      END DO
       RETURN
       END
 C
@@ -244005,7 +244008,8 @@ C     .. set properly, since we must know the distance at this point.
       END
       INTEGER FUNCTION XDLSTR(STRING)
       IMPLICIT NONE
-      CHARACTER*(*) STRING
+C     Accept scalar or array CHARACTER actuals (MENU_ITEMS, etc.).
+      CHARACTER*(*) STRING(*)
       XDLSTR = 1
       END
 C== WARNINGS ==

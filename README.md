@@ -2,26 +2,28 @@
 
 Progressive C++ port of the MOSFLM diffraction-processing core.
 
-**Phase D Done:** default build/install is the C++ core. The CCP4-compatible
-name `ipmosflm` is a thin CONTROL → PROCESS driver that does **not** link the
-Fortran amalgamation. Autotools `mosflm/` remains an optional scientific oracle.
+**Phase D Done:** default build/install is the C++ core. The release binary is
+**`IntegrationLab`** (`IntegrationLab.exe` on Windows) — a thin CONTROL →
+PROCESS driver that does **not** link the Fortran amalgamation. Autotools
+`mosflm/` remains an optional scientific oracle named **`ipmosflm`** (F77).
 
 | Path | Role |
 | ---- | ---- |
 | [`mosflm-cpp/`](mosflm-cpp/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
-| [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle**) |
+| [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle** → `bin/ipmosflm`) |
 | [`porting.md`](porting.md) | Migration roadmap and current status |
-| `bin/ipmosflm` | Thin C++ CONTROL binary (default) |
+| `bin/IntegrationLab` | C++ CONTROL binary (default; `.exe` on Windows) |
 | `bin/mosflm_cpp_cli` | Full C++ CLI |
+| `bin/ipmosflm` | F77 oracle only (`make fortran-oracle`) |
 
 ## Quick start (default)
 
 ```bash
 make cpp          # builds cbf/lib/libcbf.a then mosflm-cpp
 make test         # ctest in mosflm-cpp/build
-./bin/ipmosflm version
+./bin/IntegrationLab version
 ./bin/mosflm_cpp_cli process-insulin
-./bin/ipmosflm HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
+./bin/IntegrationLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   mosflm-cpp/testdata/images/known_indexed/cpp_process.in
 ```
 
@@ -35,7 +37,7 @@ Top-level CMake (`-S .`) adds `mosflm-cpp` when `PROCESSINGLAB_BUILD_CPP=ON`
 Requires CCP4. See [`porting.md`](porting.md) for macOS notes.
 
 ```bash
-make fortran-oracle
+make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite IntegrationLab)
 # or:
 #   ./configure --with-ccp4-prefix=/Applications/ccp4-9
 #   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm

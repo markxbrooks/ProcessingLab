@@ -1,8 +1,9 @@
 # Porting ProcessingLab (MOSFLM) to C++: a practical roadmap
 
-**Repository:** ProcessingLab (formerly `ipmosflm`). Default `bin/ipmosflm` is the
-thin C++ CONTROL driver (Phase D / D6); the Autotools amalgamation is an optional
-oracle (`make fortran-oracle`). The C++ port lives in `mosflm-cpp/`.
+**Repository:** ProcessingLab (formerly `ipmosflm`). Default `bin/IntegrationLab`
+(`IntegrationLab.exe` on Windows) is the C++ CONTROL driver (Phase D / E); the
+Autotools amalgamation is an optional F77 oracle (`make fortran-oracle` →
+`bin/ipmosflm`). The C++ port lives in `mosflm-cpp/`.
 
 I would approach this as a progressive reimplementation of MOSFLM's computational core, with a C++ interface and a compatibility layer around the existing crystallographic algorithms—not as a line-by-line translation of the entire repository.
 
@@ -18,7 +19,7 @@ Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there 
 | ----- | ------ |
 | C++ vertical slice | Geometry, miniCBF I/O, stills + oscillation `PREDICT`, box summation, 2D Gaussian profile fit, MTZ write — covered by CTest and `mosflm_cpp_cli` |
 | PREDICT oracles | Analytical dumps + real insulin capture under `mosflm-cpp/testdata/oracle/known_indexed/`. CTest `insulin_hkl_overlap`: ASU-aware recall **100%** (`mosflm_lab_to_cpp`); `insulin_xdet`: median ~**23 px** (`ROTMAT2` + refined TILT/TWIST/YSCALE); `insulin_process_mtz`: exact-HKL recall ≥ 0.85 |
-| Default `bin/ipmosflm` | **Thin C++** CONTROL → PROCESS (D6); no amalgamation link. Oracle Autotools: `make fortran-oracle` / `MOSFLM_FORTRAN_ORACLE=1`; optional `MOSFLM_CPP_PREDICT=1` splice ~89% exact-HKL (`known_indexed_cpp_predict/`) |
+| Default `bin/IntegrationLab` | **C++** CONTROL → PROCESS (D6/E); no amalgamation link (`.exe` on Windows). F77 oracle: `make fortran-oracle` → `bin/ipmosflm`; optional `MOSFLM_CPP_PREDICT=1` splice ~89% exact-HKL (`known_indexed_cpp_predict/`) |
 | Phase C | **Done** — lab-frame map, HKL/XDET differentials, mosaicity + absences in predictor, YSCALE/TILT/TWIST fields, PROCESS splice + MTZ CTest |
 | Phase D / D1 | **Done** — pure C++ `ProcessPipeline` (SMV → predict → sum → MTZ); CTest `insulin_cpp_process` ASU recall ≥ 0.85 (no amalgamation hook) |
 | Phase D / D2 | **Done** — `MeasIntegrator` (SEPARATION boxes, overlap, bg sigma-clip); CTest `insulin_isi` soft I/SIGI vs oracle; no Fortran MEAS |
@@ -181,5 +182,5 @@ Day 5: Document first legacy routine to replace (`PREDICT`).
 
 1. Real known-indexed images — **done** (`capture_ipmosflm_oracle.sh` → `testdata/oracle/known_indexed/`).
 2. **Phase C** — **Done** (D0 closed): HKL/XDET/MTZ CTests, mosaicity + absences, YSCALE pixel aspect + TILT/TWIST fields, PROCESS splice ~89% exact-HKL recall.
-3. **Phase D / D1–D6** — **Done**: SMV + `ProcessPipeline` + MEAS + Rossmann profile + Stage 2 `PostRefiner` + CONTROL + thin `ipmosflm` / `make cpp`; amalgamation behind `MOSFLM_FORTRAN_ORACLE`. CTests include `insulin_control`, `ipmosflm_thin`. See [`portingD.md`](portingD.md).
+3. **Phase D / D1–D6** — **Done**: SMV + `ProcessPipeline` + MEAS + Rossmann profile + Stage 2 `PostRefiner` + CONTROL + `IntegrationLab` / `make cpp`; amalgamation behind `MOSFLM_FORTRAN_ORACLE` → `ipmosflm`. CTests include `insulin_control`, `integrationlab`. See [`portingD.md`](portingD.md).
 4. **Phase E** — CCP4 drop-in roadmap: see [`portingE.md`](portingE.md) (E0 CLI UX through E7 packaging).

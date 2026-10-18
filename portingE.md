@@ -1,7 +1,8 @@
-# Phase E: CCP4 drop-in for C++ ipmosflm
+# Phase E: CCP4 drop-in for C++ IntegrationLab
 
-Progressive drop-in of thin `bin/ipmosflm` toward Mosflm 7.4.0 CONTROL/science.
-Fortran amalgamation remains `make fortran-oracle` (not the default `make`).
+Progressive drop-in of thin `bin/IntegrationLab` toward Mosflm 7.4.0
+CONTROL/science. Fortran amalgamation remains `make fortran-oracle` →
+`bin/ipmosflm` (not the default `make`).
 
 | Milestone | Intent | Status |
 | --------- | ------ | ------ |
@@ -17,17 +18,18 @@ Fortran amalgamation remains `make fortran-oracle` (not the default `make`).
 ## Build
 
 ```bash
-# Thin C++ (default)
+# Thin C++ (default) → IntegrationLab (.exe on Windows)
 make cpp
-./bin/ipmosflm </dev/null   # banner + NO "RUN" CARD GIVEN
+./bin/IntegrationLab </dev/null   # banner + NO "RUN" CARD GIVEN
 
 # Fortran oracle (does NOT use MOSFLM_FORTRAN_ORACLE=1 alone at repo root)
-make dps-lib fortran-oracle
+make dps-lib fortran-oracle       # → bin/ipmosflm
 export DYLD_LIBRARY_PATH=/Applications/ccp4-9/lib
 # optional: tools/fix_oracle_rpath.sh
 ```
 
 ## CTests
 
-`ipmosflm_thin`, `control_session`, `control_autoindex` (if DPS), `image_io`,
-`imosflm_socket`, plus existing insulin PROCESS suite.
+`integrationlab`, `control_session`, `control_autoindex` (if DPS), `image_io`,
+`imosflm_socket`, `cbf_process_compare` (F77 vs C++ CBF PROCESS; soft-skip),
+plus existing insulin PROCESS suite.

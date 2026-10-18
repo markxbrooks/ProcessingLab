@@ -1,8 +1,8 @@
 /**
- * Thin ``ipmosflm`` CCP4-compatible name (Phase D / E).
+ * ``IntegrationLab`` — ProcessingLab C++ CONTROL driver (Phase D / E).
  *
- * Default ProcessingLab release binary: CONTROL → C++ science path.
- * Does **not** link the Fortran amalgamation. Oracle:
+ * Default release binary: CONTROL → C++ science path.
+ * Does **not** link the Fortran amalgamation. F77 oracle remains ``ipmosflm``:
  * ``make fortran-oracle`` (see ``../portingE.md``).
  */
 
@@ -44,9 +44,9 @@ void print_banner() {
         << "\n"
         << " ************ Mosflm version 7.4.0 for IP, CCD and PAD data"
            " (C++ core) ***********\n"
-        << " ProcessingLab thin ipmosflm — CONTROL → C++ PROCESS/AUTOINDEX\n"
+        << " IntegrationLab — CONTROL → C++ PROCESS/AUTOINDEX\n"
         << " Andrew Leslie and Harry Powell, MRC Laboratory of Molecular Biology\n"
-        << " Oracle amalgamation: make fortran-oracle\n"
+        << " F77 oracle (ipmosflm): make fortran-oracle\n"
         << "--------------------------------------------------------------------------------\n";
 }
 
@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
         }
         if (a == "--image") {
             if (i + 1 >= argc) {
-                std::cerr << "ipmosflm: --image needs a path\n";
+                std::cerr << "IntegrationLab: --image needs a path\n";
                 return 2;
             }
             image = argv[++i];
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
         }
         if (a == "HKLOUT" || a == "hklout") {
             if (i + 1 >= argc) {
-                std::cerr << "ipmosflm: HKLOUT needs a path\n";
+                std::cerr << "IntegrationLab: HKLOUT needs a path\n";
                 return 2;
             }
             hklout = argv[++i];
@@ -101,15 +101,16 @@ int main(int argc, char** argv) {
             script = argv[i];
             continue;
         }
-        std::cerr << "ipmosflm: unexpected argument '" << a << "'\n";
+        std::cerr << "IntegrationLab: unexpected argument '" << a << "'\n";
         return 2;
     }
 
     if (want_help) {
         std::cerr
-            << "Usage: ipmosflm [HKLOUT out.mtz] [--image img] [script.in]\n"
+            << "Usage: IntegrationLab [HKLOUT out.mtz] [--image img] [script.in]\n"
             << "  Reads CONTROL from script or stdin (GO/RUN → C++ science).\n"
-            << "  MOSFLM_IMAGE / CCP4 used when IMAGE/TEMPLATE unset.\n";
+            << "  MOSFLM_IMAGE / CCP4 used when IMAGE/TEMPLATE unset.\n"
+            << "  F77 ipmosflm oracle: make fortran-oracle\n";
         return 0;
     }
 
@@ -172,7 +173,7 @@ int main(int argc, char** argv) {
         }
         return 0;
     } catch (const std::exception& ex) {
-        std::cerr << "ipmosflm: " << ex.what() << '\n';
+        std::cerr << "IntegrationLab: " << ex.what() << '\n';
         return 1;
     }
 }

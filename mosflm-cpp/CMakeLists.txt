@@ -235,23 +235,24 @@ target_link_libraries(mosflm_cpp_cli
         mosflm_geometry
 )
 
-# Thin CCP4-compatible name (default release binary; no amalgamation).
-add_executable(ipmosflm
+# Default release binary (C++ CONTROL). Distinct from F77 ``ipmosflm`` oracle.
+# On Windows, CMake appends ``.exe`` → IntegrationLab.exe.
+add_executable(IntegrationLab
     app/ipmosflm_main.cpp
 )
-target_link_libraries(ipmosflm
+target_link_libraries(IntegrationLab
     PRIVATE
         mosflm_geometry
 )
 if(TARGET mosflm_indexing AND MOSFLM_HAS_DPS_INDEXER)
-    target_link_libraries(ipmosflm PRIVATE mosflm_indexing)
-    target_compile_definitions(ipmosflm PRIVATE MOSFLM_HAS_INDEXING=1)
+    target_link_libraries(IntegrationLab PRIVATE mosflm_indexing)
+    target_compile_definitions(IntegrationLab PRIVATE MOSFLM_HAS_INDEXING=1)
 endif()
-set_target_properties(ipmosflm PROPERTIES
-    OUTPUT_NAME ipmosflm
+set_target_properties(IntegrationLab PROPERTIES
+    OUTPUT_NAME IntegrationLab
 )
 
-install(TARGETS mosflm_cpp_cli ipmosflm
+install(TARGETS mosflm_cpp_cli IntegrationLab
     RUNTIME DESTINATION bin
 )
 install(TARGETS mosflm_geometry
@@ -448,6 +449,21 @@ if(BUILD_TESTING)
     set_tests_properties(cbf_vertical_slice PROPERTIES
         ENVIRONMENT
             "MOSFLM_CBF_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/cbf/sample_minicbf.cbf"
+    )
+
+    # F77 ipmosflm vs C++ ProcessPipeline on a real CBF (soft-skip if missing).
+    add_executable(test_cbf_process_compare
+        tests/differential/test_cbf_process_compare.cpp
+    )
+    target_link_libraries(test_cbf_process_compare PRIVATE mosflm_geometry)
+    add_test(
+        NAME cbf_process_compare
+        COMMAND test_cbf_process_compare
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(cbf_process_compare PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_IPMOSFLM=${MOSFLM_IPMOSFLM_ROOT}/bin/ipmosflm.oracle"
     )
 
     add_executable(test_profile_fitter
@@ -721,18 +737,18 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
-    add_executable(test_ipmosflm_thin
+    add_executable(test_integrationlab
         tests/differential/test_ipmosflm_thin.cpp
     )
-    add_dependencies(test_ipmosflm_thin ipmosflm)
+    add_dependencies(test_integrationlab IntegrationLab)
     add_test(
-        NAME ipmosflm_thin
-        COMMAND test_ipmosflm_thin
+        NAME integrationlab
+        COMMAND test_integrationlab
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
-    set_tests_properties(ipmosflm_thin PROPERTIES
+    set_tests_properties(integrationlab PROPERTIES
         ENVIRONMENT
-            "MOSFLM_THIN_IPMOSFLM=${CMAKE_CURRENT_BINARY_DIR}/ipmosflm"
+            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/IntegrationLab${CMAKE_EXECUTABLE_SUFFIX}"
     )
 
     if(MOSFLM_HAS_DPS_BRAVAIS)

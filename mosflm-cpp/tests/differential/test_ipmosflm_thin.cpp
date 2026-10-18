@@ -1,6 +1,8 @@
 /**
- * Phase D / E: thin ipmosflm (C++ CONTROL) without Fortran amalgamation.
+ * Phase D / E: IntegrationLab (C++ CONTROL) without Fortran amalgamation.
  * Empty-stdin golden lines + EXIT smoke + optional PROCESS.
+ *
+ * Distinct from F77 ``ipmosflm`` (``make fortran-oracle``).
  */
 
 #include "test_util.hpp"
@@ -16,21 +18,28 @@ namespace fs = std::filesystem;
 
 namespace {
 
-fs::path find_ipmosflm() {
+fs::path find_integrationlab() {
+    if (const char* env = std::getenv("MOSFLM_INTEGRATIONLAB")) {
+        return env;
+    }
+    // Back-compat with older test env name.
     if (const char* env = std::getenv("MOSFLM_THIN_IPMOSFLM")) {
         return env;
     }
     const char* rels[] = {
-        "build/ipmosflm",
-        "./ipmosflm",
-        "../build/ipmosflm",
+        "build/IntegrationLab",
+        "build/IntegrationLab.exe",
+        "./IntegrationLab",
+        "./IntegrationLab.exe",
+        "../build/IntegrationLab",
+        "../build/IntegrationLab.exe",
     };
     for (const char* rel : rels) {
         if (fs::exists(rel)) {
             return rel;
         }
     }
-    return "build/ipmosflm";
+    return "build/IntegrationLab";
 }
 
 fs::path find_insulin_img() {
@@ -68,8 +77,8 @@ std::string slurp(const fs::path& path) {
 }  // namespace
 
 int main() {
-    const fs::path bin = find_ipmosflm();
-    CHECK_MSG(fs::exists(bin), "missing thin ipmosflm binary in build/");
+    const fs::path bin = find_integrationlab();
+    CHECK_MSG(fs::exists(bin), "missing IntegrationLab binary in build/");
 
     // Empty stdin → Mosflm-like banner + NO RUN CARD + END OF PROCESSING.
     {
@@ -85,7 +94,7 @@ int main() {
                   "missing NO RUN CARD warning");
         CHECK_MSG(text.find("END OF PROCESSING") != std::string::npos,
                   "missing END OF PROCESSING");
-        std::cout << "ipmosflm_thin: empty-stdin golden ok\n";
+        std::cout << "integrationlab: empty-stdin golden ok\n";
     }
 
     // EXIT-only smoke (no amalgamation, no image) — still "ran" EXIT without RUN.
@@ -138,11 +147,11 @@ int main() {
                                 script.string() + " >/dev/null 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         CHECK_MSG(fs::exists(mtz) && fs::file_size(mtz) > 0,
-                  "thin ipmosflm did not write MTZ");
-        std::cout << "ipmosflm_thin: PROCESS MTZ ok (" << mtz << ")\n";
+                  "IntegrationLab did not write MTZ");
+        std::cout << "integrationlab: PROCESS MTZ ok (" << mtz << ")\n";
     } else {
-        std::cout << "ipmosflm_thin: SKIP PROCESS (no insulin SMV)\n";
+        std::cout << "integrationlab: SKIP PROCESS (no insulin SMV)\n";
     }
 
-    return mosflm_test::finish("ipmosflm_thin");
+    return mosflm_test::finish("integrationlab");
 }

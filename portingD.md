@@ -317,7 +317,7 @@ Exit: Keyword-driven C++ PROCESS without Fortran CONTROL for this corpus.
 
 D6 — Drop amalgamation (Phase D complete) — **Done**
 
-Default build/install is the C++ core: `make` / `make cpp` builds `mosflm_cpp_cli` + thin `bin/ipmosflm` (CONTROL → PROCESS; no `mosflm_all_ip_inc_noX.o` / science `unoptimizable.o`). CMake option `MOSFLM_FORTRAN_ORACLE` (OFF) gates `mosflm_predict_hook`. Autotools amalgamation: `make fortran-oracle` or `make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm`. CTest `ipmosflm_thin`.
+Default build/install is the C++ core: `make` / `make cpp` builds `mosflm_cpp_cli` + `bin/IntegrationLab` (CONTROL → PROCESS; `.exe` on Windows; no `mosflm_all_ip_inc_noX.o` / science `unoptimizable.o`). CMake option `MOSFLM_FORTRAN_ORACLE` (OFF) gates `mosflm_predict_hook`. Autotools amalgamation: `make fortran-oracle` or `make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm` → `bin/ipmosflm`. CTest `integrationlab`.
 
 Exit: Phase D Done in porting.md.
 
