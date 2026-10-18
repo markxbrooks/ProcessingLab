@@ -207,6 +207,16 @@ MasterMeta read_metadata(hid_t hdf, int frame_1based) {
     if (beam_y_px > 0.0 && m.pixel_y_mm > 0.0) {
         m.beam_y_mm = beam_y_px * m.pixel_y_mm;
     }
+    // Many NXmx masters omit beam_center_*; fall back to panel centre so
+    // XDET/YDET and integration boxes are not pinned near (0,0).
+    if (!(m.beam_x_mm > 0.0) && m.width > 0 && m.pixel_x_mm > 0.0) {
+        m.beam_x_mm =
+            0.5 * static_cast<double>(m.width) * m.pixel_x_mm;
+    }
+    if (!(m.beam_y_mm > 0.0) && m.height > 0 && m.pixel_y_mm > 0.0) {
+        m.beam_y_mm =
+            0.5 * static_cast<double>(m.height) * m.pixel_y_mm;
+    }
 
     // --- bit depth / saturation ---------------------------------------------
     if (!read_int(hdf, "/entry/instrument/detector/bit_depth_image", m.bit_depth)) {

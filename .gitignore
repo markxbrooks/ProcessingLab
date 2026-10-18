@@ -13,7 +13,8 @@
 # Executables and build artifacts
 *.exe
 *.out
-
+*.mtz
 # Build directories
 build/
-_build/
+_build/GXPARM.XDS
+XPARM.XDS

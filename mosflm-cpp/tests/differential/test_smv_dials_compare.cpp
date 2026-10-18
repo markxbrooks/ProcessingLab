@@ -11,7 +11,7 @@
  *
  * Soft-skip (exit 0) if ProcessingLab, DIALS, or the image is missing.
  * Override paths with:
- *   MOSFLM_INTEGRATIONLAB — C++ CONTROL binary (ProcessingLab)
+ *   MOSFLM_PROCESSINGLAB — C++ CONTROL binary (ProcessingLab)
  *   MOSFLM_DIALS_BIN       — directory containing ``dials.import`` etc.
  *   MOSFLM_IMAGE           — path to ``insulin_1_001.img``
  *   CCP4                   — used to locate DIALS under ``$CCP4/bin``
@@ -63,7 +63,7 @@ int run_cmd(const std::string& cmd) {
 }
 
 fs::path find_integrationlab() {
-    if (const char* env = std::getenv("MOSFLM_INTEGRATIONLAB")) {
+    if (const char* env = std::getenv("MOSFLM_PROCESSINGLAB")) {
         return env;
     }
     if (const char* env = std::getenv("MOSFLM_THIN_IPMOSFLM")) {
@@ -252,7 +252,7 @@ int main() {
         "testdata/images/known_indexed/cpp_process.in";
 
     if (cpp_bin_raw.empty() || !fs::exists(cpp_bin_raw)) {
-        skip_pass("no ProcessingLab (set MOSFLM_INTEGRATIONLAB)");
+        skip_pass("no ProcessingLab (set MOSFLM_PROCESSINGLAB)");
     }
     if (dials_bin_raw.empty()) {
         skip_pass("no DIALS (set MOSFLM_DIALS_BIN or CCP4)");

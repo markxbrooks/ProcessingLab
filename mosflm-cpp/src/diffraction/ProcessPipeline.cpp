@@ -205,6 +205,8 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         row.k = r.k;
         row.l = r.l;
         row.batch = 1;
+        // Default I/SIGI from summation; prefer profile when fit succeeded
+        // (DIALS-like: profile intensities correlate better for shared HKL).
         row.intensity = static_cast<float>(r.intensity);
         row.sigma = static_cast<float>(r.sigma);
         if (po != nullptr) {
@@ -214,6 +216,10 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             row.sigipr = static_cast<float>(
                 po->profile_ok ? po->profile_sigma : po->summation_sigma
             );
+            if (po->profile_ok) {
+                row.intensity = row.ipr;
+                row.sigma = row.sigipr;
+            }
             const double bgrat =
                 po->npix_bg > 0
                     ? static_cast<double>(po->n_bg_rejected) /
@@ -225,26 +231,131 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             row.sigipr = row.sigma;
         }
 
-        const double width = std::max(0.0, pm.phi_end - pm.phi_begin);
-        row.rot = static_cast<float>(0.5 * (pm.phi_begin + pm.phi_end));
+        const double phi0 = pm.phi_begin;
+        const double phi1 = pm.phi_end;
+        const double width = std::max(0.0, phi1 - phi0);
+        row.rot = static_cast<float>(0.5 * (phi0 + phi1));
         row.width = static_cast<float>(width);
-        row.fractioncalc = pm.full ? 1.0f : static_cast<float>(std::min(
-            1.0, std::max(0.05, width / std::max(1e-6, request.scan.phi_end_deg -
-                                                          request.scan.phi_start_deg))
-        ));
-        row.mpart = pm.full ? 0 : 1;
+
+        // FRACTIONCALC: fraction of the *intrinsic* rocking width on this
+        // image (mosaic+divergence). Mid-frame Bragg hits are treated as
+        // full even if Ewald sampling touched an osc endpoint.
+        //
+        // Important: when mosaic ≳ osc (default MOSAIC was 0.30° on 0.15°
+        // frames), margin = 0.5·rocking eats the whole frame and every
+        // whole-osc observation collapses to osc/mosaic = 0.5 — emptying
+        // "fully recorded" zone views (e.g. hk0). Cap the mid-frame margin
+        // to a fraction of the oscillation and treat whole-frame interior
+        // hits as full.
+        const double osc0 = request.scan.phi_start_deg;
+        const double osc1 = request.scan.phi_end_deg;
+        const double osc_w = std::max(1e-6, osc1 - osc0);
+        const double mosaic = std::max(0.0, request.prediction.mosaic_spread_deg);
+        const double div = std::max(
+            request.prediction.divh_deg, request.prediction.divv_deg
+        );
+        const double phi_step =
+            std::max(1e-6, request.prediction.phi_step_deg);
+        const double rocking = std::max(mosaic + div, phi_step);
+        const double mid = 0.5 * (phi0 + phi1);
+        const double margin = std::min(0.5 * rocking, 0.35 * osc_w);
+        bool treat_full = pm.full;
+        if (!treat_full && mid - osc0 > margin && osc1 - mid > margin) {
+            treat_full = true;
+        }
+        const double lo = std::max(phi0, osc0);
+        const double hi = std::min(phi1, osc1);
+        const double overlap = std::max(0.0, hi - lo);
+        // Reflection spans (almost) the whole frame with Bragg mid interior.
+        if (!treat_full && overlap >= 0.98 * osc_w &&
+            mid - osc0 > 0.05 * osc_w && osc1 - mid > 0.05 * osc_w) {
+            treat_full = true;
+        }
+        if (treat_full) {
+            row.fractioncalc = 1.0f;
+        } else {
+            row.fractioncalc = static_cast<float>(
+                std::min(1.0, overlap / rocking)
+            );
+        }
+        row.mpart = treat_full ? 0 : 1;
+
+        if (request.min_fractioncalc > 0.0 &&
+            static_cast<double>(row.fractioncalc) < request.min_fractioncalc) {
+            ++out.n_omitted;
+            continue;
+        }
+
+        // Full-equivalent intensities: scale partials by 1/FRACTIONCALC so
+        // mean-I over HKL matches DIALS-style full-obs comparisons.
+        if (request.scale_by_partiality) {
+            const double frac =
+                std::max(0.05, static_cast<double>(row.fractioncalc));
+            if (frac < 0.999) {
+                const double inv = 1.0 / frac;
+                row.intensity = static_cast<float>(
+                    static_cast<double>(row.intensity) * inv
+                );
+                row.sigma = static_cast<float>(
+                    static_cast<double>(row.sigma) * inv
+                );
+                row.ipr = static_cast<float>(
+                    static_cast<double>(row.ipr) * inv
+                );
+                row.sigipr = static_cast<float>(
+                    static_cast<double>(row.sigipr) * inv
+                );
+            }
+        }
+
+        // CORRECT-lite AIR absorption: path length through air beyond the
+        // crystal–detector baseline (XDS AIR= stand-in).
+        if (request.air_absorption_mm_inv > 0.0 &&
+            request.detector.distance_mm > 0.0) {
+            const double dx = pm.x_mm - request.detector.beam_x_mm;
+            const double dy = pm.y_mm - request.detector.beam_y_mm;
+            const double rad = std::hypot(dx, dy);
+            const double path =
+                std::hypot(request.detector.distance_mm, rad);
+            const double extra =
+                std::max(0.0, path - request.detector.distance_mm);
+            const double corr =
+                std::exp(request.air_absorption_mm_inv * extra);
+            row.intensity = static_cast<float>(
+                static_cast<double>(row.intensity) * corr
+            );
+            row.sigma = static_cast<float>(
+                static_cast<double>(row.sigma) * corr
+            );
+            row.ipr = static_cast<float>(
+                static_cast<double>(row.ipr) * corr
+            );
+            row.sigipr = static_cast<float>(
+                static_cast<double>(row.sigipr) * corr
+            );
+        }
 
         double xdet = 0.0;
         double ydet = 0.0;
-        cpp_mm_to_mosflm_xdet(
-            pm.x_mm, pm.y_mm, beam_x, beam_y, px, py, xdet, ydet
+        // Same YSCALE-aware map as MeasurementBox / StandardProfile.
+        cpp_mm_to_mosflm_xdet_yscale(
+            pm.x_mm,
+            pm.y_mm,
+            beam_x,
+            beam_y,
+            px,
+            py,
+            request.detector.yscale,
+            xdet,
+            ydet
         );
         row.xdet = static_cast<float>(xdet);
         row.ydet = static_cast<float>(ydet);
 
-        row.lp = static_cast<float>(
-            lp_factor(request.detector, pm.x_mm, pm.y_mm)
-        );
+        row.lp = static_cast<float>(lp_factor(
+            request.detector, pm.x_mm, pm.y_mm,
+            request.integration.polarization_fraction
+        ));
 
         // FLAG: 0 good; else IBAD bits (Aimless rejects non-zero by default).
         row.flag = ibad;
@@ -271,11 +382,12 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
 void ProcessPipeline::write_mtz(
     const std::filesystem::path& path,
     const crystal::CrystalMetadata& crystal,
-    const ProcessResult& result
+    const ProcessResult& result,
+    double wavelength_A
 ) {
     if (!result.mosflm_reflections.empty()) {
         crystal::MtzAdapter::write_mosflm(
-            path, crystal, result.mosflm_reflections
+            path, crystal, result.mosflm_reflections, wavelength_A
         );
     } else {
         crystal::MtzAdapter::write_simple(
@@ -377,6 +489,10 @@ ProcessRequest ProcessPipeline::known_indexed_insulin(
         true,
         enable_postref,
         postref,
+        // Oracle differentials keep all fractions; CONTROL default is 0.5.
+        0.0,
+        true,   // scale_by_partiality
+        0.0,    // air_absorption_mm_inv
         image
     };
 }

@@ -50,4 +50,18 @@ DiffractionImage read_diffraction_image(
     return SmvImageReader{}.read(path);
 }
 
+int num_diffraction_images(const std::filesystem::path& path) {
+    const std::string ext = lower_ext(path);
+    if (is_hdf5_ext(ext)) {
+#if defined(MOSFLM_HAS_HDF5)
+        return Hdf5ImageReader{}.num_images(path);
+#else
+        throw std::runtime_error(
+            "ImageIO: HDF5/NeXus reader not built for " + path.string()
+        );
+#endif
+    }
+    return 1;
+}
+
 }  // namespace mosflm::image

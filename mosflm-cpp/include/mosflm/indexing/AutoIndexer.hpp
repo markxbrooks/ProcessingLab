@@ -45,11 +45,14 @@ struct AutoIndexSettings {
     float dmaxscal{1.5f};
     /// Keep spots with ``I/σ ≥ min_isigi`` (MOSFLM AUTOINDEX THRESHOLD).
     float min_isigi{20.0f};
-    /// Prefer lattice character (1–44). 0 = leave DPS primary OM.
+    /// Prefer lattice character (1–44). 0 = SUGGLATT / prefer_system.
     /// Insulin solution 12 maps to a cI-compatible character after Bravais.
     int prefer_character{0};
     /// If non-empty (e.g. ``"cI"``), pick lowest-criterion matching system.
     std::string prefer_system;
+    /// Max Bravais penalty for SUGGLATT-style highest-symmetry pick
+    /// (DiffractionLab ``max_penalty_to_refine`` / Mosflm soft cut).
+    float max_penalty{50.0f};
 };
 
 struct AutoIndexResult {
@@ -62,6 +65,8 @@ struct AutoIndexResult {
     std::vector<BravaisCandidate> bravais;
     int selected_character{0};
     std::string selected_system;
+    /// Default space-group number for ``selected_system`` (Mosflm SPGMIN).
+    int selected_symmetry_number{1};
     std::size_t n_spots_used{0};
 };
 

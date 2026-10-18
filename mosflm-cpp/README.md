@@ -57,6 +57,16 @@ CCP4) enables `Hdf5ImageReader` for Dectris Eiger NeXus masters
 # Default release binary (D6/E; ProcessingLab.exe on Windows):
 ./build/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   testdata/images/known_indexed/cpp_process.in
+# Find spots → .spt → AUTOINDEX → multi-frame PROCESS (HDF5 master):
+./build/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/master.h5 <<'EOF'
+FINDSPOTS THRESHOLD 5 FIND 1 FILE spots.spt
+GO
+AUTOINDEX DPS THRESHOLD 20
+GO
+PROCESS 1 TO 10
+GO
+EXIT
+EOF
 # Wall-time vs F77 ipmosflm (CCP4 default /apps/ccp4/ccp4-9/bin/ipmosflm):
 ./tools/bench_ipmosflm_perf.sh
 # or: ctest --test-dir build -R ipmosflm_perf --output-on-failure
@@ -72,7 +82,7 @@ CCP4) enables `Hdf5ImageReader` for Dectris Eiger NeXus masters
 | `include/mosflm/diffraction` | Predict / integrate / `ProcessPipeline`; see `docs/DOMAIN_API.md` |
 | `include/mosflm/refinement` | Stage 2 `PostRefiner` (POSTREFL-class φ LS) |
 | `include/mosflm/control` | CONTROL keyword subset → `ProcessPipeline` |
-| `include/mosflm/indexing` | BravaisClassifier (DPS façade) |
+| `include/mosflm/indexing` | BravaisClassifier + SUGGLATT select (penalty table log), `SpotFinder` + `.spt` I/O, CONTROL FINDSPOTS/AUTOINDEX |
 | `include/mosflm/legacy` | CELL(6) + hardened `MosflmCApi.h` (see `docs/C_ABI.md`) |
 | `fortran/` | `iso_c_binding` mirror + `predict_still_cpp` (Phase C; needs gfortran) |
 | `tests/` | unit + differential (oracle dumps under `testdata/oracle/`) |

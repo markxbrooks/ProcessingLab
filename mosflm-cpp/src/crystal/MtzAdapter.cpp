@@ -4,7 +4,9 @@
 #include <gemmi/symmetry.hpp>
 
 #include <cmath>
+#include <set>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace mosflm::crystal {
@@ -51,7 +53,8 @@ void MtzAdapter::write_simple(
 void MtzAdapter::write_mosflm(
     const std::filesystem::path& path,
     const CrystalMetadata& crystal,
-    const std::vector<MosflmReflection>& reflections
+    const std::vector<MosflmReflection>& reflections,
+    double wavelength_A
 ) {
     gemmi::Mtz mtz;
     mtz.title = "mosflm-cpp PROCESS";
@@ -64,6 +67,11 @@ void MtzAdapter::write_mosflm(
 
     mtz.add_base();
     const gemmi::Mtz::Dataset& ds = mtz.add_dataset("HKL_base");
+    if (wavelength_A > 0.0 &&
+        static_cast<std::size_t>(ds.id) < mtz.datasets.size()) {
+        mtz.datasets[static_cast<std::size_t>(ds.id)].wavelength =
+            wavelength_A;
+    }
     // Column order matches F77 STARTMTZ LSPRGO (MCOLS=18).
     mtz.add_column("M/ISYM", 'Y', ds.id, -1, false);
     mtz.add_column("BATCH", 'B', ds.id, -1, false);
@@ -80,6 +88,25 @@ void MtzAdapter::write_mosflm(
     mtz.add_column("MPART", 'I', ds.id, -1, false);
     mtz.add_column("FLAG", 'I', ds.id, -1, false);
     mtz.add_column("BGPKRATIOS", 'R', ds.id, -1, false);
+
+    // POINTLESS / AIMLESS require BATCH *headers* for unmerged MTZ (the BATCH
+    // column alone is not enough; gemmi treats batches.empty() as merged).
+    std::set<int> batch_ids;
+    for (const auto& r : reflections) {
+        batch_ids.insert(r.batch);
+    }
+    mtz.batches.reserve(batch_ids.size());
+    for (int bn : batch_ids) {
+        gemmi::Mtz::Batch batch;
+        batch.number = bn;
+        batch.title = "Batch " + std::to_string(bn);
+        batch.set_dataset_id(ds.id);
+        batch.set_cell(crystal.cell);
+        if (wavelength_A > 0.0) {
+            batch.set_wavelength(static_cast<float>(wavelength_A));
+        }
+        mtz.batches.push_back(batch);
+    }
 
     std::vector<float> data;
     data.reserve(reflections.size() * 18);

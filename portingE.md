@@ -54,10 +54,70 @@ chunks must sit next to the master. Example (script still required for
   --image /path/to/thaumatin_9_1_master.h5 your_process.in
 ```
 
+### AUTOINDEX Bravais (SUGGLATT / LASTGOOD)
+
+After DPS, ProcessingLab selects a lattice like Mosflm `SUGGLATT` /
+`DPSCHOOSE` (penalty-only):
+
+1. Build Mosflm MERIT from the raw DPS goof for jump math only
+   (`round(crit * 999 / max_crit)`).
+2. Find `LASTGOOD` — the sorted rank before the largest relative MERIT jump
+   among candidates with MERIT ≤ 100 (same idea as Mosflm `TESTGOOD`).
+3. Among ranks `1..LASTGOOD` (when a jump was found), prefer the highest
+   crystal class (`c` > `h`/`r` > `t` > `o` > `m` > `a`).
+4. If no jump is detected, fall back to the soft cut (criterion ≤ 50) with
+   the same crystal-class ranking.
+
+Then apply that Bravais OM to CELL/MATRIX. Default `SYMMETRY` follows Mosflm
+`SPGMIN` (e.g. `tP` → P4 / #75) when unset. Overrides: `AUTOINDEX … SYSTEM tP`
+or `prefer_character`. (Full Mosflm prerefine/RMSD `BESTSOLAR` is not ported.)
+
+AUTOINDEX also prints the Mosflm-style lattice-character table
+(`No PENALTY LATT a b c alpha beta gamma Possible spacegroups`), sorted by
+penalty. PENALTY is the raw DPS Niggli goof (not MERIT 0–999). The table
+notes `LASTGOOD` when a jump is found and ends with a `Suggested Solution`
+footer.
+
+### FINDSPOTS → `.spt` → AUTOINDEX
+
+ProcessingLab includes a DiffractionLab-style peak finder (`SpotFinder`:
+MAD background + 3×3 local maxima) and MOSFLM `.spt` write/read. CONTROL:
+
+```text
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 500 FIND 1 PHI 0.0 0.15 FILE thaumatin.spt
+GO
+AUTOINDEX DPS THRESHOLD 20 FILE thaumatin.spt
+GO
+```
+
+`--image` supplies the frame (SMV/CBF/HDF5). If `AUTOINDEX` omits `FILE`,
+the path from the preceding `FINDSPOTS` is reused. Geometry cards may be
+omitted when the image header fills distance / wavelength / beam / pixel.
+
+### Multi-frame PROCESS
+
+`PROCESS 1 TO N` / `PROCESS 1 N` loops images on one `GO`. HDF5/NeXus masters
+reuse the path with a 1-based frame index; SMV/CBF series need `TEMPLATE`.
+Each frame’s reflections get `BATCH =` image number; φ comes from the image
+header unless `PROCESS … START` / `ANGLE` is set. Example:
+
+```bash
+./bin/ProcessingLab HKLOUT /tmp/out.mtz \
+  --image /path/to/master.h5 <<'EOF'
+FINDSPOTS THRESHOLD 5 FIND 1 FILE /tmp/spots.spt
+GO
+AUTOINDEX DPS THRESHOLD 20
+GO
+PROCESS 1 TO 10
+GO
+EXIT
+EOF
+```
+
 ## DiffractionLab
 
 Sibling app [`DiffractionLab`](../DiffractionLab) can drive `ProcessingLab` via
 CONTROL scripts (`diffraction_lab/processinglab_client.py`). After AUTOINDEX,
-`ProcessingLab` prints `INTEGRATIONLAB_CELL` / `INTEGRATIONLAB_MATRIX` (and
+`ProcessingLab` prints `PROCESSINGLAB_CELL` / `PROCESSINGLAB_MATRIX` (and
 writes `integrationlab_index.txt`). Set `DIFFRACTIONLAB_BACKEND=processinglab`
 or `DIFFRACTIONLAB_PREFER_PROCESSINGLAB=1`.

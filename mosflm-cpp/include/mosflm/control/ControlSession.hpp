@@ -29,6 +29,26 @@ struct AutoIndexControlSettings {
     int image_number{1};
 };
 
+/// FINDSPOTS settings (DiffractionLab-style peak finder → ``.spt``).
+struct FindSpotsControlSettings {
+    std::filesystem::path spot_file{"spots.spt"};
+    int image_number{1};
+    /// Optional multi-image COLSPOT (``RANGE first last`` / ``MULTIFRAME``).
+    int range_first{0};
+    int range_last{0};
+    bool multiframe{false};
+    double merge_xy_mm{0.3};
+    double merge_phi_tol_deg{0.5};
+    int min_frames{1};
+    double phi_start_deg{0.0};
+    double phi_end_deg{0.0};
+    bool has_phi{false};
+    float threshold_sigma{5.0f};
+    int min_distance{8};
+    int max_spots{500};
+    int border{20};
+};
+
 /// Keyword state accumulated by MOSFLM CONTROL (Phase D / E).
 struct ControlState {
     bool has_distance{false};
@@ -48,7 +68,9 @@ struct ControlState {
     double beam_y_mm{94.7};
     double pixel_x_mm{0.0816};
     double pixel_y_mm{0.0816};
-    double mosaic_deg{0.30};
+    /// Default matches common fine-phi Eiger scans (≪ older 0.30°, which
+    /// forced FRACTIONCALC≈0.5 on 0.15° frames when MOSAIC was omitted).
+    double mosaic_deg{0.15};
     /// Beam divergence full-angles (degrees); MOSFLM ``DIVERGENCE`` / DIVH,DIVV.
     /// Default 0 unless ``DIVERGENCE`` is set (matches known-indexed insulin).
     double divh_deg{0.0};
@@ -59,14 +81,41 @@ struct ControlState {
     double dmax_A{200.0};
     /// Predictor φ sample step (degrees); 0.025 matches known_indexed_insulin.
     double phi_step_deg{0.025};
-    /// Oracle-refined detector fiducials (insulin PROCESS / geometry.txt).
-    double yscale{0.9921};
-    double tilt_mrad{-83.0};
-    double twist_mrad{-140.0};
-    bool use_rotmat2{true};
+    /// Detector fiducials (neutral by default; insulin oracle via CONTROL
+    /// ``YSCALE`` / ``TILT`` / ``TWIST`` / ``ROTMAT2``).
+    double yscale{1.0};
+    double tilt_mrad{0.0};
+    double twist_mrad{0.0};
+    bool use_rotmat2{false};
+    /// If true, widen Ewald acceptance with mosaic (indexing-style). PROCESS
+    /// default is false (REEK); set ``WIDEN_EWALD ON`` for insulin oracle.
+    bool widen_ewald_with_mosaic{false};
+    double mosaic_ewald_scale{0.55};
+    /// Minimum FRACTIONCALC to keep on MTZ write (CONTROL ``MINFRAC``).
+    /// Default 0.5 matches DIALS-style export; ≤ 0 disables.
+    double min_fractioncalc{0.5};
+    /// XDS ``FRACTION_OF_POLARIZATION`` for PROCESS LP (CONTROL
+    /// ``POLARIZATION``). Default 0.98 (synchrotron); 0 = unpolarized.
+    double polarization_fraction{0.98};
+    /// XDS ``AIR=`` stand-in (mm⁻¹). Default small synchrotron air path.
+    double air_absorption_mm_inv{0.0001};
+    /// Scale partials by ``1/FRACTIONCALC`` (CONTROL ``PARTIALSCALE``).
+    bool scale_by_partiality{true};
+    /// Auto-estimate MOSAIC / DIVERGENCE from strong-spot widths.
+    bool auto_sigma_msd{true};
+    /// Auto-write GXPARM.XDS after PROCESS (default ON). Override path with
+    /// ``XPARMOUT``; disable with ``XPARMOUT OFF``.
+    bool auto_gxparm{true};
+    /// Periodic post-refinement interval in frames (0 = only when
+    /// ``POSTREFINE`` without PERIOD; CONTROL ``POSTREFINE PERIOD n``).
+    int postrefine_period{25};
 
     UnitCell cell{78.19, 78.19, 78.19, 90.0, 90.0, 90.0};
     int symmetry_number{1};
+    /// Apply MOSFLM-style CELLFIX before PROCESS/MTZ (default ON).
+    bool cellfix_enabled{true};
+    /// CELLFIX softness in (0,1]; 1 = hard metric projection.
+    double cellfix_softness{1.0};
     /// MOSFLM Orientation Matrix [A] (lab X,Y,Z rows), before C++ frame map.
     Eigen::Matrix3d amat{Eigen::Matrix3d::Identity()};
 
@@ -75,12 +124,21 @@ struct ControlState {
     std::filesystem::path image_path;  ///< ``IMAGE`` keyword if set
     /// Output MTZ path (``HKLOUT`` keyword or CLI override).
     std::filesystem::path hklout{"process.mtz"};
+    /// Optional GXPARM.XDS write path (``XPARMOUT``).
+    std::filesystem::path xparm_out;
+    bool has_xparm_out{false};
 
     bool process_pending{false};
     int process_first{1};
     int process_last{1};
     double process_start_phi_deg{0.0};
     double process_angle_deg{1.0};
+    /// True when ``PROCESS … START`` / ``ANGLE`` overrode image φ metadata.
+    bool has_process_phi{false};
+    /// Added to every frame's φ start/end (CONTROL ``PHI_OFFSET``).
+    double phi_offset_deg{0.0};
+    /// If >= 0, overrides MEAS/profile peak half-width (CONTROL ``PEAKHALF``).
+    int peak_half_px{-1};
 
     /// Standard-profile detector tiling (MOSFLM NMASKS / XLINES×YLINES).
     int nmasks_x{5};
@@ -89,6 +147,11 @@ struct ControlState {
     bool enable_postrefinement{false};
     /// Multi-image NADD window (1 = single image; >1 reserved for joint refine).
     int nadd{1};
+
+    bool findspots_pending{false};
+    FindSpotsControlSettings findspots{};
+    /// Number of spots written by the last FINDSPOTS GO.
+    std::size_t findspots_n_spots{0};
 
     bool autoindex_pending{false};
     AutoIndexControlSettings autoindex{};
@@ -113,26 +176,39 @@ struct ControlState {
 struct ControlGoResult {
     bool ran_process{false};
     bool ran_autoindex{false};
+    bool ran_findspots{false};
     bool ran_strategy{false};
     diffraction::ProcessResult process{};
     crystal::CrystalMetadata crystal{};
     std::filesystem::path image_used{};
+    /// Inclusive PROCESS image range actually integrated this GO.
+    int process_first{0};
+    int process_last{0};
     std::string message;
 };
 
 /// Hook that runs AUTOINDEX and writes CELL/MATRIX into ``state``.
 using AutoIndexRunner = std::function<void(ControlState& state)>;
 
+/// Hook that runs FINDSPOTS (load image → peak find → write ``.spt``).
+using FindSpotsRunner = std::function<void(
+    ControlState& state,
+    const std::optional<std::filesystem::path>& image_override
+)>;
+
 /// Pure-C++ CONTROL driver (Phase D subset + Phase E extensions).
 ///
 /// Supported: geometry keywords, ``PROCESS``, ``GO``/``RUN``, ``EXIT``,
-/// ``AUTOINDEX`` (when a runner is registered), ``STRATEGY``, ``NMASKS``,
-/// ``POSTREFINE``, ``NADD``, ``MULTILATTICE``. Unimplemented major verbs
-/// (``REFIX``, …) throw. Other unknown keywords warn once then continue.
+/// ``FINDSPOTS`` / ``AUTOINDEX`` (when runners are registered), ``STRATEGY``,
+/// ``NMASKS``, ``POSTREFINE``, ``NADD``, ``MULTILATTICE``. Unimplemented major
+/// verbs (``REFIX``, …) throw. Other unknown keywords warn once then continue.
 class ControlSession {
 public:
     /// Register DPS AUTOINDEX implementation (from ``mosflm_indexing``).
     static void register_autoindex_runner(AutoIndexRunner runner);
+
+    /// Register DiffractionLab-style FINDSPOTS (from ``mosflm_indexing``).
+    static void register_findspots_runner(FindSpotsRunner runner);
 
     /// Parse one logical line (comments stripped). Throws on malformed
     /// known keywords or unimplemented major verbs.
@@ -146,13 +222,17 @@ public:
         const std::optional<std::filesystem::path>& image_override = std::nullopt
     );
 
+    /// Build a PROCESS request for one 1-based image number (φ / batch).
     [[nodiscard]] diffraction::ProcessRequest make_process_request(
-        const image::DiffractionImage& image
+        const image::DiffractionImage& image,
+        int frame
     ) const;
 
+    /// Resolve the path for ``frame`` (TEMPLATE expands; HDF5 masters reuse path).
     [[nodiscard]] std::filesystem::path resolve_image_path(
         const std::optional<std::filesystem::path>& image_override =
-            std::nullopt
+            std::nullopt,
+        int frame = -1
     ) const;
 
     [[nodiscard]] const ControlState& state() const { return state_; }
@@ -187,6 +267,7 @@ private:
     void ingest_matrix_numbers(const std::vector<double>& vals);
     void finish_matrix_if_ready();
     void parse_autoindex_args(const std::vector<std::string>& args);
+    void parse_findspots_args(const std::vector<std::string>& args);
 };
 
 }  // namespace mosflm::control

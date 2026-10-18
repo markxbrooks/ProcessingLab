@@ -49,10 +49,15 @@ public:
     );
 
     /// Write a MOSFLM-compatible 18-column PROCESS MTZ.
+    ///
+    /// Emits one MTZ batch header per unique ``BATCH`` value so CCP4 tools
+    /// (POINTLESS / AIMLESS) treat the file as unmerged. ``wavelength_A`` is
+    /// written to the dataset and each batch header when ``> 0``.
     static void write_mosflm(
         const std::filesystem::path& path,
         const CrystalMetadata& crystal,
-        const std::vector<MosflmReflection>& reflections
+        const std::vector<MosflmReflection>& reflections,
+        double wavelength_A = 0.0
     );
 
     /// Read H K L I SIGI from an MTZ (works for simple or full MOSFLM files).

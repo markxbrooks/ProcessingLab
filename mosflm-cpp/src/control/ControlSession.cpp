@@ -1,14 +1,25 @@
 #include "mosflm/control/ControlSession.hpp"
 
 #include "mosflm/crystal/SpaceGroupInfo.hpp"
+#include "mosflm/diffraction/DataQualityStats.hpp"
+#include "mosflm/diffraction/DetectorInit.hpp"
+#include "mosflm/diffraction/TrustedRegion.hpp"
+#include "mosflm/geometry/CellFix.hpp"
+#include "mosflm/geometry/LabFrame.hpp"
+#include "mosflm/io/XparmIO.hpp"
 #include "mosflm/image/ImageIO.hpp"
+#include "mosflm/refinement/PostRefinement.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace mosflm::control {
 namespace {
@@ -18,11 +29,18 @@ AutoIndexRunner& autoindex_runner_slot() {
     return runner;
 }
 
+FindSpotsRunner& findspots_runner_slot() {
+    static FindSpotsRunner runner;
+    return runner;
+}
+
 std::string strip_comment(std::string_view line) {
+    // Only ``!`` starts a comment. ``#`` is the MOSFLM TEMPLATE digit
+    // placeholder (e.g. ``insulin_1_###.img``) and must be preserved.
     std::string out;
     out.reserve(line.size());
     for (char c : line) {
-        if (c == '!' || c == '#') {
+        if (c == '!') {
             break;
         }
         out.push_back(c);
@@ -108,7 +126,7 @@ std::string expand_template(const std::string& tmpl, int frame) {
 
 bool is_unimplemented_major(const std::string& key) {
     static const char* k[] = {
-        "REFIX", "FINDSPOTS", "PICK", "XDISPLAY", "TCPIP", "SOCKET",
+        "REFIX", "PICK", "XDISPLAY", "TCPIP", "SOCKET",
         nullptr
     };
     for (const char** p = k; *p != nullptr; ++p) {
@@ -123,6 +141,10 @@ bool is_unimplemented_major(const std::string& key) {
 
 void ControlSession::register_autoindex_runner(AutoIndexRunner runner) {
     autoindex_runner_slot() = std::move(runner);
+}
+
+void ControlSession::register_findspots_runner(FindSpotsRunner runner) {
+    findspots_runner_slot() = std::move(runner);
 }
 
 void ControlSession::ingest_matrix_numbers(const std::vector<double>& vals) {
@@ -198,6 +220,71 @@ void ControlSession::parse_autoindex_args(const std::vector<std::string>& args) 
     }
 }
 
+void ControlSession::parse_findspots_args(const std::vector<std::string>& args) {
+    state_.findspots_pending = true;
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const std::string u = upper(args[i]);
+        if (u == "FIND" && i + 1 < args.size()) {
+            state_.findspots.image_number = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "FILE" && i + 1 < args.size()) {
+            state_.findspots.spot_file = args[++i];
+            continue;
+        }
+        if (u == "PHI" && i + 2 < args.size()) {
+            state_.findspots.phi_start_deg =
+                require_double(args[++i], "FINDSPOTS");
+            state_.findspots.phi_end_deg =
+                require_double(args[++i], "FINDSPOTS");
+            state_.findspots.has_phi = true;
+            continue;
+        }
+        if ((u == "THRESHOLD" || u == "THRESH") && i + 1 < args.size()) {
+            state_.findspots.threshold_sigma =
+                static_cast<float>(require_double(args[++i], "FINDSPOTS"));
+            continue;
+        }
+        if (u == "MAXSPOTS" && i + 1 < args.size()) {
+            state_.findspots.max_spots = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "MINDIST" && i + 1 < args.size()) {
+            state_.findspots.min_distance = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "BORDER" && i + 1 < args.size()) {
+            state_.findspots.border = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "RANGE" && i + 2 < args.size()) {
+            state_.findspots.range_first = require_int(args[++i], "FINDSPOTS");
+            state_.findspots.range_last = require_int(args[++i], "FINDSPOTS");
+            state_.findspots.multiframe = true;
+            continue;
+        }
+        if (u == "MULTIFRAME" || u == "COLSPOT3D" || u == "COLSPOT") {
+            state_.findspots.multiframe = true;
+            continue;
+        }
+        if (u == "MERGE_XY" && i + 1 < args.size()) {
+            state_.findspots.merge_xy_mm =
+                require_double(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "MERGE_PHI" && i + 1 < args.size()) {
+            state_.findspots.merge_phi_tol_deg =
+                require_double(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "MINFRAMES" && i + 1 < args.size()) {
+            state_.findspots.min_frames = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        // Ignore MOSFLM FINDSPOTS noise keywords (LOCAL, AUTORESLN, …).
+    }
+}
+
 void ControlSession::apply_keyword(
     const std::string& key,
     const std::vector<std::string>& args
@@ -268,6 +355,31 @@ void ControlSession::apply_keyword(
         state_.has_symmetry = true;
         return;
     }
+    if (key == "CELLFIX") {
+        // CELLFIX [ON|OFF|HARD|SOFT] [softness]
+        if (args.empty()) {
+            state_.cellfix_enabled = true;
+            state_.cellfix_softness = 1.0;
+            return;
+        }
+        const std::string a0 = upper(args[0]);
+        if (a0 == "OFF" || a0 == "NO" || a0 == "0") {
+            state_.cellfix_enabled = false;
+            return;
+        }
+        state_.cellfix_enabled = true;
+        if (a0 == "SOFT") {
+            state_.cellfix_softness = 0.5;
+        } else if (a0 == "HARD" || a0 == "ON" || a0 == "YES" || a0 == "1") {
+            state_.cellfix_softness = 1.0;
+        } else {
+            state_.cellfix_softness = require_double(args[0], "CELLFIX");
+        }
+        if (args.size() >= 2) {
+            state_.cellfix_softness = require_double(args[1], "CELLFIX");
+        }
+        return;
+    }
     if (key == "MOSAIC" || key == "MOSAICITY") {
         if (args.size() < 1) {
             throw std::invalid_argument("CONTROL MOSAIC needs 1 value");
@@ -329,6 +441,33 @@ void ControlSession::apply_keyword(
         state_.image_path = args[0];
         return;
     }
+    if (key == "XPARM" || key == "GXPARM") {
+        if (args.empty()) {
+            throw std::invalid_argument("CONTROL XPARM needs a path");
+        }
+        const auto g = io::read_xparm(args[0]);
+        io::apply_xparm(*this, g);
+        std::cout << "  Imported XPARM: " << args[0] << '\n';
+        return;
+    }
+    if (key == "XPARMOUT" || key == "GXPARMOUT") {
+        if (args.empty()) {
+            throw std::invalid_argument("CONTROL XPARMOUT needs a path");
+        }
+        const std::string a0 = upper(args[0]);
+        if (a0 == "OFF" || a0 == "NO" || a0 == "0") {
+            state_.auto_gxparm = false;
+            state_.has_xparm_out = false;
+            return;
+        }
+        state_.xparm_out = args[0];
+        state_.has_xparm_out = true;
+        state_.auto_gxparm = true;
+        const auto g = io::xparm_from_control(*this);
+        io::write_xparm(state_.xparm_out, g);
+        std::cout << "  Wrote XPARM: " << state_.xparm_out << '\n';
+        return;
+    }
     if (key == "HKLOUT") {
         if (args.size() < 1) {
             throw std::invalid_argument("CONTROL HKLOUT needs a path");
@@ -353,21 +492,36 @@ void ControlSession::apply_keyword(
         }
         state_.process_first = require_int(args[0], "PROCESS");
         state_.process_last = state_.process_first;
+        bool saw_last = false;
         for (std::size_t i = 1; i < args.size(); ++i) {
             const std::string u = upper(args[i]);
             if (u == "TO" && i + 1 < args.size()) {
                 state_.process_last = require_int(args[i + 1], "PROCESS");
+                saw_last = true;
                 ++i;
             } else if (u == "START" && i + 1 < args.size()) {
                 state_.process_start_phi_deg =
                     require_double(args[i + 1], "PROCESS");
+                state_.has_process_phi = true;
                 ++i;
             } else if ((u == "ANGLE" || u == "OSCILLATION") &&
                        i + 1 < args.size()) {
                 state_.process_angle_deg =
                     require_double(args[i + 1], "PROCESS");
+                state_.has_process_phi = true;
                 ++i;
+            } else if (!saw_last) {
+                // MOSFLM shorthand: ``PROCESS 1 100`` ⇒ first=1 last=100.
+                try {
+                    state_.process_last = require_int(args[i], "PROCESS");
+                    saw_last = true;
+                } catch (const std::invalid_argument&) {
+                    // Non-numeric token; ignore (compat with extra keywords).
+                }
             }
+        }
+        if (state_.process_last < state_.process_first) {
+            std::swap(state_.process_last, state_.process_first);
         }
         state_.process_pending = true;
         return;
@@ -388,10 +542,64 @@ void ControlSession::apply_keyword(
         }
         return;
     }
+    if (key == "POLARIZATION" || key == "POLARISN") {
+        if (args.empty()) {
+            throw std::invalid_argument(
+                "CONTROL POLARIZATION needs a fraction (0..1)"
+            );
+        }
+        state_.polarization_fraction =
+            require_double(args[0], "POLARIZATION");
+        return;
+    }
+    if (key == "AIR" || key == "AIRABS") {
+        if (args.empty()) {
+            throw std::invalid_argument("CONTROL AIR needs a coefficient");
+        }
+        state_.air_absorption_mm_inv = require_double(args[0], "AIR");
+        return;
+    }
+    if (key == "PARTIALSCALE" || key == "SCALEPARTIAL") {
+        if (args.empty() || upper(args[0]) == "ON" || upper(args[0]) == "YES" ||
+            args[0] == "1") {
+            state_.scale_by_partiality = true;
+        } else {
+            state_.scale_by_partiality = false;
+        }
+        return;
+    }
+    if (key == "AUTOSIGMA" || key == "AUTOSIGMAS") {
+        if (args.empty() || upper(args[0]) == "ON" || upper(args[0]) == "YES" ||
+            args[0] == "1") {
+            state_.auto_sigma_msd = true;
+        } else {
+            state_.auto_sigma_msd = false;
+        }
+        return;
+    }
     if (key == "POSTREFINE" || key == "POSTREFL") {
         state_.enable_postrefinement = true;
+        for (std::size_t i = 0; i < args.size(); ++i) {
+            const std::string u = upper(args[i]);
+            if ((u == "PERIOD" || u == "EVERY") && i + 1 < args.size()) {
+                state_.postrefine_period =
+                    require_int(args[++i], "POSTREFINE");
+                continue;
+            }
+            if (u == "OFF" || u == "NO" || u == "0") {
+                state_.enable_postrefinement = false;
+                state_.postrefine_period = 0;
+            }
+            if (u == "ON" || u == "YES") {
+                state_.enable_postrefinement = true;
+                if (state_.postrefine_period <= 0) {
+                    state_.postrefine_period = 25;
+                }
+            }
+        }
         if (!args.empty() && (upper(args[0]) == "OFF" || args[0] == "0")) {
             state_.enable_postrefinement = false;
+            state_.postrefine_period = 0;
         }
         return;
     }
@@ -412,8 +620,112 @@ void ControlSession::apply_keyword(
         state_.dmax_A = require_double(args[0], "DMAX");
         return;
     }
+    if (key == "DMIN") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL DMIN needs 1 value");
+        }
+        state_.dmin_A = require_double(args[0], "DMIN");
+        return;
+    }
+    if (key == "RESOLUTION") {
+        // RESOLUTION dmax dmin  OR  RESOLUTION dmin (high-res only).
+        if (args.size() < 1) {
+            throw std::invalid_argument(
+                "CONTROL RESOLUTION needs 1 or 2 values"
+            );
+        }
+        if (args.size() >= 2) {
+            state_.dmax_A = require_double(args[0], "RESOLUTION");
+            state_.dmin_A = require_double(args[1], "RESOLUTION");
+        } else {
+            state_.dmin_A = require_double(args[0], "RESOLUTION");
+        }
+        return;
+    }
+    if (key == "YSCALE") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL YSCALE needs 1 value");
+        }
+        state_.yscale = require_double(args[0], "YSCALE");
+        return;
+    }
+    if (key == "TILT") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL TILT needs 1 value (mrad)");
+        }
+        state_.tilt_mrad = require_double(args[0], "TILT");
+        return;
+    }
+    if (key == "TWIST") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL TWIST needs 1 value (mrad)");
+        }
+        state_.twist_mrad = require_double(args[0], "TWIST");
+        return;
+    }
+    if (key == "ROTMAT2") {
+        if (args.empty()) {
+            state_.use_rotmat2 = true;
+            return;
+        }
+        const std::string u = upper(args[0]);
+        if (u == "ON" || u == "YES" || u == "TRUE" || u == "1") {
+            state_.use_rotmat2 = true;
+        } else if (u == "OFF" || u == "NO" || u == "FALSE" || u == "0") {
+            state_.use_rotmat2 = false;
+        } else {
+            throw std::invalid_argument(
+                "CONTROL ROTMAT2 expects ON/OFF (or no argument for ON)"
+            );
+        }
+        return;
+    }
+    if (key == "MINFRAC" || key == "MINFRACTION" || key == "MIN_FRACTION") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL MINFRAC needs 1 value");
+        }
+        state_.min_fractioncalc = require_double(args[0], "MINFRAC");
+        return;
+    }
+    if (key == "PHI_OFFSET" || key == "PHIOFFSET") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL PHI_OFFSET needs 1 value");
+        }
+        state_.phi_offset_deg = require_double(args[0], "PHI_OFFSET");
+        return;
+    }
+    if (key == "PEAKHALF" || key == "PEAK_HALF") {
+        if (args.size() < 1) {
+            throw std::invalid_argument("CONTROL PEAKHALF needs 1 integer");
+        }
+        state_.peak_half_px = require_int(args[0], "PEAKHALF");
+        if (state_.peak_half_px < 1) {
+            throw std::invalid_argument("CONTROL PEAKHALF must be >= 1");
+        }
+        return;
+    }
+    if (key == "WIDEN_EWALD" || key == "WIDENEWALD") {
+        if (args.empty()) {
+            state_.widen_ewald_with_mosaic = true;
+            return;
+        }
+        const std::string u = upper(args[0]);
+        if (u == "ON" || u == "YES" || u == "TRUE" || u == "1") {
+            state_.widen_ewald_with_mosaic = true;
+        } else if (u == "OFF" || u == "NO" || u == "FALSE" || u == "0") {
+            state_.widen_ewald_with_mosaic = false;
+        } else {
+            state_.mosaic_ewald_scale = require_double(args[0], "WIDEN_EWALD");
+            state_.widen_ewald_with_mosaic = state_.mosaic_ewald_scale > 0.0;
+        }
+        return;
+    }
     if (key == "AUTOINDEX") {
         parse_autoindex_args(args);
+        return;
+    }
+    if (key == "FINDSPOTS") {
+        parse_findspots_args(args);
         return;
     }
     if (key == "STRATEGY") {
@@ -510,9 +822,509 @@ void ControlSession::parse_file(const std::filesystem::path& path) {
     }
 }
 
+namespace {
+
+bool path_looks_hdf5(const std::filesystem::path& path) {
+    std::string e = path.extension().string();
+    for (char& c : e) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return e == ".h5" || e == ".nxs" || e == ".hdf5";
+}
+
+/// XDS-lite auto σM / σD: infer reflecting range from partial FRACTIONCALC
+/// and oscillation width (rocking ≈ osc / frac for partials).
+bool auto_estimate_sigma_msd(
+    ControlState& state,
+    const diffraction::ProcessResult& acc,
+    double osc_w_deg
+) {
+    if (!state.auto_sigma_msd || !(osc_w_deg > 1e-6)) {
+        return false;
+    }
+    std::vector<double> rockings;
+    rockings.reserve(256);
+    for (const auto& row : acc.mosflm_reflections) {
+        if (row.flag != 0 || !(row.sigma > 0.0f)) {
+            continue;
+        }
+        if (static_cast<double>(row.intensity / row.sigma) < 5.0) {
+            continue;
+        }
+        const double f = static_cast<double>(row.fractioncalc);
+        if (f > 0.08 && f < 0.95) {
+            rockings.push_back(osc_w_deg / f);
+        }
+    }
+    if (rockings.size() < 40) {
+        return false;
+    }
+    const std::size_t mid = rockings.size() / 2U;
+    std::nth_element(
+        rockings.begin(), rockings.begin() + static_cast<std::ptrdiff_t>(mid),
+        rockings.end()
+    );
+    const double rocking = rockings[mid];
+    // Split rocking into mosaic + small divergence (XDS σM / σD stand-in).
+    const double div = std::clamp(0.15 * rocking, 0.01, 0.25);
+    double mosaic = std::clamp(rocking - div, 0.05, 2.0);
+    // If MOSAIC was set in CONTROL, only seed DIV; do not rewrite mosaic.
+    if (state.has_mosaic) {
+        if (!state.has_divergence) {
+            state.divh_deg = div;
+            state.divv_deg = div;
+            state.has_divergence = true;
+            std::cout << std::fixed << std::setprecision(3);
+            std::cout << "  AUTOSIGMA: DIV=" << div
+                      << " (MOSAIC kept " << state.mosaic_deg << ")\n";
+            return true;
+        }
+        return false;
+    }
+    const bool changed = std::fabs(mosaic - state.mosaic_deg) > 0.02;
+    if (!changed) {
+        return false;
+    }
+    state.mosaic_deg = mosaic;
+    state.has_mosaic = true;
+    state.divh_deg = div;
+    state.divv_deg = div;
+    state.has_divergence = true;
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "  AUTOSIGMA: MOSAIC=" << mosaic << " DIV=" << div
+              << " (from " << rockings.size() << " partials)\n";
+    return true;
+}
+
+/// CORRECT/INTEGRATE-lite: refine misset from measured XDET/YDET/ROT and
+/// write the updated MOSFLM AMAT back into CONTROL state.
+bool postrefine_from_observations(
+    ControlState& state,
+    const diffraction::ProcessResult& one,
+    const DetectorGeometry& det
+) {
+    using refinement::PostRefObservation;
+    using refinement::PostRefinementSettings;
+    using refinement::PostRefiner;
+
+    std::vector<PostRefObservation> obs;
+    obs.reserve(one.mosflm_reflections.size());
+    for (const auto& row : one.mosflm_reflections) {
+        if (row.flag != 0 || !(row.sigma > 0.0f)) {
+            continue;
+        }
+        const double isigi =
+            static_cast<double>(row.intensity / row.sigma);
+        if (isigi < 1.5) {
+            continue;
+        }
+        PostRefObservation o;
+        o.h = row.h;
+        o.k = row.k;
+        o.l = row.l;
+        o.phi_obs_deg = static_cast<double>(row.rot);
+        o.weight = (row.fractioncalc < 0.95f) ? 1.5 : 0.5;
+        o.xdet_obs_px = static_cast<double>(row.xdet);
+        o.ydet_obs_px = static_cast<double>(row.ydet);
+        obs.push_back(o);
+    }
+    if (obs.size() < 12) {
+        return false;
+    }
+
+    PostRefinementSettings settings;
+    settings.refine_against_detector = true;
+    settings.refine_cell_scale = false;  // avoid lattice walk on long wedges
+    settings.detector = det;
+    settings.beam_x_mm = state.has_beam ? state.beam_x_mm : det.beam_x_mm;
+    settings.beam_y_mm = state.has_beam ? state.beam_y_mm : det.beam_y_mm;
+    settings.max_iterations = 8;
+    // Fine-φ Eiger: predicted ROT ≈ observed; widen φ gate, rely on XDET.
+    settings.outlier_phi_deg = 5.0;
+
+    crystal::CrystalMetadata crystal;
+    crystal.cell = gemmi::UnitCell(
+        state.cell.a, state.cell.b, state.cell.c, state.cell.alpha_deg,
+        state.cell.beta_deg, state.cell.gamma_deg
+    );
+    if (state.has_symmetry) {
+        crystal.spacegroup =
+            crystal::SpaceGroupInfo::find_by_number(state.symmetry_number);
+    }
+    const auto orient =
+        OrientationMatrix::from_mosflm_orientation_matrix(state.amat);
+    const auto result = PostRefiner{}.refine(
+        crystal, orient, state.wavelength_A, state.mosaic_deg, obs, settings
+    );
+    if (!result.ok) {
+        return false;
+    }
+    // Only accept if positional residual improves (or φ when no pos term).
+    const bool pos_ok =
+        result.rms_pos_initial_px <= 0.0 ||
+        result.rms_pos_px <= result.rms_pos_initial_px * 1.02;
+    const bool phi_ok =
+        result.rms_phi_deg <= result.rms_phi_initial_deg * 1.02;
+    const bool accept = pos_ok && phi_ok;
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "  POSTREFINE: n=" << result.n_used
+              << " rms_phi=" << result.rms_phi_initial_deg << "→"
+              << result.rms_phi_deg << " rms_pos="
+              << result.rms_pos_initial_px << "→" << result.rms_pos_px
+              << " px" << (accept ? " (applied)" : " (rejected)") << '\n';
+    if (!accept) {
+        return false;
+    }
+    // Cap misset so a bad batch cannot walk the orientation off lattice.
+    const double cap = 0.35;  // degrees
+    const auto& p = result.parameters;
+    if (std::fabs(p.dphix_deg) > cap || std::fabs(p.dphiy_deg) > cap ||
+        std::fabs(p.dphiz_deg) > cap) {
+        std::cout << "  POSTREFINE: misset exceeds " << cap
+                  << " deg — not applied\n";
+        return false;
+    }
+    state.amat =
+        cpp_ub_to_mosflm_amat(result.orientation.ub(), state.wavelength_A);
+    state.has_matrix = true;
+    // Do not overwrite CONTROL MOSAIC from postref (φ residuals ≠ σM).
+    return true;
+}
+
+void append_process_result(
+    diffraction::ProcessResult& acc,
+    diffraction::ProcessResult&& one,
+    int batch
+) {
+    for (auto& row : one.mosflm_reflections) {
+        row.batch = batch;
+    }
+    acc.n_overlapped += one.n_overlapped;
+    acc.n_profile_ok += one.n_profile_ok;
+    acc.n_omitted += one.n_omitted;
+    acc.predictions.insert(
+        acc.predictions.end(),
+        std::make_move_iterator(one.predictions.begin()),
+        std::make_move_iterator(one.predictions.end())
+    );
+    acc.integrated.insert(
+        acc.integrated.end(),
+        std::make_move_iterator(one.integrated.begin()),
+        std::make_move_iterator(one.integrated.end())
+    );
+    acc.meas_observations.insert(
+        acc.meas_observations.end(),
+        std::make_move_iterator(one.meas_observations.begin()),
+        std::make_move_iterator(one.meas_observations.end())
+    );
+    acc.profile_observations.insert(
+        acc.profile_observations.end(),
+        std::make_move_iterator(one.profile_observations.begin()),
+        std::make_move_iterator(one.profile_observations.end())
+    );
+    acc.mtz_reflections.insert(
+        acc.mtz_reflections.end(),
+        std::make_move_iterator(one.mtz_reflections.begin()),
+        std::make_move_iterator(one.mtz_reflections.end())
+    );
+    acc.mosflm_reflections.insert(
+        acc.mosflm_reflections.end(),
+        std::make_move_iterator(one.mosflm_reflections.begin()),
+        std::make_move_iterator(one.mosflm_reflections.end())
+    );
+    // Keep last frame's postrefinement summary if any.
+    if (one.postrefinement.ok) {
+        acc.postrefinement = std::move(one.postrefinement);
+    }
+}
+
+/// Per-image counters for XDS INTEGRATE-style PROCESS logging.
+struct ProcessImageStats {
+    int ier{0};
+    double scale{1.0};
+    std::size_t nbkg{0};
+    std::size_t novl{0};
+    std::size_t newald{0};
+    std::size_t nstrong{0};
+    std::size_t nrej{0};
+    double sigmab{0.0};
+    double sigmar{0.0};
+    double mean_isigi{0.0};
+    std::size_t n_integrated{0};
+};
+
+ProcessImageStats make_process_image_stats(
+    const diffraction::ProcessResult& one,
+    double sigmab,
+    double sigmar
+) {
+    ProcessImageStats s;
+    s.sigmab = sigmab;
+    s.sigmar = sigmar;
+    s.newald = one.predictions.size();
+    s.novl = one.n_overlapped;
+    s.nrej = one.n_omitted;
+    s.nstrong = one.n_profile_ok;
+    s.n_integrated = one.mtz_reflections.size();
+
+    for (const auto& obs : one.integrated) {
+        if (obs.npix_bg > 0) {
+            s.nbkg += static_cast<std::size_t>(obs.npix_bg);
+        }
+    }
+    if (s.nbkg == 0) {
+        for (const auto& obs : one.meas_observations) {
+            if (obs.npix_bg > 0) {
+                s.nbkg += static_cast<std::size_t>(obs.npix_bg);
+            }
+        }
+    }
+
+    double sum_isigi = 0.0;
+    std::size_t n_isigi = 0;
+    for (const auto& row : one.mosflm_reflections) {
+        if (row.flag != 0) {
+            continue;
+        }
+        if (!(row.sigma > 0.0f) || !std::isfinite(row.sigma) ||
+            !std::isfinite(row.intensity)) {
+            continue;
+        }
+        sum_isigi += static_cast<double>(row.intensity / row.sigma);
+        ++n_isigi;
+    }
+    if (n_isigi > 0) {
+        s.mean_isigi = sum_isigi / static_cast<double>(n_isigi);
+    }
+    if (s.nstrong == 0 && n_isigi > 0) {
+        // Fallback when profile learning did not fill n_profile_ok.
+        for (const auto& row : one.mosflm_reflections) {
+            if (row.flag == 0 && row.sigma > 0.0f &&
+                row.intensity / row.sigma >= 3.0f) {
+                ++s.nstrong;
+            }
+        }
+    }
+    return s;
+}
+
+void print_process_integrate_header(
+    const ControlState& state,
+    int first,
+    int last,
+    const std::filesystem::path& image_example,
+    double osc_range_deg,
+    double start_angle_deg,
+    const image::ImageMetadata& img_meta
+) {
+    // Prefer image-header geometry when CONTROL did not override.
+    const double wavelength =
+        state.has_wavelength ? state.wavelength_A
+                             : (img_meta.wavelength_angstrom > 0.0
+                                    ? img_meta.wavelength_angstrom
+                                    : state.wavelength_A);
+    const double distance =
+        state.has_distance ? state.distance_mm
+                           : (img_meta.detector_distance_mm > 0.0
+                                  ? img_meta.detector_distance_mm
+                                  : state.distance_mm);
+    const double pixel_x =
+        state.has_pixel ? state.pixel_x_mm
+                        : (img_meta.pixel_size_x_mm > 0.0
+                               ? img_meta.pixel_size_x_mm
+                               : state.pixel_x_mm);
+    const double pixel_y =
+        state.has_pixel ? state.pixel_y_mm
+                        : (img_meta.pixel_size_y_mm > 0.0
+                               ? img_meta.pixel_size_y_mm
+                               : state.pixel_y_mm);
+    const double beam_x =
+        state.has_beam ? state.beam_x_mm
+                       : (img_meta.beam_x_mm > 0.0 ? img_meta.beam_x_mm
+                                                   : state.beam_x_mm);
+    const double beam_y =
+        state.has_beam ? state.beam_y_mm
+                       : (img_meta.beam_y_mm > 0.0 ? img_meta.beam_y_mm
+                                                   : state.beam_y_mm);
+
+    // XDS INTEGRATE-style preamble (honest ProcessingLab field mapping).
+    std::cout << "\n ***** INTEGRATE ***** (ProcessingLab PROCESS)\n\n";
+    std::cout << " NAME_TEMPLATE_OF_DATA_FRAMES=" << image_example.string()
+              << "\n";
+    std::cout << " DATA_RANGE= " << std::setw(7) << first << " " << std::setw(7)
+              << last << "\n";
+    std::cout << " PROFILE_FITTING= TRUE\n";
+    std::cout << " SPACE_GROUP_NUMBER= " << std::setw(4)
+              << state.symmetry_number << "\n";
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << " UNIT_CELL_CONSTANTS= " << std::setw(8) << state.cell.a << " "
+              << std::setw(8) << state.cell.b << " " << std::setw(8)
+              << state.cell.c << " " << std::setw(7) << state.cell.alpha_deg
+              << " " << std::setw(7) << state.cell.beta_deg << " " << std::setw(7)
+              << state.cell.gamma_deg << "\n";
+    std::cout << std::setprecision(6);
+    std::cout << " OSCILLATION_RANGE= " << std::setw(10) << osc_range_deg
+              << " DEGREES\n";
+    std::cout << std::setprecision(3);
+    std::cout << " STARTING_ANGLE= " << std::setw(8) << start_angle_deg
+              << " STARTING_FRAME= " << std::setw(7) << first << "\n";
+    std::cout << std::setprecision(5);
+    std::cout << " X-RAY_WAVELENGTH= " << std::setw(9) << wavelength
+              << " ANGSTROM\n";
+    std::cout << std::setprecision(3);
+    std::cout << " DETECTOR_DISTANCE= " << std::setw(9) << distance << "\n";
+    const double orgx = (pixel_x > 0.0) ? (beam_x / pixel_x) : 0.0;
+    const double orgy = (pixel_y > 0.0) ? (beam_y / pixel_y) : 0.0;
+    std::cout << " ORGX= " << std::setw(9) << orgx << "  ORGY= " << std::setw(9)
+              << orgy << "  (beam / pixel)\n";
+    std::cout << std::setprecision(5);
+    std::cout << " QX= " << std::setw(8) << pixel_x << " QY= " << std::setw(8)
+              << pixel_y << " (mm)\n";
+    std::cout << std::setprecision(3);
+    std::cout << " BEAM_DIVERGENCE_E.S.D.= ";
+    if (state.has_divergence) {
+        std::cout << std::setw(8)
+                  << (0.5 * std::max(state.divh_deg, state.divv_deg));
+        std::cout << "  (from DIVERGENCE " << std::setw(6) << state.divh_deg
+                  << " " << std::setw(6) << state.divv_deg << ")\n";
+    } else {
+        std::cout << std::setw(8) << 0.0 << "  (DIVERGENCE not set)\n";
+    }
+    std::cout << " REFLECTING_RANGE_E.S.D.= " << std::setw(8) << state.mosaic_deg
+              << "  (MOSAICITY)\n";
+    std::cout << " RESOLUTION RANGE (ANGSTROM) " << std::setw(9) << state.dmax_A
+              << " " << std::setw(9) << state.dmin_A << "\n";
+    std::cout << " NMASKS= " << state.nmasks_x << " " << state.nmasks_y << "\n";
+    std::cout << " YSCALE= " << std::setw(8) << state.yscale
+              << "  TILT= " << std::setw(8) << state.tilt_mrad
+              << "  TWIST= " << std::setw(8) << state.twist_mrad
+              << "  WIDEN_EWALD= " << (state.widen_ewald_with_mosaic ? "ON" : "OFF")
+              << "\n";
+    std::cout << std::flush;
+}
+
+void print_process_batch_banner(
+    int batch_first,
+    int batch_last,
+    bool print_symbols
+) {
+    std::cout << "\n ******************************************************************************\n";
+    std::cout << "                     PROCESSING OF IMAGES " << std::setw(7)
+              << batch_first << " ... " << std::setw(7) << batch_last << "\n";
+    std::cout << " ******************************************************************************\n\n";
+    std::cout << " USING   1 PROCESSORS\n\n";
+    if (print_symbols) {
+        // Column meanings follow XDS INTEGRATE; MEANIS is ProcessingLab-only.
+        std::cout << " *** DEFINITION OF SYMBOLS ***\n";
+        std::cout << " IER     = ERROR CODE AFTER ACCESSING DATA IMAGE\n";
+        std::cout << "              0: NO ERROR\n";
+        std::cout << "             -1: CANNOT OPEN OR READ IMAGE FILE\n";
+        std::cout << "             -3: WRONG DATA FORMAT / UNSUPPORTED IMAGE\n";
+        std::cout << " SCALE   = SCALING FACTOR FOR THIS DATA IMAGE\n";
+        std::cout << "            (1.0 until SCALE / postrefinement)\n";
+        std::cout << " NBKG    = SUM OF BACKGROUND PIXELS USED PER REFLECTION\n";
+        std::cout << " NOVL    = NUMBER OF OVERLAPPED REFLECTIONS ON DATA IMAGE\n";
+        std::cout << "            (XDS: overloaded; here: spatial overlap)\n";
+        std::cout << " NEWALD  = NUMBER OF PREDICTED REFLECTIONS (on detector)\n";
+        std::cout << " NSTRONG = NUMBER OF PROFILE-FITTED / STRONG REFLECTIONS\n";
+        std::cout << " NREJ    = NUMBER OF OMITTED REFLECTIONS\n";
+        std::cout << " SIGMAB  = BEAM_DIVERGENCE_E.S.D.=SIGMAB (input; deg)\n";
+        std::cout << " SIGMAR  = REFLECTING_RANGE_E.S.D.=SIGMAR (MOSAICITY)\n";
+        std::cout << " MEANIS  = MEAN I/SIGMA OF ACCEPTED REFLECTIONS ON IMAGE\n";
+        std::cout << "            (ProcessingLab extension; not an XDS column)\n\n";
+    }
+    std::cout << " IMAGE IER  SCALE     NBKG NOVL NEWALD NSTRONG  NREJ  SIGMAB  SIGMAR  MEANIS\n";
+    std::cout << std::flush;
+}
+
+void print_process_image_row(int frame, const ProcessImageStats& s) {
+    std::cout << std::setw(6) << frame << " " << std::setw(3) << s.ier << " "
+              << std::fixed << std::setprecision(3) << std::setw(6) << s.scale
+              << " " << std::setw(7) << s.nbkg << " " << std::setw(4) << s.novl
+              << " " << std::setw(6) << s.newald << " " << std::setw(7)
+              << s.nstrong << " " << std::setw(5) << s.nrej << " "
+              << std::setprecision(4) << std::setw(7) << s.sigmab << " "
+              << std::setw(7) << s.sigmar << " " << std::setprecision(1)
+              << std::setw(7) << s.mean_isigi << "\n"
+              << std::flush;
+}
+
+void print_process_batch_footer(
+    std::size_t n_integrated_batch,
+    const ControlState& state
+) {
+    std::cout << "\n  " << n_integrated_batch
+              << " REFLECTION INTENSITIES INTEGRATED\n";
+    std::cout << " SPACE GROUP NUMBER " << std::setw(6) << state.symmetry_number
+              << "\n";
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << " UNIT CELL PARAMETERS " << std::setw(8) << state.cell.a << " "
+              << std::setw(8) << state.cell.b << " " << std::setw(8)
+              << state.cell.c << " " << std::setw(7) << state.cell.alpha_deg
+              << " " << std::setw(7) << state.cell.beta_deg << " " << std::setw(7)
+              << state.cell.gamma_deg << "\n";
+    std::cout << " CRYSTAL MOSAICITY (DEGREES) " << std::setw(8)
+              << state.mosaic_deg << "\n";
+    std::cout << " CRYSTAL TO DETECTOR DISTANCE (mm) " << std::setw(10)
+              << state.distance_mm << "\n";
+    std::cout << std::flush;
+}
+
+void print_process_run_summary(
+    const diffraction::ProcessResult& acc,
+    int first,
+    int last,
+    std::size_t n_frames,
+    const crystal::CrystalMetadata& crystal,
+    double dmax_A,
+    double dmin_A
+) {
+    std::cout << "\n ******************************************************************************\n";
+    std::cout << "  PROCESS SUMMARY  FRAMES " << first << " ... " << last << "  ("
+              << n_frames << " image(s))\n";
+    std::cout << " ******************************************************************************\n";
+    std::cout << "  " << std::setw(8) << acc.mtz_reflections.size()
+              << " REFLECTIONS INTEGRATED\n";
+    std::cout << "  " << std::setw(8) << acc.predictions.size()
+              << " PREDICTIONS (all frames, concatenated)\n";
+    std::cout << "  " << std::setw(8) << acc.n_profile_ok
+              << " PROFILE-FITTED (strong)\n";
+    std::cout << "  " << std::setw(8) << acc.n_overlapped << " OVERLAPPED\n";
+    std::cout << "  " << std::setw(8) << acc.n_omitted << " OMITTED\n";
+    if (!acc.mosflm_reflections.empty()) {
+        double sum = 0.0;
+        std::size_t n = 0;
+        for (const auto& row : acc.mosflm_reflections) {
+            if (row.flag == 0 && row.sigma > 0.0f &&
+                std::isfinite(row.intensity) && std::isfinite(row.sigma)) {
+                sum += static_cast<double>(row.intensity / row.sigma);
+                ++n;
+            }
+        }
+        if (n > 0) {
+            std::cout << std::fixed << std::setprecision(2);
+            std::cout << "  MEAN I/SIGMA (accepted) = "
+                      << (sum / static_cast<double>(n)) << "  (N=" << n
+                      << ")\n";
+        }
+    }
+    std::cout << "\n" << std::flush;
+
+    if (!acc.mosflm_reflections.empty() && crystal.spacegroup != nullptr) {
+        const auto quality = diffraction::compute_data_quality(
+            crystal, acc.mosflm_reflections, dmax_A, dmin_A
+        );
+        diffraction::write_data_quality_table(std::cout, quality);
+    }
+}
+
+}  // namespace
+
 std::filesystem::path ControlSession::resolve_image_path(
-    const std::optional<std::filesystem::path>& image_override
+    const std::optional<std::filesystem::path>& image_override,
+    int frame
 ) const {
+    const int use_frame = (frame > 0) ? frame : state_.process_first;
     if (image_override && !image_override->empty()) {
         return *image_override;
     }
@@ -524,16 +1336,18 @@ std::filesystem::path ControlSession::resolve_image_path(
     }
     if (!state_.image_template.empty()) {
         const std::string name =
-            expand_template(state_.image_template, state_.process_first);
+            expand_template(state_.image_template, use_frame);
         return state_.directory / name;
     }
+    (void)use_frame;
     throw std::runtime_error(
         "CONTROL: no IMAGE/TEMPLATE and no image override for PROCESS"
     );
 }
 
 diffraction::ProcessRequest ControlSession::make_process_request(
-    const image::DiffractionImage& image
+    const image::DiffractionImage& image,
+    int frame
 ) const {
     if (!state_.has_matrix) {
         throw std::runtime_error(
@@ -557,6 +1371,8 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         sg = crystal::SpaceGroupInfo::find_by_name("P 1");
     }
 
+    // CELLFIX is applied in go_process (mutates state_.cell once). Here we
+    // just use the current cell (already fixed if go_process ran CELLFIX).
     crystal::CrystalMetadata crystal;
     crystal.cell = gemmi::UnitCell(
         state_.cell.a,
@@ -588,16 +1404,34 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         det.pixel_size_x_mm = state_.pixel_x_mm;
         det.pixel_size_y_mm = state_.pixel_y_mm;
     }
-    // Match ProcessPipeline::known_indexed_insulin detector frame.
+    // Detector fiducials: neutral defaults unless CONTROL YSCALE/TILT/TWIST.
     det.yscale = state_.yscale;
     det.tilt_mrad = state_.tilt_mrad;
     det.twist_mrad = state_.twist_mrad;
     det.use_rotmat2 = state_.use_rotmat2;
 
     diffraction::ScanRange scan;
-    scan.phi_start_deg = state_.process_start_phi_deg;
-    scan.phi_end_deg =
-        state_.process_start_phi_deg + state_.process_angle_deg;
+    if (state_.has_process_phi) {
+        const int offset = frame - state_.process_first;
+        scan.phi_start_deg =
+            state_.process_start_phi_deg +
+            static_cast<double>(offset) * state_.process_angle_deg;
+        scan.phi_end_deg = scan.phi_start_deg + state_.process_angle_deg;
+    } else if (image.metadata.oscillation_range_deg > 0.0) {
+        scan.phi_start_deg = image.metadata.oscillation_start_deg;
+        scan.phi_end_deg =
+            scan.phi_start_deg + image.metadata.oscillation_range_deg;
+    } else {
+        const int offset = frame - state_.process_first;
+        scan.phi_start_deg =
+            state_.process_start_phi_deg +
+            static_cast<double>(offset) * state_.process_angle_deg;
+        scan.phi_end_deg = scan.phi_start_deg + state_.process_angle_deg;
+    }
+    if (std::fabs(state_.phi_offset_deg) > 1e-12) {
+        scan.phi_start_deg += state_.phi_offset_deg;
+        scan.phi_end_deg += state_.phi_offset_deg;
+    }
 
     diffraction::PredictionSettings prediction;
     prediction.mosaic_spread_deg = state_.mosaic_deg;
@@ -607,20 +1441,42 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     prediction.dmax_A = state_.dmax_A;
     prediction.phi_step_deg = state_.phi_step_deg;
     prediction.apply_systematic_absences = true;
-    // REEK-style gates tuned for insulin PROCESS (~1680 gen target).
+    // REEK PROCESS: do not widen Ewald with mosaic (avoids multi-frame
+    // over-prediction / extreme multiplicity vs DIALS).
     prediction.exclude_ice_rings = false;
     prediction.exclude_cusp = true;
     prediction.cusp_fraction = 0.035;
+    // NWMAX-like cap (degrees). Multiplicity is controlled by not widening
+    // the Ewald gate with mosaic (REEK PROCESS policy).
     prediction.max_phi_width_deg = 5.0;
     prediction.apply_reek_detector_margin = true;
     prediction.detector_margin_px = 24.0;
-    prediction.widen_ewald_with_mosaic = true;
-    prediction.mosaic_ewald_scale = 0.55;
+    prediction.widen_ewald_with_mosaic = state_.widen_ewald_with_mosaic;
+    prediction.mosaic_ewald_scale = state_.mosaic_ewald_scale;
+    // Keep Ewald angular half-width well below the image osc so mid-frame
+    // spots are classified ``full`` (FRACTIONCALC=1) instead of spanning the
+    // whole image as 0.5-partials. Default 0.0025 Å⁻¹ ≈ 0.14° at λ≈0.98 —
+    // comparable to a 0.15° frame and made almost everything partial.
+    {
+        constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
+        const double osc_w = std::max(
+            1e-6, scan.phi_end_deg - scan.phi_start_deg
+        );
+        // Tuned for thaumatin/DIALS-like obs/image (~500–700) with correct beam.
+        const double half_deg = 0.18 * osc_w;  // ~0.027° for 0.15° frames
+        const double lam =
+            det.wavelength_A > 0.0 ? det.wavelength_A : state_.wavelength_A;
+        if (lam > 0.0) {
+            prediction.ewald_tolerance_Ainv =
+                (half_deg * kDeg2Rad) / lam;
+        }
+    }
 
     diffraction::IntegrationSettings integration;
     integration.box_half_px = 3;
     integration.bg_frame_px = 2;
     integration.apply_lp = true;
+    integration.polarization_fraction = state_.polarization_fraction;
     integration.mosflm_detector_axes = true;
     integration.image_beam_x_mm =
         state_.has_beam ? state_.beam_x_mm : image.metadata.beam_x_mm;
@@ -630,21 +1486,81 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     diffraction::MeasurementBoxSettings measurement;
     measurement.separation_x_mm = state_.separation_x_mm;
     measurement.separation_y_mm = state_.separation_y_mm;
-    measurement.bg_rim_px = 2;
+    // Fine-pixel (Eiger ≤0.08 mm): thicker bg rim; else modest rim.
+    const double px_mm = state_.has_pixel
+                             ? state_.pixel_x_mm
+                             : image.metadata.pixel_size_x_mm;
+    // Clamp PEAKHALF so the peak box stays within half SEPARATION (avoids
+    // neighbour bleed on fine-pixel detectors).
+    {
+        const double px = std::max(px_mm, 1e-6);
+        // Peak box must fit inside SEPARATION so neighbours do not share
+        // peak pixels (half-separation in px is the hard upper bound).
+        const double half_sep_px = 0.5 * std::min(
+            state_.separation_x_mm, state_.separation_y_mm
+        ) / px;
+        const int max_half = std::max(
+            1, static_cast<int>(std::floor(half_sep_px + 1e-9))
+        );
+        int ph = state_.peak_half_px >= 1 ? state_.peak_half_px : -1;
+        if (ph < 0) {
+            ph = std::min(5, max_half);
+        }
+        measurement.peak_half_px = std::min(ph, max_half);
+    }
+    // Eiger: modest rim (4); oversized rims dilute SNR without helping CC.
+    measurement.bg_rim_px = (px_mm > 0.0 && px_mm <= 0.08) ? 4 : 3;
     measurement.bg_reject_nsigma = 3.0;
+    // INIT-lite BLANK/GAIN: tighten bg reject when gain is high (noisy PAD).
+    {
+        const auto init = diffraction::estimate_blank_gain(image, 32);
+        if (init.ok && init.gain > 1.5) {
+            measurement.bg_reject_nsigma =
+                std::max(2.5, 3.0 / std::sqrt(init.gain));
+        }
+    }
     measurement.mark_overlaps = true;
     measurement.integrate_overlaps = true;
+    // Local COM refine; cap shift to avoid noise walks on weak Eiger spots.
+    measurement.refine_centroid = true;
+    measurement.centroid_half_px = 2;
+    measurement.centroid_max_shift_px = 1.5;
+    // INIT/DEFPIX-lite trusted region (circular + DMIN/DMAX).
+    {
+        diffraction::TrustedRegionSettings tr;
+        tr.trusted_radius_frac = 0.98;
+        tr.dmin_A = state_.dmin_A;
+        tr.dmax_A = state_.dmax_A > 0.0 ? state_.dmax_A : 0.0;
+        if (state_.has_beam) {
+            tr.beam_x_mm = state_.beam_x_mm;
+            tr.beam_y_mm = state_.beam_y_mm;
+        }
+        measurement.trusted_mask =
+            diffraction::build_trusted_mask(image, det, tr);
+        measurement.trusted_width = image.metadata.width;
+    }
 
     diffraction::StandardProfileSettings profile;
     profile.box = measurement;
-    profile.learn_min_isigi = 5.0;
+    // Eiger: learn from I/σ≥3; prefer profile only when pkratio is sane.
+    profile.learn_min_isigi = 3.0;
     profile.min_learners = 8;
     profile.fallback_sigma_px = 1.5;
     profile.prefer_profile = true;
+    profile.max_pkratio_for_profile = 2.0;
     profile.n_bins_x = state_.nmasks_x;
     profile.n_bins_y = state_.nmasks_y;
 
     refinement::PostRefinementSettings postref;
+    postref.refine_against_detector = true;
+    postref.detector = det;
+    postref.beam_x_mm =
+        state_.has_beam ? state_.beam_x_mm : image.metadata.beam_x_mm;
+    postref.beam_y_mm =
+        state_.has_beam ? state_.beam_y_mm : image.metadata.beam_y_mm;
+    // Prefer ControlSession periodic (measured XDET) over pipeline pre-pass.
+    const bool pipeline_postref =
+        state_.enable_postrefinement && state_.postrefine_period <= 0;
 
     return diffraction::ProcessRequest{
         crystal,
@@ -657,8 +1573,11 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         profile,
         true,
         true,
-        state_.enable_postrefinement,
+        pipeline_postref,
         postref,
+        state_.min_fractioncalc,
+        state_.scale_by_partiality,
+        state_.air_absorption_mm_inv,
         image
     };
 }
@@ -671,17 +1590,52 @@ ControlGoResult ControlSession::go(
         throw std::runtime_error("CONTROL: incomplete MATRIX before GO");
     }
 
+    if (state_.findspots_pending) {
+        if (!findspots_runner_slot()) {
+            throw std::runtime_error(
+                "CONTROL FINDSPOTS: spot finder not linked into this build"
+            );
+        }
+        findspots_runner_slot()(state_, image_override);
+        state_.findspots_pending = false;
+        state_.done_run = true;
+        out.ran_findspots = true;
+        out.image_used = resolve_image_path(image_override);
+        out.message = "FINDSPOTS wrote " +
+                      state_.findspots.spot_file.string() + " (" +
+                      std::to_string(state_.findspots_n_spots) + " spots)";
+        return out;
+    }
+
     if (state_.autoindex_pending) {
         if (!autoindex_runner_slot()) {
             throw std::runtime_error(
                 "CONTROL AUTOINDEX: DPS indexer not linked into this build"
             );
         }
+        // Prefer FILE from prior FINDSPOTS when AUTOINDEX omitted it.
+        if (state_.autoindex.spot_file.empty() &&
+            !state_.findspots.spot_file.empty()) {
+            state_.autoindex.spot_file = state_.findspots.spot_file;
+        }
         autoindex_runner_slot()(state_);
         state_.autoindex_pending = false;
         state_.done_run = true;
         out.ran_autoindex = true;
         out.message = "AUTOINDEX complete";
+        // IDXREF analogue: write XPARM.XDS after successful index.
+        if (state_.has_matrix && state_.has_cell) {
+            std::filesystem::path out_xparm =
+                state_.directory / "XPARM.XDS";
+            try {
+                const auto g = io::xparm_from_control(*this);
+                io::write_xparm(out_xparm, g);
+                std::cout << "  Wrote XPARM: " << out_xparm << '\n';
+            } catch (const std::exception& ex) {
+                std::cerr << " *** WARNING **   XPARM write failed: "
+                          << ex.what() << '\n';
+            }
+        }
         return out;
     }
 
@@ -700,28 +1654,221 @@ ControlGoResult ControlSession::go(
     }
 
     if (!state_.process_pending) {
-        out.message = "GO with no pending PROCESS/AUTOINDEX/STRATEGY";
+        out.message = "GO with no pending PROCESS/FINDSPOTS/AUTOINDEX/STRATEGY";
         return out;
     }
 
-    const auto img_path = resolve_image_path(image_override);
-    out.image_used = img_path;
-    // HDF5/NeXus masters: PROCESS first image is the 1-based frame index.
-    const auto image =
-        image::read_diffraction_image(img_path, state_.process_first);
-    const auto req = make_process_request(image);
-    out.crystal = req.crystal;
-    out.process = diffraction::ProcessPipeline{}.run(req);
+    const int first = state_.process_first;
+    int last = state_.process_last;
+    if (first < 1) {
+        throw std::runtime_error("CONTROL PROCESS: first image must be >= 1");
+    }
 
-    // Multi-image NADD scaffolding: re-run adjacent frames when nadd > 1 and
-    // TEMPLATE is set (joint postref still single-image refine for now).
+    const auto path0 = resolve_image_path(image_override, first);
+    out.image_used = path0;
+
+    // Multi-frame SMV/CBF needs a TEMPLATE (or one IMAGE per GO). HDF5 masters
+    // reuse the same path with a 1-based frame index.
+    const bool hdf5 = path_looks_hdf5(path0) ||
+                      (image_override && path_looks_hdf5(*image_override));
+    if (hdf5) {
+        const int nimg = image::num_diffraction_images(path0);
+        if (nimg > 0 && last > nimg) {
+            std::cerr << " *** WARNING **   CONTROL PROCESS: last image "
+                      << last << " clamped to nimages=" << nimg << '\n';
+            last = nimg;
+        }
+    }
+    if (last < first) {
+        throw std::runtime_error(
+            "CONTROL PROCESS: last image < first after nimages clamp"
+        );
+    }
+    out.process_first = first;
+    out.process_last = last;
+
+    // MOSFLM CELLFIX: project cell onto crystal-system metric before integrate.
+    if (state_.cellfix_enabled && state_.has_symmetry) {
+        const auto* sg =
+            crystal::SpaceGroupInfo::find_by_number(state_.symmetry_number);
+        if (sg != nullptr) {
+            const auto chk =
+                check_lattice_vs_spacegroup(state_.cell, sg, 2.0);
+            std::cout << "  CELLFIX check: " << chk.message << '\n';
+            const UnitCell fixed = cellfix_for_spacegroup(
+                state_.cell, sg, state_.cellfix_softness
+            );
+            if (std::fabs(fixed.a - state_.cell.a) > 1e-4 ||
+                std::fabs(fixed.b - state_.cell.b) > 1e-4 ||
+                std::fabs(fixed.c - state_.cell.c) > 1e-4 ||
+                std::fabs(fixed.alpha_deg - state_.cell.alpha_deg) > 1e-3 ||
+                std::fabs(fixed.beta_deg - state_.cell.beta_deg) > 1e-3 ||
+                std::fabs(fixed.gamma_deg - state_.cell.gamma_deg) > 1e-3) {
+                std::cout << "  CELLFIX applied: " << state_.cell.describe()
+                          << " → " << fixed.describe() << '\n';
+                state_.cell = fixed;
+            }
+        }
+    }
+
+    const bool multi = last > first;
+    if (multi && !hdf5 && state_.image_template.empty()) {
+        throw std::runtime_error(
+            "CONTROL PROCESS " + std::to_string(first) + " TO " +
+            std::to_string(last) +
+            ": multi-frame SMV/CBF requires TEMPLATE (HDF5 masters OK)"
+        );
+    }
+
+    diffraction::ProcessPipeline pipe;
+    diffraction::ProcessResult acc;
+    crystal::CrystalMetadata crystal;
+    std::size_t n_frames = 0;
+
+    // XDS INTEGRATE-style batch size for log sections.
+    constexpr int k_log_batch = 25;
+    double sigmab =
+        state_.has_divergence
+            ? 0.5 * std::max(state_.divh_deg, state_.divv_deg)
+            : 0.0;
+    double sigmar = state_.mosaic_deg;
+
+    // Peek first frame for osc metadata (reuse in the loop).
+    const auto image0 = image::read_diffraction_image(path0, first);
+    if (!state_.has_wavelength &&
+        image0.metadata.wavelength_angstrom > 0.0) {
+        state_.wavelength_A = image0.metadata.wavelength_angstrom;
+        state_.has_wavelength = true;
+    }
+    double osc_log = state_.process_angle_deg;
+    double start_log = state_.process_start_phi_deg;
+    if (!state_.has_process_phi &&
+        image0.metadata.oscillation_range_deg > 0.0) {
+        osc_log = image0.metadata.oscillation_range_deg;
+        start_log = image0.metadata.oscillation_start_deg;
+    }
+    print_process_integrate_header(
+        state_, first, last, path0, osc_log, start_log, image0.metadata
+    );
+
+    int batch_first = first;
+    std::size_t batch_integrated = 0;
+    bool batch_header_printed = false;
+    // Multi-frame: periodic postref on by default (period>0); POSTREFINE OFF
+    // clears period. Single-frame: only when POSTREFINE explicitly set.
+    const bool want_periodic_postref =
+        (multi && state_.postrefine_period > 0) ||
+        state_.enable_postrefinement;
+    bool autosigma_done = false;
+
+    for (int frame = first; frame <= last; ++frame) {
+        if (!batch_header_printed ||
+            (frame - batch_first) >= k_log_batch) {
+            if (batch_header_printed) {
+                print_process_batch_footer(batch_integrated, state_);
+                if (!autosigma_done && state_.auto_sigma_msd) {
+                    autosigma_done = auto_estimate_sigma_msd(
+                        state_, acc, osc_log
+                    );
+                    sigmar = state_.mosaic_deg;
+                    sigmab =
+                        state_.has_divergence
+                            ? 0.5 * std::max(state_.divh_deg, state_.divv_deg)
+                            : 0.0;
+                }
+                batch_integrated = 0;
+                batch_first = frame;
+            }
+            const int batch_last =
+                std::min(batch_first + k_log_batch - 1, last);
+            // Symbol legend once per PROCESS; table header every batch.
+            print_process_batch_banner(
+                batch_first, batch_last, /*print_symbols=*/!batch_header_printed
+            );
+            batch_header_printed = true;
+        }
+
+        ProcessImageStats stats;
+        try {
+            const auto img_path = resolve_image_path(image_override, frame);
+            const auto image =
+                (frame == first)
+                    ? image0
+                    : image::read_diffraction_image(img_path, frame);
+            auto req = make_process_request(image, frame);
+            crystal = req.crystal;
+            auto one = pipe.run(req);
+            stats = make_process_image_stats(one, sigmab, sigmar);
+            batch_integrated += stats.n_integrated;
+            if (want_periodic_postref) {
+                const int period = std::max(1, state_.postrefine_period);
+                const bool due =
+                    state_.enable_postrefinement
+                        ? ((frame - first) % period == 0)
+                        : ((frame - first) % period == period - 1 ||
+                           frame == last);
+                if (due) {
+                    postrefine_from_observations(state_, one, req.detector);
+                }
+            }
+            append_process_result(acc, std::move(one), frame);
+        } catch (const std::exception& ex) {
+            stats.ier = -1;
+            stats.sigmab = sigmab;
+            stats.sigmar = sigmar;
+            print_process_image_row(frame, stats);
+            std::cout << " *** IER=-1: " << ex.what() << "\n";
+            throw;
+        }
+        print_process_image_row(frame, stats);
+        ++n_frames;
+
+        if (!multi && frame == last) {
+            // Single-frame: still show the one-row table + footer.
+        }
+    }
+
+    if (batch_header_printed) {
+        print_process_batch_footer(batch_integrated, state_);
+    }
+    print_process_run_summary(
+        acc, first, last, n_frames, crystal, state_.dmax_A, state_.dmin_A
+    );
+
+    out.crystal = crystal;
+    out.process = std::move(acc);
+
+    std::string msg = "PROCESS complete frames " + std::to_string(first) +
+                      "-" + std::to_string(last) + " (" +
+                      std::to_string(n_frames) + " image(s))" +
+                      "; integrated=" +
+                      std::to_string(out.process.mtz_reflections.size());
     if (state_.nadd > 1 && !state_.image_template.empty() &&
         state_.enable_postrefinement) {
-        // Observations from the primary process remain; flag in message.
-        out.message = "PROCESS complete (NADD=" + std::to_string(state_.nadd) +
-                      " reserved for joint refine)";
-    } else {
-        out.message = "PROCESS complete";
+        msg += "; NADD=" + std::to_string(state_.nadd) +
+               " reserved for joint refine";
+    }
+    out.message = std::move(msg);
+
+    // CORRECT-lite: auto-write GXPARM.XDS after PROCESS (XDS GXPARM analogue).
+    if (state_.auto_gxparm) {
+        std::filesystem::path out_xparm = state_.xparm_out;
+        if (out_xparm.empty()) {
+            out_xparm = "GXPARM.XDS";
+        }
+        if (!out_xparm.is_absolute()) {
+            out_xparm = state_.directory / out_xparm;
+        }
+        try {
+            const auto g = io::xparm_from_control(*this);
+            io::write_xparm(out_xparm, g);
+            state_.xparm_out = out_xparm;
+            state_.has_xparm_out = true;
+            std::cout << "  Wrote GXPARM: " << out_xparm << '\n';
+        } catch (const std::exception& ex) {
+            std::cerr << " *** WARNING **   GXPARM write failed: " << ex.what()
+                      << '\n';
+        }
     }
 
     out.ran_process = true;

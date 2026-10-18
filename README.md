@@ -2,6 +2,9 @@
 
 Progressive C++ port of the MOSFLM diffraction-processing core.
 
+![ProcessingLab Logo](resources/ProcessingLabLogo.png)
+
+
 **Phase D Done:** default build/install is the C++ core. The release binary is
 **`ProcessingLab`** (`ProcessingLab.exe` on Windows) — a thin CONTROL →
 PROCESS driver that does **not** link the Fortran amalgamation. Autotools
@@ -52,12 +55,27 @@ make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite ProcessingLab)
 # Usage
 
 ```commandline
-./bin/ProcessingLab HKLOUT /tmp/thaumatin_9_1_master.mtz \
-  --image ~/Downloads/thaumatin_9_1_master.h5 <<'EOF'
-PROCESS 1 TO 1
-AUTOINDEX
+./bin/ProcessingLab --image ~/Downloads/thaumatin_9_1_master.h5 <<'EOF'
+DIRECTORY /tmp
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 300 FIND 1 PHI 0.0 0.15 FILE /tmp/thaumatin_cpp.spt
 GO
-PROCESS 1 TO 1
+AUTOINDEX DPS THRESHOLD 20
+GO
+PROCESS 1 TO 999
+GO
+EXIT
+EOF
+```
+
+```commandline
+./bin/ProcessingLab --image testdata/test_0001.cbf hklout test.mtz <<'EOF'
+DIRECTORY testdata
+TEMPLATE testdata_####.cbf
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 300 FIND 1 PHI 0.0 0.15 FILE /tmp/testdata.spt
+GO
+AUTOINDEX DPS THRESHOLD 20
+GO
+PROCESS 1 TO 900
 GO
 EXIT
 EOF

@@ -8,7 +8,7 @@
  *
  * Soft-skips (exit 0) when either binary or the image is missing so CI
  * without CCP4 / oracle still passes. Override with:
- *   MOSFLM_INTEGRATIONLAB — C++ CONTROL binary
+ *   MOSFLM_PROCESSINGLAB — C++ CONTROL binary
  *   MOSFLM_IPMOSFLM       — F77 ``ipmosflm`` / ``ipmosflm.oracle``
  *   MOSFLM_IMAGE          — path to ``insulin_1_001.img``
  *   MOSFLM_PERF_REPEATS   — timed iterations per side (default 3)
@@ -47,7 +47,7 @@ int run_cmd(const std::string& cmd) {
 }
 
 fs::path find_integrationlab() {
-    if (const char* env = std::getenv("MOSFLM_INTEGRATIONLAB")) {
+    if (const char* env = std::getenv("MOSFLM_PROCESSINGLAB")) {
         return env;
     }
     if (const char* env = std::getenv("MOSFLM_THIN_IPMOSFLM")) {
@@ -182,7 +182,7 @@ int main() {
         "testdata/images/known_indexed/insulin_1.mat";
 
     if (cpp_bin.empty() || !fs::exists(cpp_bin)) {
-        skip_pass("no ProcessingLab (set MOSFLM_INTEGRATIONLAB)");
+        skip_pass("no ProcessingLab (set MOSFLM_PROCESSINGLAB)");
     }
     if (f77_bin.empty() || !fs::exists(f77_bin)) {
         skip_pass("no F77 ipmosflm (set MOSFLM_IPMOSFLM or build fortran-oracle)");

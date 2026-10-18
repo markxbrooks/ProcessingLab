@@ -2,9 +2,11 @@
 
 #include "mosflm/control/ControlSession.hpp"
 #include "mosflm/indexing/AutoIndexer.hpp"
+#include "mosflm/indexing/BravaisSelect.hpp"
 #include "mosflm/indexing/SpotList.hpp"
 
 #include <filesystem>
+#include <iostream>
 #include <stdexcept>
 
 namespace mosflm::indexing {
@@ -40,6 +42,16 @@ void run_autoindex(control::ControlState& state) {
 
     const AutoIndexResult result = AutoIndexer{}.index(spots, geo, settings);
     if (!result.ok || result.ierr != 0) {
+        if (result.ierr == -2) {
+            throw std::runtime_error(
+                "CONTROL AUTOINDEX: only " +
+                std::to_string(result.n_spots_used) +
+                " spots pass I/σ ≥ " +
+                std::to_string(settings.min_isigi) +
+                " (need ≥20). Lower AUTOINDEX THRESHOLD or re-run FINDSPOTS "
+                "with a lower THRESHOLD / higher MAXSPOTS."
+            );
+        }
         throw std::runtime_error(
             "CONTROL AUTOINDEX failed (ierr=" + std::to_string(result.ierr) +
             ")"
@@ -53,13 +65,29 @@ void run_autoindex(control::ControlState& state) {
     state.autoindex_system = result.selected_system;
     state.autoindex_character = result.selected_character;
     state.autoindex_n_spots = result.n_spots_used;
+    // SUGGLATT → default SYMMETRY when the user did not set SYMMETRY.
+    if (!state.has_symmetry && result.selected_symmetry_number > 0) {
+        state.symmetry_number = result.selected_symmetry_number;
+        state.has_symmetry = true;
+    }
+
+    // Mosflm DPSCHOOSE-style lattice-character / penalty table.
+    write_bravais_penalty_table(
+        std::cout,
+        result.bravais,
+        result.selected_character,
+        result.selected_system,
+        result.cell,
+        settings.max_penalty
+    );
 }
 
 }  // namespace
 
-/// Called once from ipmosflm / tests to enable CONTROL AUTOINDEX.
+/// Called once from ipmosflm / tests to enable CONTROL AUTOINDEX + FINDSPOTS.
 void register_control_autoindex() {
     control::ControlSession::register_autoindex_runner(run_autoindex);
+    register_control_findspots();
 }
 
 }  // namespace mosflm::indexing

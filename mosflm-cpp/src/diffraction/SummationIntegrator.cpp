@@ -158,7 +158,10 @@ std::vector<IntegratedReflection> SummationIntegrator::integrate(
                  : 0.0);
         r.sigma = std::sqrt(std::max(var, 1.0));
         if (settings.apply_lp) {
-            apply_lp_inplace(detector, r.x_mm, r.y_mm, r.intensity, r.sigma);
+            apply_lp_inplace(
+                detector, r.x_mm, r.y_mm, r.intensity, r.sigma,
+                settings.polarization_fraction
+            );
         }
         r.ok = true;
         out.push_back(r);

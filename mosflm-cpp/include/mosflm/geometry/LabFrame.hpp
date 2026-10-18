@@ -34,6 +34,12 @@ namespace mosflm {
     double wavelength_A = 1.0
 );
 
+/// Inverse of :func:`mosflm_amat_to_cpp_ub` (CONTROL ``MATRIX`` snapshot).
+[[nodiscard]] Eigen::Matrix3d cpp_ub_to_mosflm_amat(
+    const Eigen::Matrix3d& ub_cpp,
+    double wavelength_A = 1.0
+);
+
 /**
  * Map C++ predictor detector millimetres (beam-relative, from
  * :meth:`DetectorGeometry::lab_to_detector_mm`) to MOSFLM ``XDET``/``YDET``
@@ -54,6 +60,23 @@ void cpp_mm_to_mosflm_xdet(
     double beam_y_mm,
     double pixel_size_x_mm,
     double pixel_size_y_mm,
+    double& xdet_px,
+    double& ydet_px
+);
+
+/**
+ * Same as :func:`cpp_mm_to_mosflm_xdet`, applying MOSFLM ``YSCALE`` to the
+ * slow-axis pixel pitch (``pixel_y_eff = pixel_y / yscale``). Matches
+ * MeasurementBox / StandardProfile integration centres.
+ */
+void cpp_mm_to_mosflm_xdet_yscale(
+    double x_mm,
+    double y_mm,
+    double beam_x_mm,
+    double beam_y_mm,
+    double pixel_size_x_mm,
+    double pixel_size_y_mm,
+    double yscale,
     double& xdet_px,
     double& ydet_px
 );

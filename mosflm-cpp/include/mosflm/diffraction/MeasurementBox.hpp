@@ -3,6 +3,7 @@
 #include "mosflm/diffraction/SummationIntegrator.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
 
+#include <cstdint>
 #include <vector>
 
 namespace mosflm::diffraction {
@@ -35,7 +36,9 @@ struct BackgroundPlane {
     int outer,
     const std::vector<int>& neigh_cols,
     const std::vector<int>& neigh_rows,
-    double reject_nsigma = 3.0
+    double reject_nsigma = 3.0,
+    const std::vector<std::uint8_t>* trusted_mask = nullptr,
+    int trusted_width = 0
 );
 
 /// MOSFLM MEAS-inspired measurement-box / background / overlap controls.
@@ -62,6 +65,15 @@ struct MeasurementBoxSettings {
     bool integrate_overlaps{true};
     /// Use tilted ``BackgroundPlane`` (default); false → flat mean of rim.
     bool use_bg_plane{true};
+    /// Local COM refine of predicted (col,row) before integrate.
+    bool refine_centroid{true};
+    /// Half-window (px) for COM refine around the predicted pixel.
+    int centroid_half_px{3};
+    /// Cap on COM shift from prediction (px).
+    double centroid_max_shift_px{2.0};
+    /// Optional INIT/DEFPIX-lite trusted mask (row-major, 1=ok). Empty = all.
+    std::vector<std::uint8_t> trusted_mask{};
+    int trusted_width{0};
 };
 
 /// Extra fields filled by :class:`MeasIntegrator`.
@@ -73,6 +85,15 @@ struct MeasObservation : IntegratedReflection {
     double bg_b{0.0};
     double bg_c{0.0};
 };
+
+/// Intensity-weighted COM refine of predicted pixel; capped shift.
+void refine_centroid_com(
+    const image::DiffractionImage& image,
+    int& col,
+    int& row,
+    int half,
+    double max_shift_px
+);
 
 /// Random-access measurement boxes (MEAS science contract without the
 /// Fortran stripe I/O buffer). Feeds PROCESS-style summation / profiles.

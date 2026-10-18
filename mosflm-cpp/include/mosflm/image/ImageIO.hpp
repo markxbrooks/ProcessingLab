@@ -19,4 +19,7 @@ namespace mosflm::image {
     int frame = 1
 );
 
+/// Number of frames in ``path`` (HDF5/NeXus masters); ``1`` for SMV/CBF.
+[[nodiscard]] int num_diffraction_images(const std::filesystem::path& path);
+
 }  // namespace mosflm::image

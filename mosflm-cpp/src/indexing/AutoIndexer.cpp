@@ -1,5 +1,7 @@
 #include "mosflm/indexing/AutoIndexer.hpp"
 
+#include "mosflm/indexing/BravaisSelect.hpp"
+
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -122,6 +124,7 @@ AutoIndexResult AutoIndexer::index(
     }
     if (n < 20) {
         result.ierr = -2;
+        result.n_spots_used = static_cast<std::size_t>(n);
         return result;
     }
 
@@ -273,42 +276,24 @@ AutoIndexResult AutoIndexer::index(
     }
     result.bravais = BravaisClassifier{}.classify(om_e, 1);
 
-    int pick = -1;
-    if (settings.prefer_character >= 1 && settings.prefer_character <= 44) {
-        pick = settings.prefer_character - 1;
-    } else if (!settings.prefer_system.empty()) {
-        float best = 1e30f;
-        for (std::size_t i = 0; i < result.bravais.size(); ++i) {
-            if (result.bravais[i].system_id == settings.prefer_system &&
-                result.bravais[i].criterion < best) {
-                best = result.bravais[i].criterion;
-                pick = static_cast<int>(i);
-            }
-        }
-    }
-
-    if (pick >= 0) {
-        const auto& c = result.bravais[static_cast<std::size_t>(pick)];
+    const std::size_t pick = select_suggested_bravais(
+        result.bravais,
+        settings.max_penalty,
+        settings.prefer_character,
+        settings.prefer_system
+    );
+    if (pick != static_cast<std::size_t>(-1) && pick < result.bravais.size()) {
+        const auto& c = result.bravais[pick];
         result.selected_character = c.character;
         result.selected_system = c.system_id;
+        result.selected_symmetry_number =
+            symmetry_number_for_lattice(c.system_id);
+        // Always apply Bravais OM → CELL / AMAT (SUGGLATT + prefer_*).
         const struct matrix_3x3 om_pick = eigen_to_dps(c.orientation);
         result.amat = amat_from_dps_om(om_pick, geometry.wavelength_A);
         struct cell_struct cell2{};
         dircell_from_om(om_pick, &cell2);
         result.cell = cell_from_dps(cell2);
-    } else if (!result.bravais.empty()) {
-        int best = 0;
-        float best_c = result.bravais[0].criterion;
-        for (std::size_t i = 1; i < result.bravais.size(); ++i) {
-            if (result.bravais[i].criterion < best_c) {
-                best_c = result.bravais[i].criterion;
-                best = static_cast<int>(i);
-            }
-        }
-        result.selected_character =
-            result.bravais[static_cast<std::size_t>(best)].character;
-        result.selected_system =
-            result.bravais[static_cast<std::size_t>(best)].system_id;
     }
 
     result.orientation =

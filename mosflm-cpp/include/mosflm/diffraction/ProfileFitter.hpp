@@ -37,8 +37,10 @@ struct ProfileFitSettings {
     double sigma_px{1.5};
     /// If true, refine σ by a short 1-D golden search around ``sigma_px``.
     bool refine_sigma{false};
-    /// If true, scale intensity/sigma by unpolarized ``lp_factor``.
+    /// If true, scale intensity/sigma by ``lp_factor``.
     bool apply_lp{false};
+    /// XDS ``FRACTION_OF_POLARIZATION`` (0 = unpolarized).
+    double polarization_fraction{0.0};
 };
 
 /// Inputs for one profile-fit call (refs must outlive the call).

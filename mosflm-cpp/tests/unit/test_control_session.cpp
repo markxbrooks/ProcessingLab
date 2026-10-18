@@ -43,6 +43,20 @@ int main() {
         CHECK_EQ(st.process_first, 1);
         CHECK_EQ(st.process_last, 1);
         CHECK(std::fabs(st.process_angle_deg - 1.0) < 1e-12);
+        CHECK(st.has_process_phi);
+    }
+
+    {
+        // MOSFLM shorthand ``PROCESS 1 100`` and ``PROCESS 1 TO 5``.
+        ControlSession a;
+        a.parse_line("PROCESS 1 100");
+        CHECK_EQ(a.state().process_first, 1);
+        CHECK_EQ(a.state().process_last, 100);
+        ControlSession b;
+        b.parse_line("PROCESS 1 TO 5");
+        CHECK_EQ(b.state().process_first, 1);
+        CHECK_EQ(b.state().process_last, 5);
+        CHECK(!b.state().has_process_phi);
     }
 
     {
@@ -82,6 +96,15 @@ int main() {
         CHECK_EQ(s.state().nmasks_y, 5);
         s.parse_line("POSTREFINE");
         CHECK(s.state().enable_postrefinement);
+    }
+
+    {
+        ControlSession s;
+        CHECK(std::fabs(s.state().min_fractioncalc - 0.5) < 1e-12);
+        s.parse_line("MINFRAC 0.25");
+        CHECK(std::fabs(s.state().min_fractioncalc - 0.25) < 1e-12);
+        s.parse_line("MINFRAC 0");
+        CHECK(std::fabs(s.state().min_fractioncalc) < 1e-12);
         s.parse_line("NADD 3");
         CHECK_EQ(s.state().nadd, 3);
         s.parse_line("STRATEGY ANGLE 45");

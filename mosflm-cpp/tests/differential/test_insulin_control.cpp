@@ -119,7 +119,9 @@ int main() {
 
     const auto mtz_path =
         std::filesystem::temp_directory_path() / "mosflm_insulin_control.mtz";
-    ProcessPipeline::write_mtz(mtz_path, crystal, result);
+    ProcessPipeline::write_mtz(
+        mtz_path, crystal, result, session.state().wavelength_A
+    );
 
     const auto oracle_hkl = unique_hkl_mtz(oracle);
     const auto cpp_hkl = unique_hkl_simple(result.mtz_reflections);
