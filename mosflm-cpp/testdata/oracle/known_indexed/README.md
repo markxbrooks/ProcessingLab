@@ -33,3 +33,6 @@ are **not** from `ipmosflm`.
 `XDET`/`YDET`: `XDET↔y_mm`, `YDET↔x_mm` relative to BEAM (94.0, 94.7) mm;
 exact-HKL median residual ~**37 px** (~3 mm), inlier RMS ~38 px (no TILT/TWIST).
 See `../images/known_indexed/geometry.txt`.
+
+**PROCESS splice:** `make MOSFLM_CPP_PREDICT=1 ipmosflm` then capture →
+`../known_indexed_cpp_predict/` (~89% exact-HKL recall vs this oracle MTZ).

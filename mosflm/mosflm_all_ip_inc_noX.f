@@ -68149,7 +68149,13 @@ C
           COMMENT = 'with MODE=0'
           IF (DEBUG(99))  CALL PRINTFLOW(THIS,CALLED,COMMENT,INDENT)
 C              ****
+#ifdef MOSFLM_CPP_PREDICT
+C---- Experimental GENERATE path: C++ osc PREDICT (PHASE_C_SPLICE.md).
+          CALL PREDICT_CPP_FROM_COMMON(MODERK, NREFLS,
+     +         IHG, IKG, ILG, XG, YG, PHIG, PHIWG, IMG, NSPOT)
+#else
           CALL REEK(ITEMP,MODERK,ILATTICE)
+#endif
 C              ****
 C
 C---- Check for overlapping reflexions
@@ -194121,13 +194127,8 @@ C
         DSTMIN2PHIP = DSTMIN**2
         DSTMAX2PHIP = DSTMAX**2
 #ifdef MOSFLM_CPP_PREDICT
-C---- Experimental stills PREDICT via mosflm-cpp (PHASE_C_SPLICE.md).
-C     CELL/XTOFD from COMMON inside PREDICT_CPP_FROM_COMMON.
-        DMINCPP = 0.0
-        IF (DSTMAX.GT.1.0E-12) DMINCPP = WAVE/DSTMAX
-        ETOLCPP = 0.0025
-        CALL PREDICT_CPP_FROM_COMMON(PSI, IFLAGPR, WAVE, RAST,
-     +       RASTY, IYLEN, NREC, PHIBEG, DMINCPP, ETOLCPP, NREFLS,
+C---- Experimental PREDICT via mosflm-cpp (PHASE_C_SPLICE.md).
+        CALL PREDICT_CPP_FROM_COMMON(IFLAGPR, NREFLS,
      +       IHG, IKG, ILG, XG, YG, PHIG, PHIWG, IMG, NSPOT)
 #else
         CALL PREDICT(PSI, IFLAGPR)

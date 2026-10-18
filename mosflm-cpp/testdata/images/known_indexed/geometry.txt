@@ -43,5 +43,6 @@
 # (BEAM 94.0, 94.7 mm). CTest insulin_xdet: exact-HKL median ~37 px (~3 mm);
 # inliers lack TILT/TWIST/YSCALE. Hook GENDATA still 1:1 until PHASE_C_SPLICE
 # adopts this swap.
-# Experimental Autotools splice: make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
-# (requires mosflm_predict_hook; see mosflm-cpp/docs/PHASE_C_SPLICE.md).
+# PROCESS splice verified: make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
+# → testdata/oracle/known_indexed_cpp_predict/ (~89% exact-HKL vs Fortran MTZ).
+# See mosflm-cpp/docs/PHASE_C_SPLICE.md.

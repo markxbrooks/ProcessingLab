@@ -17,8 +17,8 @@ Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there 
 | Topic | Status |
 | ----- | ------ |
 | C++ vertical slice | Geometry, miniCBF I/O, stills + oscillation `PREDICT`, box summation, 2D Gaussian profile fit, MTZ write — covered by CTest and `mosflm_cpp_cli` |
-| PREDICT oracles | Analytical dumps + real insulin capture under `mosflm-cpp/testdata/oracle/known_indexed/` (MTZ, spot list, log). CTest `insulin_hkl_overlap` (~7% HKL recall; axis mapping open) |
-| Legacy `bin/ipmosflm` | Autotools binary; `MOSFLM_CPP_PREDICT=1` links C++ hook. Default path unchanged |
+| PREDICT oracles | Analytical dumps + real insulin capture under `mosflm-cpp/testdata/oracle/known_indexed/`. CTest `insulin_hkl_overlap`: ASU-aware recall **100%** (`mosflm_lab_to_cpp`); `insulin_xdet`: median ~37 px (`XG↔y_mm`, `YG↔x_mm`) |
+| Legacy `bin/ipmosflm` | Autotools binary; `MOSFLM_CPP_PREDICT=1` splices GENERATE+REFLFIND through C++ osc PREDICT (AMAT lab map). Insulin PROCESS runs; MTZ vs Fortran oracle exact-HKL recall **~89%** (`testdata/oracle/known_indexed_cpp_predict/`) |
 
 Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-languages). Package layout and CLI: [`mosflm-cpp/README.md`](mosflm-cpp/README.md).
 
@@ -38,7 +38,7 @@ Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-language
 
 | Routine | File | Approx. line | C++ status (Oct 2026) |
 | ------- | ---- | ------------ | --------------------- |
-| `PREDICT` | `mosflm_all_ip_inc_noX.f` | 171805 | Stills + oscillation predictor + analytical oracles; not wired into Fortran |
+| `PREDICT` | `mosflm_all_ip_inc_noX.f` | 171805 | Stills + oscillation + known-indexed HKL/XDET differentials; optional Fortran splice via `MOSFLM_CPP_PREDICT` |
 | `DSTAR` | `unoptimizable.f` | 17692 | Thin helpers (`Dstar`) |
 | `ROTMAT` | `unoptimizable.f` | 37480 | `rotmat_from_missetting` |
 | `CLCALC` | `mosflm_all_ip_inc_noX.f` | 23322 | `cell_from_metric_tensor` |
@@ -136,7 +136,7 @@ Staged migration with **current status**:
 | ----- | ------ | ----------------- |
 | **A** | Hybrid CMake build; narrow Fortran/C++ adapters | **Done** — `mosflm_geometry`, `LegacyMosflmAdapter` (CELL(6), predict, summation, profile), optional `mosflm_indexing` |
 | **B** | Replace isolated kernels; keep Fortran as oracle | **In progress / advanced** — geometry, Gemmi crystal, miniCBF, stills+osc `PREDICT`, summation + profile fit, MTZ, Bravais façade. Domain API uses `PredictionRequest` / `IntegrationRequest` (see `mosflm-cpp/docs/DOMAIN_API.md`). Still missing: known-indexed Fortran dumps, post-refinement |
-| **C** | Switch implementation behind interfaces after differential tests pass | **In progress** — `#ifdef MOSFLM_CPP_PREDICT` at ≈194120; `make MOSFLM_CPP_PREDICT=1 ipmosflm` **links and runs** (hook symbols in binary). Still need known-indexed differentials vs REEK (`docs/PHASE_C_SPLICE.md`) |
+| **C** | Switch implementation behind interfaces after differential tests pass | **In progress** — `MOSFLM_CPP_PREDICT` splices GENERATE + REFLFIND; insulin PROCESS MTZ ~89% exact-HKL recall vs Fortran oracle. Still missing full REEK physics (mosaicity/divergence) and tighter XDET (`docs/PHASE_C_SPLICE.md`) |
 | **D** | Retire Fortran only when all callers migrated | **Not started** |
 
 Keep COMMON blocks, column-major layout, and mangling inside `include/mosflm/legacy/`.
@@ -173,7 +173,7 @@ Day 5: Document first legacy routine to replace (`PREDICT`).
 
 ### Next
 
-1. Real known-indexed images (replace synthetic dumps via `capture_ipmosflm_oracle.sh`).
-2. **Phase C:** raise `insulin_hkl_overlap` recall (lab-frame / A-matrix mapping); then XDET positional differential; exercise `MOSFLM_CPP_PREDICT=1` on insulin PROCESS.
+1. Real known-indexed images — **done** (`capture_ipmosflm_oracle.sh` → `testdata/oracle/known_indexed/`).
+2. **Phase C** — HKL/XDET differentials + insulin PROCESS with CPP PREDICT **done** (~89% exact-HKL recall). Tighten XDET (TILT/TWIST); port mosaicity into predictor.
 3. Post-refinement (Stage 2).
 4. Full `INTEG3` parity beyond the Gaussian profile stand-in.

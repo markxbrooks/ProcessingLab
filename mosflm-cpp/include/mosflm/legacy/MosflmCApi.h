@@ -99,6 +99,15 @@ int mosflm_ub_from_psi(
  */
 int mosflm_ub_from_matrix9(const double m[9], mosflm_ub9* out);
 
+/**
+ * Build C++ predictor UB from a MOSFLM Orientation Matrix [A]
+ * (Fortran column-major ``AMAT(3,3)`` as 9 contiguous floats) via
+ * :func:`mosflm_amat_to_cpp_ub`.
+ *
+ * \return ``MOSFLM_SUCCESS`` or ``MOSFLM_ERROR_INVALID_ARGUMENT``
+ */
+int mosflm_ub_from_mosflm_amat(const float amat_colmaj[9], mosflm_ub9* out);
+
 typedef struct mosflm_predicted_c {
     int h;
     int k;
@@ -238,6 +247,39 @@ void predict_still_psi_cpp_(
     double* dmin_A,
     double* ewald_tol,
     double psi_deg[3],
+    int* h,
+    int* k,
+    int* l,
+    double* x_mm,
+    double* y_mm,
+    double* phi_beg,
+    double* phi_end,
+    int* ifull,
+    const int* nmax,
+    int* nspot,
+    int* ierr
+);
+
+/**
+ * Oscillation PREDICT with MOSFLM AMAT (column-major 3×3) mapped to C++ UB.
+ * ``phi_end == phi_start`` is a still. ``phi_step_deg`` may be NULL → 0.05°.
+ */
+void predict_osc_amat_cpp_(
+    float cell[6],
+    double* distance_mm,
+    double* wavelength_A,
+    double* pixel_x_mm,
+    double* pixel_y_mm,
+    int* nfast,
+    int* nslow,
+    double* beam_x_mm,
+    double* beam_y_mm,
+    double* phi_start_deg,
+    double* phi_end_deg,
+    double* dmin_A,
+    double* ewald_tol,
+    double* phi_step_deg,
+    float amat_colmaj[9],
     int* h,
     int* k,
     int* l,

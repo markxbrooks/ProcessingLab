@@ -4,6 +4,7 @@
 
 #include "mosflm/diffraction/LpCorrection.hpp"
 #include "mosflm/diffraction/SummationIntegrator.hpp"
+#include "mosflm/geometry/LabFrame.hpp"
 #include "mosflm/geometry/OrientationMatrix.hpp"
 #include "mosflm/geometry/Rotmat.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
@@ -71,6 +72,30 @@ extern "C" int mosflm_ub_from_matrix9(const double m[9], mosflm_ub9* out) {
         out->m[i] = m[i];
     }
     return MOSFLM_SUCCESS;
+}
+
+extern "C" int mosflm_ub_from_mosflm_amat(
+    const float amat_colmaj[9],
+    mosflm_ub9* out
+) {
+    if (!amat_colmaj || !out) {
+        return MOSFLM_ERROR_INVALID_ARGUMENT;
+    }
+    for (int i = 0; i < 9; ++i) {
+        if (!std::isfinite(amat_colmaj[i])) {
+            return MOSFLM_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    try {
+        Eigen::Matrix3d A;
+        A << amat_colmaj[0], amat_colmaj[3], amat_colmaj[6],
+            amat_colmaj[1], amat_colmaj[4], amat_colmaj[7],
+            amat_colmaj[2], amat_colmaj[5], amat_colmaj[8];
+        fill_ub9(mosflm::mosflm_amat_to_cpp_ub(A), out);
+        return MOSFLM_SUCCESS;
+    } catch (...) {
+        return MOSFLM_ERROR_INTERNAL;
+    }
 }
 
 extern "C" void mosflm_analytical_still_fixture(

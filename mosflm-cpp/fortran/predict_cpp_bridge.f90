@@ -153,3 +153,86 @@ subroutine predict_cpp_still_psi(cell, distance_mm, wavelength_A, &
                              x_mm, y_mm, phi_beg, phi_end, ifull, nmax, &
                              nspot, ierr)
 end subroutine predict_cpp_still_psi
+
+! Oscillation PREDICT with MOSFLM AMAT → C++ UB (lab-frame map).
+subroutine predict_cpp_osc_amat(cell, distance_mm, wavelength_A, &
+                                pixel_x_mm, pixel_y_mm, nfast, nslow, &
+                                beam_x_mm, beam_y_mm, phi_start, phi_end_osc, &
+                                dmin_A, ewald_tol, phi_step, amat, h, k, l, &
+                                x_mm, y_mm, phi_beg, phi_end, ifull, nmax, &
+                                nspot, ierr)
+  use, intrinsic :: iso_c_binding
+  implicit none
+
+  real(c_float), intent(inout) :: cell(6)
+  real(c_double), intent(inout) :: distance_mm
+  real(c_double), intent(inout) :: wavelength_A
+  real(c_double), intent(inout) :: pixel_x_mm
+  real(c_double), intent(inout) :: pixel_y_mm
+  integer(c_int), intent(inout) :: nfast
+  integer(c_int), intent(inout) :: nslow
+  real(c_double), intent(inout) :: beam_x_mm
+  real(c_double), intent(inout) :: beam_y_mm
+  real(c_double), intent(inout) :: phi_start
+  real(c_double), intent(inout) :: phi_end_osc
+  real(c_double), intent(inout) :: dmin_A
+  real(c_double), intent(inout) :: ewald_tol
+  real(c_double), intent(inout) :: phi_step
+  real(c_float), intent(inout) :: amat(3, 3)
+  integer(c_int), intent(out) :: h(*)
+  integer(c_int), intent(out) :: k(*)
+  integer(c_int), intent(out) :: l(*)
+  real(c_double), intent(out) :: x_mm(*)
+  real(c_double), intent(out) :: y_mm(*)
+  real(c_double), intent(out) :: phi_beg(*)
+  real(c_double), intent(out) :: phi_end(*)
+  integer(c_int), intent(out) :: ifull(*)
+  integer(c_int), intent(in) :: nmax
+  integer(c_int), intent(out) :: nspot
+  integer(c_int), intent(out) :: ierr
+
+  interface
+    subroutine predict_osc_amat_cpp(cell, distance_mm, wavelength_A, &
+                                    pixel_x_mm, pixel_y_mm, nfast, nslow, &
+                                    beam_x_mm, beam_y_mm, phi_start, &
+                                    phi_end_osc, dmin_A, ewald_tol, &
+                                    phi_step, amat, h, k, l, x_mm, y_mm, &
+                                    phi_beg, phi_end, ifull, nmax, nspot, &
+                                    ierr) &
+      bind(C, name='predict_osc_amat_cpp_')
+      import :: c_float, c_double, c_int
+      real(c_float), intent(inout) :: cell(6)
+      real(c_double), intent(inout) :: distance_mm
+      real(c_double), intent(inout) :: wavelength_A
+      real(c_double), intent(inout) :: pixel_x_mm
+      real(c_double), intent(inout) :: pixel_y_mm
+      integer(c_int), intent(inout) :: nfast
+      integer(c_int), intent(inout) :: nslow
+      real(c_double), intent(inout) :: beam_x_mm
+      real(c_double), intent(inout) :: beam_y_mm
+      real(c_double), intent(inout) :: phi_start
+      real(c_double), intent(inout) :: phi_end_osc
+      real(c_double), intent(inout) :: dmin_A
+      real(c_double), intent(inout) :: ewald_tol
+      real(c_double), intent(inout) :: phi_step
+      real(c_float), intent(inout) :: amat(3, 3)
+      integer(c_int), intent(out) :: h(*)
+      integer(c_int), intent(out) :: k(*)
+      integer(c_int), intent(out) :: l(*)
+      real(c_double), intent(out) :: x_mm(*)
+      real(c_double), intent(out) :: y_mm(*)
+      real(c_double), intent(out) :: phi_beg(*)
+      real(c_double), intent(out) :: phi_end(*)
+      integer(c_int), intent(out) :: ifull(*)
+      integer(c_int), intent(in) :: nmax
+      integer(c_int), intent(out) :: nspot
+      integer(c_int), intent(out) :: ierr
+    end subroutine predict_osc_amat_cpp
+  end interface
+
+  call predict_osc_amat_cpp(cell, distance_mm, wavelength_A, pixel_x_mm, &
+                            pixel_y_mm, nfast, nslow, beam_x_mm, beam_y_mm, &
+                            phi_start, phi_end_osc, dmin_A, ewald_tol, &
+                            phi_step, amat, h, k, l, x_mm, y_mm, phi_beg, &
+                            phi_end, ifull, nmax, nspot, ierr)
+end subroutine predict_cpp_osc_amat

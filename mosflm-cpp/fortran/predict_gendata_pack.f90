@@ -23,6 +23,7 @@ module predict_gendata_pack
   public :: predict_unpack_gendata_i2
   public :: predict_cpp_still_to_gendata
   public :: predict_cpp_still_to_gendata_i2
+  public :: predict_cpp_osc_amat_to_gendata_i2
 
 contains
 
@@ -282,5 +283,74 @@ contains
                                    ilg, xg, yg, phig, phiwg, img, nspot, &
                                    iflagpr)
   end subroutine predict_cpp_still_to_gendata_i2
+
+  !> Oscillation PREDICT with MOSFLM AMAT → GENDATA ``INTEGER*2``.
+  subroutine predict_cpp_osc_amat_to_gendata_i2(cell, distance_mm, &
+                                                wavelength_A, pixel_x_mm, &
+                                                pixel_y_mm, nfast, nslow, &
+                                                beam_x_mm, beam_y_mm, &
+                                                phi_start, phi_end_osc, &
+                                                dmin_A, ewald_tol, &
+                                                phi_step, amat, nmax, ihg, &
+                                                ikg, ilg, xg, yg, phig, &
+                                                phiwg, img, nspot, iflagpr, &
+                                                ierr)
+    real(c_float), intent(inout) :: cell(6)
+    real(c_double), intent(inout) :: distance_mm
+    real(c_double), intent(inout) :: wavelength_A
+    real(c_double), intent(inout) :: pixel_x_mm
+    real(c_double), intent(inout) :: pixel_y_mm
+    integer(c_int), intent(inout) :: nfast
+    integer(c_int), intent(inout) :: nslow
+    real(c_double), intent(inout) :: beam_x_mm
+    real(c_double), intent(inout) :: beam_y_mm
+    real(c_double), intent(inout) :: phi_start
+    real(c_double), intent(inout) :: phi_end_osc
+    real(c_double), intent(inout) :: dmin_A
+    real(c_double), intent(inout) :: ewald_tol
+    real(c_double), intent(inout) :: phi_step
+    real(c_float), intent(inout) :: amat(3, 3)
+    integer(c_int), intent(in) :: nmax
+    integer(c_short), intent(out) :: ihg(*)
+    integer(c_short), intent(out) :: ikg(*)
+    integer(c_short), intent(out) :: ilg(*)
+    real(c_float), intent(out) :: xg(*)
+    real(c_float), intent(out) :: yg(*)
+    real(c_float), intent(out) :: phig(*)
+    real(c_float), intent(out) :: phiwg(*)
+    integer(c_short), intent(out) :: img(*)
+    integer(c_int), intent(out) :: nspot
+    integer(c_int), intent(out) :: iflagpr
+    integer(c_int), intent(out) :: ierr
+
+    integer(c_int), allocatable :: h(:), k(:), l(:), ifull(:)
+    real(c_double), allocatable :: x_mm(:), y_mm(:), phi_beg(:), phi_end(:)
+    integer(c_int) :: n_bridge
+
+    external :: predict_cpp_osc_amat
+
+    iflagpr = 0_c_int
+    nspot = 0_c_int
+    ierr = 1_c_int
+    if (nmax <= 0) then
+      iflagpr = -1_c_int
+      return
+    end if
+
+    allocate (h(nmax), k(nmax), l(nmax), ifull(nmax))
+    allocate (x_mm(nmax), y_mm(nmax), phi_beg(nmax), phi_end(nmax))
+
+    call predict_cpp_osc_amat(cell, distance_mm, wavelength_A, pixel_x_mm, &
+                              pixel_y_mm, nfast, nslow, beam_x_mm, &
+                              beam_y_mm, phi_start, phi_end_osc, dmin_A, &
+                              ewald_tol, phi_step, amat, h, k, l, x_mm, &
+                              y_mm, phi_beg, phi_end, ifull, nmax, &
+                              n_bridge, ierr)
+
+    call predict_unpack_gendata_i2(h, k, l, x_mm, y_mm, phi_beg, phi_end, &
+                                   ifull, n_bridge, nmax, ierr, ihg, ikg, &
+                                   ilg, xg, yg, phig, phiwg, img, nspot, &
+                                   iflagpr)
+  end subroutine predict_cpp_osc_amat_to_gendata_i2
 
 end module predict_gendata_pack
