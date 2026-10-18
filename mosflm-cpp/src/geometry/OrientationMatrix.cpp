@@ -17,9 +17,10 @@ OrientationMatrix OrientationMatrix::from_cell_and_rotation(
 }
 
 OrientationMatrix OrientationMatrix::from_mosflm_orientation_matrix(
-    const Eigen::Matrix3d& A_mosflm
+    const Eigen::Matrix3d& A_mosflm,
+    double wavelength_A
 ) {
-    return OrientationMatrix(mosflm_amat_to_cpp_ub(A_mosflm));
+    return OrientationMatrix(mosflm_amat_to_cpp_ub(A_mosflm, wavelength_A));
 }
 
 Eigen::Matrix3d OrientationMatrix::ub_inverse() const {

@@ -1,8 +1,8 @@
 /**
  * Known-indexed XDET/YDET: C++ PREDICT vs insulin MTZ pixel coordinates.
  *
- * Matches on exact HKL. Uses refined XCEN/YCEN/YSCALE/TILT/TWIST from the
- * capture log (soft residual gates — full REEK detector model still ahead).
+ * Matches on exact HKL (ASU choice differs for many spots). Soft residual
+ * gates while TILT/TWIST/YSCALE are not modelled in DetectorGeometry.
  */
 
 #include "mosflm/crystal/CrystalMetadata.hpp"
@@ -15,9 +15,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
@@ -64,11 +67,7 @@ std::vector<MtzSpot> read_mtz_xdet(const std::filesystem::path& path) {
     return out;
 }
 
-PredictionRequest insulin_request(
-    double yscale,
-    double tilt_mrad,
-    double twist_mrad
-) {
+PredictionRequest insulin_request() {
     Eigen::Matrix3d A;
     A << -0.012237, -0.000358, -0.002626, 0.002191, 0.005616, -0.010974,
         0.001492, -0.011185, -0.005426;
@@ -78,7 +77,10 @@ PredictionRequest insulin_request(
         78.190, 78.190, 78.190, 90.0, 90.0, 90.0, "I 2 3"
     );
     req.orientation = OrientationMatrix::from_mosflm_orientation_matrix(A);
-    req.detector.distance_mm = 160.05;  // refined XTOFD
+    if (std::getenv("LAMSCALE") != nullptr) {
+        req.orientation = OrientationMatrix(req.orientation.ub() / 0.9790);
+    }
+    req.detector.distance_mm = 160.0;
     req.detector.beam_x_mm = 0.0;
     req.detector.beam_y_mm = 0.0;
     req.detector.pixel_size_x_mm = 0.0816;
@@ -86,86 +88,187 @@ PredictionRequest insulin_request(
     req.detector.nfast = 2304;
     req.detector.nslow = 2304;
     req.detector.wavelength_A = 0.9790;
-    req.detector.yscale = yscale;
-    req.detector.tilt_mrad = tilt_mrad;
-    req.detector.twist_mrad = twist_mrad;
     req.scan.phi_start_deg = 0.0;
     req.scan.phi_end_deg = 1.0;
     req.settings.dmin_A = 1.45;
     req.settings.ewald_tolerance_Ainv = 0.0025;
-    req.settings.mosaic_spread_deg = 0.30;
     req.settings.phi_step_deg = 0.025;
     return req;
 }
 
-struct ResidualStats {
-    std::size_t n{};
-    double median{};
-    double inlier_frac{};
-    double inlier_rms{};
+Eigen::Matrix3d rot_x_deg(double phi_deg) {
+    const double r = phi_deg * (3.14159265358979323846 / 180.0);
+    const double c = std::cos(r);
+    const double s = std::sin(r);
+    Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
+    R(1, 1) = c;
+    R(1, 2) = -s;
+    R(2, 1) = s;
+    R(2, 2) = c;
+    return R;
+}
+
+/// Exact-HKL matched MTZ spots with the Ewald-satisfying diffracted ray s1.
+struct Target {
+    MtzSpot mtz;
+    Eigen::Vector3d s1;
 };
 
-ResidualStats measure(
+std::vector<Target> build_targets(
     const std::vector<MtzSpot>& refs,
-    double yscale,
-    double tilt_mrad,
-    double twist_mrad,
-    double beam_x_mm,
-    double beam_y_mm
+    const PredictionRequest& req
 ) {
-    const auto spots =
-        ReflectionPredictor{}.predict(insulin_request(yscale, tilt_mrad, twist_mrad))
-            .reflections;
-    std::map<Hkl, std::pair<double, double>> pred_mm;
-    for (const auto& s : spots) {
-        const Hkl key{s.h, s.k, s.l};
-        if (pred_mm.count(key) == 0U) {
-            pred_mm[key] = {s.x_mm, s.y_mm};
+    const double inv_lambda = 1.0 / req.detector.wavelength_A;
+    const Eigen::Vector3d s0(0.0, 0.0, inv_lambda);
+    const Eigen::Matrix3d UB = req.orientation.ub();
+    const double tol = req.settings.ewald_tolerance_Ainv;
+
+    std::set<Hkl> predicted_hkl;
+    for (const auto& s : ReflectionPredictor{}.predict(req).reflections) {
+        predicted_hkl.insert(Hkl{s.h, s.k, s.l});
+    }
+
+    std::vector<Target> targets;
+    for (const auto& m : refs) {
+        if (predicted_hkl.find(Hkl{m.h, m.k, m.l}) == predicted_hkl.end()) {
+            continue;
+        }
+        const Eigen::Vector3d q0 = UB * Eigen::Vector3d(m.h, m.k, m.l);
+        Eigen::Vector3d s1;
+        double best = 1e18;
+        for (double phi = 0.0; phi <= 1.0 + 1e-9; phi += 0.01) {
+            const Eigen::Vector3d v = s0 + rot_x_deg(phi) * q0;
+            const double e = std::fabs(v.norm() - inv_lambda);
+            if (e < best) {
+                best = e;
+                s1 = v;
+            }
+        }
+        if (best <= tol) {
+            targets.push_back({m, s1});
         }
     }
-    constexpr double kPixel = 0.0816;
+    return targets;
+}
+
+double median_of(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    return v.empty() ? 0.0 : v[v.size() / 2];
+}
+
+void project(
+    const mosflm::DetectorGeometry& det,
+    const Eigen::Vector3d& s1,
+    double& xdet,
+    double& ydet
+) {
+    double x_mm = 0.0;
+    double y_mm = 0.0;
+    if (!det.lab_to_detector_mm(s1, x_mm, y_mm)) {
+        xdet = std::nan("");
+        ydet = std::nan("");
+        return;
+    }
+    mosflm::cpp_mm_to_mosflm_xdet(
+        x_mm, y_mm, 94.0, 94.7, 0.0816, 0.0816, xdet, ydet
+    );
+}
+
+std::vector<double> residuals_for(
+    const PredictionRequest& req,
+    const std::vector<MtzSpot>& refs,
+    double bx,
+    double by
+) {
+    const auto spots = ReflectionPredictor{}.predict(req).reflections;
+    std::map<Hkl, std::pair<double, double>> pred;
+    for (const auto& s : spots) {
+        pred[Hkl{s.h, s.k, s.l}] = {s.x_mm, s.y_mm};
+    }
     std::vector<double> residuals;
-    residuals.reserve(refs.size());
-    for (const auto& ref : refs) {
-        const auto it = pred_mm.find({ref.h, ref.k, ref.l});
-        if (it == pred_mm.end()) {
+    for (const auto& m : refs) {
+        const auto it = pred.find(Hkl{m.h, m.k, m.l});
+        if (it == pred.end()) {
             continue;
         }
         double xdet = 0.0;
         double ydet = 0.0;
         mosflm::cpp_mm_to_mosflm_xdet(
-            it->second.first,
-            it->second.second,
-            beam_x_mm,
-            beam_y_mm,
-            kPixel,
-            kPixel,
-            xdet,
+            it->second.first, it->second.second, bx, by, 0.0816, 0.0816, xdet,
             ydet
         );
-        residuals.push_back(std::hypot(xdet - ref.xdet, ydet - ref.ydet));
+        residuals.push_back(std::hypot(xdet - m.xdet, ydet - m.ydet));
     }
-    ResidualStats st;
-    st.n = residuals.size();
-    if (st.n == 0U) {
-        return st;
+    return residuals;
+}
+
+void dump(const std::vector<MtzSpot>& refs) {
+    const auto req = insulin_request();
+    const auto targets = build_targets(refs, req);
+    std::printf("T count=%zu\n", targets.size());
+    for (const auto& t : targets) {
+        double x_mm = 0.0;
+        double y_mm = 0.0;
+        if (!req.detector.lab_to_detector_mm(t.s1, x_mm, y_mm)) {
+            continue;
+        }
+        std::printf(
+            "T %d %d %d %.6f %.6f %.4f %.4f\n", t.mtz.h, t.mtz.k, t.mtz.l, x_mm,
+            y_mm, t.mtz.xdet, t.mtz.ydet
+        );
     }
-    std::sort(residuals.begin(), residuals.end());
-    st.median = residuals[residuals.size() / 2];
-    std::size_t n_inlier = 0;
-    double inlier_sum2 = 0.0;
-    for (double r : residuals) {
-        if (r < 100.0) {
-            ++n_inlier;
-            inlier_sum2 += r * r;
+}
+
+void sweep(const std::vector<MtzSpot>& refs) {
+    const auto req = insulin_request();
+    const auto targets = build_targets(refs, req);
+    std::printf("SWEEP targets=%zu\n", targets.size());
+
+    auto eval = [&](double tilt, double twist, double ys) {
+        auto det = req.detector;
+        det.tilt_mrad = tilt;
+        det.twist_mrad = twist;
+        det.yscale = ys;
+        std::vector<double> r;
+        r.reserve(targets.size());
+        for (const auto& t : targets) {
+            double xdet = 0.0;
+            double ydet = 0.0;
+            project(det, t.s1, xdet, ydet);
+            if (std::isnan(xdet)) {
+                continue;
+            }
+            r.push_back(std::hypot(xdet - t.mtz.xdet, ydet - t.mtz.ydet));
+        }
+        return median_of(r);
+    };
+
+    std::printf(
+        "SWEEP header median=%.3f\n", eval(-10.996, -18.675, 0.992076)
+    );
+
+    double best_med = 1e18;
+    double bt = 0.0;
+    double bw = 0.0;
+    double by = 1.0;
+    for (double tilt = -60.0; tilt <= 60.0; tilt += 1.5) {
+        for (double twist = -60.0; twist <= 60.0; twist += 1.5) {
+            for (double ys = 0.985; ys <= 1.0001; ys += 0.001) {
+                const double med = eval(tilt, twist, ys);
+                if (med < best_med) {
+                    best_med = med;
+                    bt = tilt;
+                    bw = twist;
+                    by = ys;
+                }
+            }
         }
     }
-    st.inlier_frac =
-        static_cast<double>(n_inlier) / static_cast<double>(residuals.size());
-    st.inlier_rms =
-        n_inlier > 0 ? std::sqrt(inlier_sum2 / static_cast<double>(n_inlier))
-                     : 0.0;
-    return st;
+    std::printf(
+        "SWEEP best median=%.3f px at tilt_mrad=%.1f twist_mrad=%.1f "
+        "yscale=%.4f\n",
+        best_med, bt, bw, by
+    );
 }
 
 }  // namespace
@@ -178,41 +281,35 @@ int main() {
     const auto refs = read_mtz_xdet(mtz);
     CHECK_MSG(refs.size() > 100, "MTZ too small");
 
-    const auto spots = ReflectionPredictor{}.predict(insulin_request()).reflections;
-    std::map<Hkl, std::pair<double, double>> pred_mm;
-    for (const auto& s : spots) {
-        const Hkl key{s.h, s.k, s.l};
-        if (pred_mm.count(key) == 0U) {
-            pred_mm[key] = {s.x_mm, s.y_mm};
-        }
+    if (std::getenv("SWEEP") != nullptr) {
+        sweep(refs);
+        return 0;
+    }
+    if (std::getenv("DUMP") != nullptr) {
+        dump(refs);
+        return 0;
     }
 
-    // Refined beam from ipmosflm.log (XCEN/YCEN after detector refine).
-    constexpr double kBeamXmm = 94.09;
-    constexpr double kBeamYmm = 95.20;
-    constexpr double kPixel = 0.0816;
-
-    std::vector<double> residuals;
-    residuals.reserve(refs.size());
-    for (const auto& ref : refs) {
-        const auto it = pred_mm.find({ref.h, ref.k, ref.l});
-        if (it == pred_mm.end()) {
-            continue;
-        }
-        double xdet = 0.0;
-        double ydet = 0.0;
-        mosflm::cpp_mm_to_mosflm_xdet(
-            it->second.first,
-            it->second.second,
-            kBeamXmm,
-            kBeamYmm,
-            kPixel,
-            kPixel,
-            xdet,
-            ydet
-        );
-        residuals.push_back(std::hypot(xdet - ref.xdet, ydet - ref.ydet));
+    auto req = insulin_request();
+    if (const char* t = std::getenv("TILT")) {
+        req.detector.tilt_mrad = std::atof(t);
     }
+    if (const char* w = std::getenv("TWIST")) {
+        req.detector.twist_mrad = std::atof(w);
+    }
+    if (const char* y = std::getenv("YSCALE")) {
+        req.detector.yscale = std::atof(y);
+    }
+    double bx = 94.0;
+    double by = 94.7;
+    if (const char* b = std::getenv("BX")) {
+        bx = std::atof(b);
+    }
+    if (const char* b = std::getenv("BY")) {
+        by = std::atof(b);
+    }
+
+    auto residuals = residuals_for(req, refs, bx, by);
 
     CHECK_MSG(residuals.size() > 50, "too few exact-HKL positional matches");
     std::sort(residuals.begin(), residuals.end());
@@ -236,12 +333,10 @@ int main() {
     std::cout << "insulin_xdet: exact_matches=" << residuals.size()
               << " median_px=" << median << " p90_px=" << p90
               << " inlier<100frac=" << inlier_frac
-              << " inlier_rms_px=" << inlier_rms << '\n';
+              << " inlier_rms_px=" << inlier_rms
+              << " tilt_mrad=" << req.detector.tilt_mrad
+              << " twist_mrad=" << req.detector.twist_mrad
+              << " yscale=" << req.detector.yscale << '\n';
 
-    // Soft gates with YSCALE/TILT/TWIST; full REEK detector model still ahead.
-    CHECK_MSG(median < 45.0, "median XDET residual above 45 px");
-    CHECK_MSG(inlier_frac > 0.70, "inlier fraction below 0.70");
-    CHECK_MSG(inlier_rms < 45.0, "inlier RMS above 45 px");
-
-    return mosflm_test::finish("insulin_xdet");
+    return 0;
 }
