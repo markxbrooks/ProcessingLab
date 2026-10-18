@@ -116,11 +116,13 @@ add_library(mosflm_geometry
     src/legacy/MosflmCApi.cpp
     src/legacy/MosflmFortranAdapters.cpp
     src/image/CbfImageReader.cpp
+    src/image/SmvImageReader.cpp
     src/crystal/CrystalMetadata.cpp
     src/crystal/SpaceGroupInfo.cpp
     src/crystal/MtzAdapter.cpp
     src/diffraction/ReflectionPredictor.cpp
     src/diffraction/SummationIntegrator.cpp
+    src/diffraction/ProcessPipeline.cpp
     src/diffraction/ProfileFitter.cpp
     src/diffraction/LpCorrection.cpp
     ${gemmi_SOURCE_DIR}/src/mtz.cpp
@@ -244,6 +246,16 @@ if(BUILD_TESTING)
     add_test(
         NAME cbf_image_reader
         COMMAND test_cbf_image_reader
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_smv_image_reader
+        tests/unit/test_smv_image_reader.cpp
+    )
+    target_link_libraries(test_smv_image_reader PRIVATE mosflm_geometry)
+    add_test(
+        NAME smv_image_reader
+        COMMAND test_smv_image_reader
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_tests_properties(cbf_image_reader PROPERTIES
@@ -531,6 +543,16 @@ if(BUILD_TESTING)
     add_test(
         NAME insulin_process_mtz
         COMMAND test_insulin_process_mtz
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_insulin_cpp_process
+        tests/differential/test_insulin_cpp_process.cpp
+    )
+    target_link_libraries(test_insulin_cpp_process PRIVATE mosflm_geometry)
+    add_test(
+        NAME insulin_cpp_process
+        COMMAND test_insulin_cpp_process
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 

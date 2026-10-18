@@ -20,6 +20,7 @@ Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there 
 | PREDICT oracles | Analytical dumps + real insulin capture under `mosflm-cpp/testdata/oracle/known_indexed/`. CTest `insulin_hkl_overlap`: ASU-aware recall **100%** (`mosflm_lab_to_cpp`); `insulin_xdet`: median ~**40 px** (`XG↔y_mm`, `YG↔x_mm`, YSCALE pixel aspect); `insulin_process_mtz`: exact-HKL recall ≥ 0.85 |
 | Legacy `bin/ipmosflm` | Autotools binary; `MOSFLM_CPP_PREDICT=1` splices GENERATE+REFLFIND through C++ osc PREDICT (AMAT lab map). Insulin PROCESS MTZ vs Fortran oracle exact-HKL recall **~89%** (`testdata/oracle/known_indexed_cpp_predict/`) |
 | Phase C | **Done** — lab-frame map, HKL/XDET differentials, mosaicity + absences in predictor, YSCALE/TILT/TWIST fields, PROCESS splice + MTZ CTest |
+| Phase D / D1 | **Done** — pure C++ `ProcessPipeline` (SMV → predict → sum → MTZ); CTest `insulin_cpp_process` ASU recall ≥ 0.85 (no amalgamation hook) |
 
 Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-languages). Package layout and CLI: [`mosflm-cpp/README.md`](mosflm-cpp/README.md).
 
@@ -176,5 +177,5 @@ Day 5: Document first legacy routine to replace (`PREDICT`).
 
 1. Real known-indexed images — **done** (`capture_ipmosflm_oracle.sh` → `testdata/oracle/known_indexed/`).
 2. **Phase C** — **Done** (D0 closed): HKL/XDET/MTZ CTests, mosaicity + absences, YSCALE pixel aspect + TILT/TWIST fields, PROCESS splice ~89% exact-HKL recall.
-3. **Phase D** — full Fortran retirement (see [`portingD.md`](portingD.md)); next: D1 C++-owned PROCESS path.
+3. **Phase D / D1** — **Done**: `SmvImageReader` + `ProcessPipeline` + CLI `process-insulin`; CTest `insulin_cpp_process` (ASU recall ~100%). Next: D2 MEAS boxes (see [`portingD.md`](portingD.md)).
 4. Post-refinement (Stage 2) and full `INTEG3` parity beyond the Gaussian profile stand-in.

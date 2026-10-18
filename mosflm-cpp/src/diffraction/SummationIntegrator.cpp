@@ -1,6 +1,7 @@
 #include "mosflm/diffraction/SummationIntegrator.hpp"
 
 #include "mosflm/diffraction/LpCorrection.hpp"
+#include "mosflm/geometry/LabFrame.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -40,6 +41,38 @@ void SummationIntegrator::mm_to_image_pixel(
     row = static_cast<int>(std::lround(yf + 0.5 * detector.nslow));
 }
 
+namespace {
+
+void mm_to_image_pixel_settings(
+    const DetectorGeometry& detector,
+    const IntegrationSettings& settings,
+    double x_mm,
+    double y_mm,
+    int& col,
+    int& row
+) {
+    if (settings.mosflm_detector_axes) {
+        double xdet = 0.0;
+        double ydet = 0.0;
+        mosflm::cpp_mm_to_mosflm_xdet(
+            x_mm,
+            y_mm,
+            settings.image_beam_x_mm,
+            settings.image_beam_y_mm,
+            detector.pixel_size_x_mm,
+            detector.pixel_size_y_mm,
+            xdet,
+            ydet
+        );
+        col = static_cast<int>(std::lround(xdet));
+        row = static_cast<int>(std::lround(ydet));
+        return;
+    }
+    SummationIntegrator::mm_to_image_pixel(detector, x_mm, y_mm, col, row);
+}
+
+}  // namespace
+
 std::vector<IntegratedReflection> SummationIntegrator::integrate(
     const IntegrationRequest& request
 ) const {
@@ -67,7 +100,9 @@ std::vector<IntegratedReflection> SummationIntegrator::integrate(
 
         int col0 = 0;
         int row0 = 0;
-        mm_to_image_pixel(detector, pred.x_mm, pred.y_mm, col0, row0);
+        mm_to_image_pixel_settings(
+            detector, settings, pred.x_mm, pred.y_mm, col0, row0
+        );
 
         const int outer = half + frame;
         // Background: pixels in outer square but outside peak square.

@@ -1,4 +1,5 @@
 #include "mosflm/crystal/MtzAdapter.hpp"
+#include "mosflm/diffraction/ProcessPipeline.hpp"
 #include "mosflm/diffraction/ProfileFitter.hpp"
 #include "mosflm/diffraction/ReflectionPredictor.hpp"
 #include "mosflm/diffraction/SummationIntegrator.hpp"
@@ -28,7 +29,8 @@ void print_usage(const char* argv0) {
         << "  vertical-slice [mtz]         Predict→plant→integrate→MTZ smoke\n"
         << "  cbf-slice <cbf> [mtz]        Read miniCBF → predict → integrate → MTZ\n"
         << "  profile-fit [mtz]            Synthetic Gaussian peaks → profile fit → MTZ\n"
-        << "  profile-fit-cbf <cbf> [mtz]  miniCBF → predict → profile fit → MTZ\n";
+        << "  profile-fit-cbf <cbf> [mtz]  miniCBF → predict → profile fit → MTZ\n"
+        << "  process-insulin [img] [mtz]  SMV insulin → predict → sum → MTZ (D1)\n";
 }
 
 int cmd_version() {
@@ -316,6 +318,36 @@ int cmd_profile_fit_cbf(
     return 0;
 }
 
+std::filesystem::path default_insulin_img() {
+    if (const char* env = std::getenv("MOSFLM_IMAGE")) {
+        return env;
+    }
+    if (const char* ccp4 = std::getenv("CCP4")) {
+        const auto p =
+            std::filesystem::path(ccp4) / "examples/data/insulin_1_001.img";
+        if (std::filesystem::exists(p)) {
+            return p;
+        }
+    }
+    return "/Applications/ccp4-9/examples/data/insulin_1_001.img";
+}
+
+int cmd_process_insulin(
+    const std::filesystem::path& img_path,
+    const std::filesystem::path& mtz_path
+) {
+    const auto image = mosflm::image::SmvImageReader{}.read(img_path);
+    const auto req =
+        mosflm::diffraction::ProcessPipeline::known_indexed_insulin(image);
+    const auto result = mosflm::diffraction::ProcessPipeline{}.run(req);
+    mosflm::diffraction::ProcessPipeline::write_mtz(mtz_path, req.crystal, result);
+    std::cout << "process-insulin: " << img_path
+              << " preds=" << result.predictions.size()
+              << " integrated=" << result.mtz_reflections.size() << " → "
+              << mtz_path << '\n';
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -369,6 +401,13 @@ int main(int argc, char** argv) {
             const std::filesystem::path mtz =
                 (argc >= 4) ? argv[3] : "profile_fit_cbf.mtz";
             return cmd_profile_fit_cbf(argv[2], mtz);
+        }
+        if (cmd == "process-insulin") {
+            const std::filesystem::path img =
+                (argc >= 3) ? argv[2] : default_insulin_img();
+            const std::filesystem::path mtz =
+                (argc >= 4) ? argv[3] : "insulin_cpp_process.mtz";
+            return cmd_process_insulin(img, mtz);
         }
         std::cerr << "Unknown command: " << cmd << '\n';
         print_usage(argv[0]);

@@ -54,4 +54,14 @@ public:
     [[nodiscard]] DiffractionImage read(const std::filesystem::path& path) const;
 };
 
+/// ADSC / SMV reader (ASCII ``{KEY=VAL;}`` header + unsigned_short pixels).
+///
+/// Enough for the CCP4 insulin example (``insulin_1_001.img``). Supports
+/// little-endian ``TYPE=unsigned_short`` with ``HEADER_BYTES`` / ``SIZE1`` /
+/// ``SIZE2``.
+class SmvImageReader {
+public:
+    [[nodiscard]] DiffractionImage read(const std::filesystem::path& path) const;
+};
+
 }  // namespace mosflm::image

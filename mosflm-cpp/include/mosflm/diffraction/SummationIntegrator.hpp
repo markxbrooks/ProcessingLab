@@ -31,6 +31,13 @@ struct IntegrationSettings {
     int bg_frame_px{2};
     /// If true, scale intensity/sigma by unpolarized ``lp_factor``.
     bool apply_lp{false};
+    /// If true, map beam-relative mm to ADSC/MOSFLM image pixels via
+    /// :func:`cpp_mm_to_mosflm_xdet` (``XG↔y_mm``, ``YG↔x_mm``) using
+    /// ``image_beam_*_mm``. Default false keeps the synthetic centre-origin
+    /// convention used by vertical-slice tests.
+    bool mosflm_detector_axes{false};
+    double image_beam_x_mm{0.0};
+    double image_beam_y_mm{0.0};
 };
 
 /// Inputs for one summation-integrate call.

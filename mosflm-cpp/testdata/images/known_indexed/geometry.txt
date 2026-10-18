@@ -45,3 +45,6 @@
 # PROCESS splice verified: make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
 # → testdata/oracle/known_indexed_cpp_predict/ (~89% exact-HKL vs Fortran MTZ);
 # CTest insulin_process_mtz. See mosflm-cpp/docs/PHASE_C_SPLICE.md. Phase C Done.
+#
+# D1 pure C++ PROCESS: SmvImageReader + ProcessPipeline::known_indexed_insulin
+# (this geometry) → CTest insulin_cpp_process (ASU recall ≥ 0.85, no Fortran hook).

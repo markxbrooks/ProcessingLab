@@ -8,6 +8,7 @@ objects**. The Fortran/C boundary stays flat and builds those requests.
 | Predict | `ReflectionPredictor::predict` | `PredictionRequest` → `PredictionResult` |
 | Summation integrate | `SummationIntegrator::integrate` | `IntegrationRequest` |
 | Profile fit | `ProfileFitter::fit` | `ProfileFitRequest` |
+| Known-indexed PROCESS | `ProcessPipeline::run` | `ProcessRequest` → `ProcessResult` |
 | LP factor | `lp_factor(detector, x, y)` | small helper (no request object) |
 
 ## Prediction
@@ -23,6 +24,20 @@ objects**. The Fortran/C boundary stays flat and builds those requests.
 `IntegrationRequest` / `ProfileFitRequest` hold **references** to the image,
 detector, and a `std::span` of predictions plus settings. Referenced objects
 must outlive the call (no giant owned context blob).
+
+## PROCESS (Phase D / D1)
+
+`ProcessRequest` / `ProcessResult` own the known-indexed pipeline without
+Fortran GENERATE / REEK / PROCESS:
+
+1. `ReflectionPredictor` → in-memory spot table (`predictions`)
+2. `SummationIntegrator` (optional MOSFLM detector axes for SMV) → `integrated`
+3. `MtzAdapter::write_simple` via `ProcessPipeline::write_mtz`
+
+`ProcessPipeline::known_indexed_insulin` loads geometry / orientation from
+`testdata/images/known_indexed/geometry.txt` conventions onto an SMV
+`DiffractionImage` (see `SmvImageReader`). CTest `insulin_cpp_process` gates
+ASU-aware HKL recall ≥ 0.85 vs the Fortran oracle MTZ (no `mosflm_predict_hook`).
 
 ## Flat ABI
 
