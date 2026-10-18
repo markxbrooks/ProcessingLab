@@ -19,7 +19,7 @@ namespace fs = std::filesystem;
 namespace {
 
 fs::path find_integrationlab() {
-    if (const char* env = std::getenv("MOSFLM_INTEGRATIONLAB")) {
+    if (const char* env = std::getenv("MOSFLM_PROCESSINGLAB")) {
         return env;
     }
     // Back-compat with older test env name.

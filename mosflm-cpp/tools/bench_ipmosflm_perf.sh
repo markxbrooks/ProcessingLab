@@ -2,7 +2,7 @@
 # Wall-time comparison: ProcessingLab (C++ / ProcessingLab) vs F77 ipmosflm.
 #
 # Defaults:
-#   C++  → $MOSFLM_INTEGRATIONLAB or build/ProcessingLab / ../bin/ProcessingLab
+#   C++  → $MOSFLM_PROCESSINGLAB or build/ProcessingLab / ../bin/ProcessingLab
 #   F77  → $MOSFLM_IPMOSFLM or /apps/ccp4/ccp4-9/bin/ipmosflm ($CCP4/bin/ipmosflm)
 #   IMG  → $MOSFLM_IMAGE or $CCP4/examples/data/insulin_1_001.img
 #
@@ -10,7 +10,7 @@
 #   ./tools/bench_ipmosflm_perf.sh
 #   MOSFLM_PERF_REPEATS=5 ./tools/bench_ipmosflm_perf.sh
 #   MOSFLM_IPMOSFLM=/apps/ccp4/ccp4-9/bin/ipmosflm \
-#     MOSFLM_INTEGRATIONLAB=./build/ProcessingLab ./tools/bench_ipmosflm_perf.sh
+#     MOSFLM_PROCESSINGLAB=./build/ProcessingLab ./tools/bench_ipmosflm_perf.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,14 +19,14 @@ cd "${ROOT}"
 CCP4="${CCP4:-/apps/ccp4/ccp4-9}"
 export CCP4
 
-if [[ -z "${MOSFLM_INTEGRATIONLAB:-}" ]]; then
+if [[ -z "${MOSFLM_PROCESSINGLAB:-}" ]]; then
   for cand in \
     "${ROOT}/build/ProcessingLab" \
     "${ROOT}/../bin/ProcessingLab" \
     "${ROOT}/bin/ProcessingLab"
   do
     if [[ -x "${cand}" ]]; then
-      MOSFLM_INTEGRATIONLAB="${cand}"
+      MOSFLM_PROCESSINGLAB="${cand}"
       break
     fi
   done
@@ -44,7 +44,7 @@ if [[ -z "${MOSFLM_IPMOSFLM:-}" ]]; then
   fi
 fi
 
-export MOSFLM_INTEGRATIONLAB MOSFLM_IPMOSFLM
+export MOSFLM_PROCESSINGLAB MOSFLM_IPMOSFLM
 export MOSFLM_IMAGE="${MOSFLM_IMAGE:-${CCP4}/examples/data/insulin_1_001.img}"
 export MOSFLM_PERF_REPEATS="${MOSFLM_PERF_REPEATS:-3}"
 
@@ -64,10 +64,10 @@ if [[ -z "${BIN}" ]]; then
   cmake -S "${ROOT}" -B "${ROOT}/build" -DCMAKE_BUILD_TYPE=Release
   cmake --build "${ROOT}/build" --target test_ipmosflm_perf ProcessingLab -j"$(nproc 2>/dev/null || echo 4)"
   BIN="${ROOT}/build/test_ipmosflm_perf"
-  export MOSFLM_INTEGRATIONLAB="${MOSFLM_INTEGRATIONLAB:-${ROOT}/build/ProcessingLab}"
+  export MOSFLM_PROCESSINGLAB="${MOSFLM_PROCESSINGLAB:-${ROOT}/build/ProcessingLab}"
 fi
 
-echo "C++ binary : ${MOSFLM_INTEGRATIONLAB:-unset}"
+echo "C++ binary : ${MOSFLM_PROCESSINGLAB:-unset}"
 echo "F77 binary : ${MOSFLM_IPMOSFLM:-unset}"
 echo "Image      : ${MOSFLM_IMAGE}"
 echo "Repeats    : ${MOSFLM_PERF_REPEATS}"

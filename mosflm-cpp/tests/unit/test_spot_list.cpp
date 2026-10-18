@@ -24,5 +24,13 @@ int main() {
     CHECK(list.spots.size() >= 500);
     CHECK(list.spots.size() <= 700);
 
+    const auto tmp =
+        std::filesystem::temp_directory_path() / "mosflm_spot_list_write.spt";
+    list.write_spt(tmp);
+    const SpotList again = SpotList::read_spt(tmp);
+    CHECK_EQ(again.spots.size(), list.spots.size());
+    CHECK(std::fabs(again.header.beam_x_mm - list.header.beam_x_mm) < 1e-3);
+    std::filesystem::remove(tmp);
+
     return mosflm_test::finish("spot_list");
 }

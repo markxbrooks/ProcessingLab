@@ -54,10 +54,26 @@ chunks must sit next to the master. Example (script still required for
   --image /path/to/thaumatin_9_1_master.h5 your_process.in
 ```
 
+### FINDSPOTS → `.spt` → AUTOINDEX
+
+ProcessingLab includes a DiffractionLab-style peak finder (`SpotFinder`:
+MAD background + 3×3 local maxima) and MOSFLM `.spt` write/read. CONTROL:
+
+```text
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 500 FIND 1 PHI 0.0 0.15 FILE thaumatin.spt
+GO
+AUTOINDEX DPS THRESHOLD 20 FILE thaumatin.spt
+GO
+```
+
+`--image` supplies the frame (SMV/CBF/HDF5). If `AUTOINDEX` omits `FILE`,
+the path from the preceding `FINDSPOTS` is reused. Geometry cards may be
+omitted when the image header fills distance / wavelength / beam / pixel.
+
 ## DiffractionLab
 
 Sibling app [`DiffractionLab`](../DiffractionLab) can drive `ProcessingLab` via
 CONTROL scripts (`diffraction_lab/processinglab_client.py`). After AUTOINDEX,
-`ProcessingLab` prints `INTEGRATIONLAB_CELL` / `INTEGRATIONLAB_MATRIX` (and
+`ProcessingLab` prints `PROCESSINGLAB_CELL` / `PROCESSINGLAB_MATRIX` (and
 writes `integrationlab_index.txt`). Set `DIFFRACTIONLAB_BACKEND=processinglab`
 or `DIFFRACTIONLAB_PREFER_PROCESSINGLAB=1`.

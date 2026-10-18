@@ -52,12 +52,11 @@ make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite ProcessingLab)
 # Usage
 
 ```commandline
-./bin/ProcessingLab HKLOUT /tmp/thaumatin_9_1_master.mtz \
-  --image ~/Downloads/thaumatin_9_1_master.h5 <<'EOF'
-PROCESS 1 TO 1
-AUTOINDEX
+./bin/ProcessingLab --image ~/Downloads/thaumatin_9_1_master.h5 <<'EOF'
+DIRECTORY /tmp
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 300 FIND 1 PHI 0.0 0.15 FILE /tmp/thaumatin_cpp.spt
 GO
-PROCESS 1 TO 1
+AUTOINDEX DPS THRESHOLD 20
 GO
 EXIT
 EOF

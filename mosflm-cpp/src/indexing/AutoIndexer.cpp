@@ -122,6 +122,7 @@ AutoIndexResult AutoIndexer::index(
     }
     if (n < 20) {
         result.ierr = -2;
+        result.n_spots_used = static_cast<std::size_t>(n);
         return result;
     }
 

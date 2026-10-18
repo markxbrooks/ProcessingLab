@@ -43,21 +43,23 @@ void print_banner() {
     // Fortran-compatible lead line + C++ core note (Phase E / E0).
     std::cout
         << "\n"
-        << " ************ ProcessingLab version 0.1.0 for IP, CCD, CBF, HD5, I22 and PAD data"
-           " (C++ core) ***********\n"
-        << " ProcessingLab — CONTROL → C++ PROCESS/AUTOINDEX\n"
-        << " Mark Brooks"
-        << " make ProcessingLab\n"
-        << "--------------------------------------------------------------------------------\n";
+        << "============================================================\n"
+        << " ProcessingLab v0.1.0\n"
+        << "------------------------------------------------------------\n"
+        << " Diffraction Processing & Autoindexing\n"
+        << " Data: CCD | CBF | HDF5\n"
+        << "------------------------------------------------------------\n"
+        << " Developed by Mark Brooks 2026\n"
+        << "============================================================\n";
 }
 
 void print_no_run_and_end() {
     std::cout << "\n\n *** WARNING **   NO \"RUN\" CARD GIVEN\n\n\n";
-    std::cout << " *********** END OF PROCESSING *****************\n";
+    std::cout << " ============= END OF PROCESSING ================\n";
 }
 
 void print_end() {
-    std::cout << "\n *********** END OF PROCESSING *****************\n";
+    std::cout << " ============= END OF PROCESSING ================\n";
 }
 
 /// Machine-readable AUTOINDEX dump for DiffractionLab (and CLI users).
@@ -68,10 +70,10 @@ void emit_autoindex_dump(const mosflm::control::ControlState& state) {
     const auto& c = state.cell;
     const auto& A = state.amat;
     std::cout << std::setprecision(10);
-    std::cout << "INTEGRATIONLAB_CELL " << c.a << " " << c.b << " " << c.c
+    std::cout << "PROCESSINGLAB_CELL " << c.a << " " << c.b << " " << c.c
               << " " << c.alpha_deg << " " << c.beta_deg << " " << c.gamma_deg
               << '\n';
-    std::cout << "INTEGRATIONLAB_MATRIX";
+    std::cout << "PROCESSINGLAB_MATRIX";
     for (int r = 0; r < 3; ++r) {
         for (int col = 0; col < 3; ++col) {
             std::cout << " " << A(r, col);
@@ -79,14 +81,14 @@ void emit_autoindex_dump(const mosflm::control::ControlState& state) {
     }
     std::cout << '\n';
     if (!state.autoindex_system.empty()) {
-        std::cout << "INTEGRATIONLAB_SYSTEM " << state.autoindex_system << '\n';
+        std::cout << "PROCESSINGLAB_SYSTEM " << state.autoindex_system << '\n';
     }
     if (state.autoindex_character > 0) {
-        std::cout << "INTEGRATIONLAB_CHARACTER " << state.autoindex_character
+        std::cout << "PROCESSINGLAB_CHARACTER " << state.autoindex_character
                   << '\n';
     }
     if (state.autoindex_n_spots > 0) {
-        std::cout << "INTEGRATIONLAB_NSPOTS " << state.autoindex_n_spots << '\n';
+        std::cout << "PROCESSINGLAB_NSPOTS " << state.autoindex_n_spots << '\n';
     }
 
     // Sidecar next to cwd for tools that prefer files over stdout.
@@ -200,6 +202,10 @@ int main(int argc, char** argv) {
         const auto out_mtz = hklout ? *hklout : session.state().hklout;
         std::size_t n_proc = 0;
         for (const auto& r : runs) {
+            if (r.ran_findspots) {
+                std::cout << "  FINDSPOTS: " << r.message << '\n';
+                continue;
+            }
             if (r.ran_autoindex) {
                 std::cout << "  AUTOINDEX: " << r.message << '\n';
                 emit_autoindex_dump(session.state());

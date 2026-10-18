@@ -18,6 +18,11 @@ AutoIndexRunner& autoindex_runner_slot() {
     return runner;
 }
 
+FindSpotsRunner& findspots_runner_slot() {
+    static FindSpotsRunner runner;
+    return runner;
+}
+
 std::string strip_comment(std::string_view line) {
     std::string out;
     out.reserve(line.size());
@@ -108,7 +113,7 @@ std::string expand_template(const std::string& tmpl, int frame) {
 
 bool is_unimplemented_major(const std::string& key) {
     static const char* k[] = {
-        "REFIX", "FINDSPOTS", "PICK", "XDISPLAY", "TCPIP", "SOCKET",
+        "REFIX", "PICK", "XDISPLAY", "TCPIP", "SOCKET",
         nullptr
     };
     for (const char** p = k; *p != nullptr; ++p) {
@@ -123,6 +128,10 @@ bool is_unimplemented_major(const std::string& key) {
 
 void ControlSession::register_autoindex_runner(AutoIndexRunner runner) {
     autoindex_runner_slot() = std::move(runner);
+}
+
+void ControlSession::register_findspots_runner(FindSpotsRunner runner) {
+    findspots_runner_slot() = std::move(runner);
 }
 
 void ControlSession::ingest_matrix_numbers(const std::vector<double>& vals) {
@@ -195,6 +204,47 @@ void ControlSession::parse_autoindex_args(const std::vector<std::string>& args) 
             state_.autoindex.prefer_system = args[++i];
             continue;
         }
+    }
+}
+
+void ControlSession::parse_findspots_args(const std::vector<std::string>& args) {
+    state_.findspots_pending = true;
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const std::string u = upper(args[i]);
+        if (u == "FIND" && i + 1 < args.size()) {
+            state_.findspots.image_number = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "FILE" && i + 1 < args.size()) {
+            state_.findspots.spot_file = args[++i];
+            continue;
+        }
+        if (u == "PHI" && i + 2 < args.size()) {
+            state_.findspots.phi_start_deg =
+                require_double(args[++i], "FINDSPOTS");
+            state_.findspots.phi_end_deg =
+                require_double(args[++i], "FINDSPOTS");
+            state_.findspots.has_phi = true;
+            continue;
+        }
+        if ((u == "THRESHOLD" || u == "THRESH") && i + 1 < args.size()) {
+            state_.findspots.threshold_sigma =
+                static_cast<float>(require_double(args[++i], "FINDSPOTS"));
+            continue;
+        }
+        if (u == "MAXSPOTS" && i + 1 < args.size()) {
+            state_.findspots.max_spots = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "MINDIST" && i + 1 < args.size()) {
+            state_.findspots.min_distance = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        if (u == "BORDER" && i + 1 < args.size()) {
+            state_.findspots.border = require_int(args[++i], "FINDSPOTS");
+            continue;
+        }
+        // Ignore MOSFLM FINDSPOTS noise keywords (LOCAL, AUTORESLN, …).
     }
 }
 
@@ -414,6 +464,10 @@ void ControlSession::apply_keyword(
     }
     if (key == "AUTOINDEX") {
         parse_autoindex_args(args);
+        return;
+    }
+    if (key == "FINDSPOTS") {
+        parse_findspots_args(args);
         return;
     }
     if (key == "STRATEGY") {
@@ -671,11 +725,33 @@ ControlGoResult ControlSession::go(
         throw std::runtime_error("CONTROL: incomplete MATRIX before GO");
     }
 
+    if (state_.findspots_pending) {
+        if (!findspots_runner_slot()) {
+            throw std::runtime_error(
+                "CONTROL FINDSPOTS: spot finder not linked into this build"
+            );
+        }
+        findspots_runner_slot()(state_, image_override);
+        state_.findspots_pending = false;
+        state_.done_run = true;
+        out.ran_findspots = true;
+        out.image_used = resolve_image_path(image_override);
+        out.message = "FINDSPOTS wrote " +
+                      state_.findspots.spot_file.string() + " (" +
+                      std::to_string(state_.findspots_n_spots) + " spots)";
+        return out;
+    }
+
     if (state_.autoindex_pending) {
         if (!autoindex_runner_slot()) {
             throw std::runtime_error(
                 "CONTROL AUTOINDEX: DPS indexer not linked into this build"
             );
+        }
+        // Prefer FILE from prior FINDSPOTS when AUTOINDEX omitted it.
+        if (state_.autoindex.spot_file.empty() &&
+            !state_.findspots.spot_file.empty()) {
+            state_.autoindex.spot_file = state_.findspots.spot_file;
         }
         autoindex_runner_slot()(state_);
         state_.autoindex_pending = false;
@@ -700,7 +776,7 @@ ControlGoResult ControlSession::go(
     }
 
     if (!state_.process_pending) {
-        out.message = "GO with no pending PROCESS/AUTOINDEX/STRATEGY";
+        out.message = "GO with no pending PROCESS/FINDSPOTS/AUTOINDEX/STRATEGY";
         return out;
     }
 

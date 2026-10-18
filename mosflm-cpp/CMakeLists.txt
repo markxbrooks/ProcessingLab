@@ -221,11 +221,13 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
     set(MOSFLM_INDEXING_SOURCES
         src/indexing/BravaisClassifier.cpp
         src/indexing/SpotList.cpp
+        src/indexing/SpotFinder.cpp
     )
     if(MOSFLM_HAS_DPS_INDEXER)
         list(APPEND MOSFLM_INDEXING_SOURCES
             src/indexing/AutoIndexer.cpp
             src/indexing/ControlAutoIndex.cpp
+            src/indexing/ControlFindSpots.cpp
         )
     endif()
     add_library(mosflm_indexing ${MOSFLM_INDEXING_SOURCES})
@@ -533,7 +535,7 @@ if(BUILD_TESTING)
     endif()
     set_tests_properties(smv_process_compare PROPERTIES
         ENVIRONMENT
-            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${MOSFLM_IPMOSFLM_ROOT}/bin/ipmosflm.oracle;CCP4=${_MOSFLM_SMV_CCP4}"
+            "MOSFLM_PROCESSINGLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${MOSFLM_IPMOSFLM_ROOT}/bin/ipmosflm.oracle;CCP4=${_MOSFLM_SMV_CCP4}"
         TIMEOUT 300
     )
 
@@ -550,7 +552,7 @@ if(BUILD_TESTING)
     )
     set_tests_properties(smv_dials_compare PROPERTIES
         ENVIRONMENT
-            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_DIALS_BIN=${_MOSFLM_SMV_CCP4}/bin;CCP4=${_MOSFLM_SMV_CCP4}"
+            "MOSFLM_PROCESSINGLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_DIALS_BIN=${_MOSFLM_SMV_CCP4}/bin;CCP4=${_MOSFLM_SMV_CCP4}"
         TIMEOUT 600
     )
 
@@ -836,7 +838,7 @@ if(BUILD_TESTING)
     )
     set_tests_properties(integrationlab PROPERTIES
         ENVIRONMENT
-            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX}"
+            "MOSFLM_PROCESSINGLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX}"
     )
 
     # Wall-time: ProcessingLab (C++) vs F77 ipmosflm on known-indexed PROCESS.
@@ -857,7 +859,7 @@ if(BUILD_TESTING)
     endif()
     set_tests_properties(ipmosflm_perf PROPERTIES
         ENVIRONMENT
-            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${_MOSFLM_PERF_CCP4}/bin/ipmosflm;CCP4=${_MOSFLM_PERF_CCP4}"
+            "MOSFLM_PROCESSINGLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${_MOSFLM_PERF_CCP4}/bin/ipmosflm;CCP4=${_MOSFLM_PERF_CCP4}"
         TIMEOUT 600
     )
 
@@ -875,6 +877,16 @@ if(BUILD_TESTING)
         add_test(
             NAME spot_list
             COMMAND test_spot_list
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_spot_finder
+            tests/unit/test_spot_finder.cpp
+        )
+        target_link_libraries(test_spot_finder PRIVATE mosflm_indexing)
+        add_test(
+            NAME spot_finder
+            COMMAND test_spot_finder
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

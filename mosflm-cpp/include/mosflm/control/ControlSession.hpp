@@ -29,6 +29,19 @@ struct AutoIndexControlSettings {
     int image_number{1};
 };
 
+/// FINDSPOTS settings (DiffractionLab-style peak finder → ``.spt``).
+struct FindSpotsControlSettings {
+    std::filesystem::path spot_file{"spots.spt"};
+    int image_number{1};
+    double phi_start_deg{0.0};
+    double phi_end_deg{0.0};
+    bool has_phi{false};
+    float threshold_sigma{5.0f};
+    int min_distance{8};
+    int max_spots{500};
+    int border{20};
+};
+
 /// Keyword state accumulated by MOSFLM CONTROL (Phase D / E).
 struct ControlState {
     bool has_distance{false};
@@ -90,6 +103,11 @@ struct ControlState {
     /// Multi-image NADD window (1 = single image; >1 reserved for joint refine).
     int nadd{1};
 
+    bool findspots_pending{false};
+    FindSpotsControlSettings findspots{};
+    /// Number of spots written by the last FINDSPOTS GO.
+    std::size_t findspots_n_spots{0};
+
     bool autoindex_pending{false};
     AutoIndexControlSettings autoindex{};
     /// Filled by AUTOINDEX runner for DiffractionLab / machine-readable dump.
@@ -113,6 +131,7 @@ struct ControlState {
 struct ControlGoResult {
     bool ran_process{false};
     bool ran_autoindex{false};
+    bool ran_findspots{false};
     bool ran_strategy{false};
     diffraction::ProcessResult process{};
     crystal::CrystalMetadata crystal{};
@@ -123,16 +142,25 @@ struct ControlGoResult {
 /// Hook that runs AUTOINDEX and writes CELL/MATRIX into ``state``.
 using AutoIndexRunner = std::function<void(ControlState& state)>;
 
+/// Hook that runs FINDSPOTS (load image → peak find → write ``.spt``).
+using FindSpotsRunner = std::function<void(
+    ControlState& state,
+    const std::optional<std::filesystem::path>& image_override
+)>;
+
 /// Pure-C++ CONTROL driver (Phase D subset + Phase E extensions).
 ///
 /// Supported: geometry keywords, ``PROCESS``, ``GO``/``RUN``, ``EXIT``,
-/// ``AUTOINDEX`` (when a runner is registered), ``STRATEGY``, ``NMASKS``,
-/// ``POSTREFINE``, ``NADD``, ``MULTILATTICE``. Unimplemented major verbs
-/// (``REFIX``, …) throw. Other unknown keywords warn once then continue.
+/// ``FINDSPOTS`` / ``AUTOINDEX`` (when runners are registered), ``STRATEGY``,
+/// ``NMASKS``, ``POSTREFINE``, ``NADD``, ``MULTILATTICE``. Unimplemented major
+/// verbs (``REFIX``, …) throw. Other unknown keywords warn once then continue.
 class ControlSession {
 public:
     /// Register DPS AUTOINDEX implementation (from ``mosflm_indexing``).
     static void register_autoindex_runner(AutoIndexRunner runner);
+
+    /// Register DiffractionLab-style FINDSPOTS (from ``mosflm_indexing``).
+    static void register_findspots_runner(FindSpotsRunner runner);
 
     /// Parse one logical line (comments stripped). Throws on malformed
     /// known keywords or unimplemented major verbs.
@@ -187,6 +215,7 @@ private:
     void ingest_matrix_numbers(const std::vector<double>& vals);
     void finish_matrix_if_ready();
     void parse_autoindex_args(const std::vector<std::string>& args);
+    void parse_findspots_args(const std::vector<std::string>& args);
 };
 
 }  // namespace mosflm::control

@@ -40,6 +40,16 @@ void run_autoindex(control::ControlState& state) {
 
     const AutoIndexResult result = AutoIndexer{}.index(spots, geo, settings);
     if (!result.ok || result.ierr != 0) {
+        if (result.ierr == -2) {
+            throw std::runtime_error(
+                "CONTROL AUTOINDEX: only " +
+                std::to_string(result.n_spots_used) +
+                " spots pass I/σ ≥ " +
+                std::to_string(settings.min_isigi) +
+                " (need ≥20). Lower AUTOINDEX THRESHOLD or re-run FINDSPOTS "
+                "with a lower THRESHOLD / higher MAXSPOTS."
+            );
+        }
         throw std::runtime_error(
             "CONTROL AUTOINDEX failed (ierr=" + std::to_string(result.ierr) +
             ")"
@@ -57,9 +67,10 @@ void run_autoindex(control::ControlState& state) {
 
 }  // namespace
 
-/// Called once from ipmosflm / tests to enable CONTROL AUTOINDEX.
+/// Called once from ipmosflm / tests to enable CONTROL AUTOINDEX + FINDSPOTS.
 void register_control_autoindex() {
     control::ControlSession::register_autoindex_runner(run_autoindex);
+    register_control_findspots();
 }
 
 }  // namespace mosflm::indexing
