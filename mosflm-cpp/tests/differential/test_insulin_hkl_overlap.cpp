@@ -95,7 +95,8 @@ PredictionRequest insulin_request(const Eigen::Matrix3d& Ub) {
     req.scan.phi_start_deg = 0.0;
     req.scan.phi_end_deg = 1.0;
     req.settings.dmin_A = 1.45;
-    req.settings.ewald_tolerance_Ainv = 0.01;
+    req.settings.ewald_tolerance_Ainv = 0.0025;
+    req.settings.mosaic_spread_deg = 0.30;
     req.settings.phi_step_deg = 0.05;
     return req;
 }

@@ -38,6 +38,13 @@ struct PredictionSettings {
     double ewald_tolerance_Ainv{0.0025};
     /// Predictor angular search increment (not physical oscillation width).
     double phi_step_deg{0.05};
+    /// Crystal mosaic spread (degrees). Widens the Ewald gate by approximately
+    /// ``mosaic_rad / λ`` (Å⁻¹), standing in for REEK η until a full rocking
+    /// model exists. Zero ⇒ use ``ewald_tolerance_Ainv`` alone.
+    double mosaic_spread_deg{0.0};
+    /// If true (default), skip Miller indices systematically absent for
+    /// ``PredictionRequest::crystal.spacegroup``.
+    bool apply_systematic_absences{true};
 };
 
 /// Cohesive inputs for stills or oscillation PREDICT.

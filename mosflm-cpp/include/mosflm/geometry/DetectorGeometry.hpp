@@ -15,9 +15,16 @@ struct DetectorGeometry {
     int nfast{1000};
     int nslow{1000};
     double wavelength_A{1.0};
+    /// MOSFLM YSCALE (stretches YG / C++ ``x_mm``; 1 = none).
+    double yscale{1.0};
+    /// Detector tilt / twist in milliradians (MOSFLM TILT / TWIST).
+    double tilt_mrad{0.0};
+    double twist_mrad{0.0};
 
     /// Detector mm coordinates for a scattering vector that intersects the
     /// detector plane at z = distance (simple flat detector, beam along +z).
+    /// Applies YSCALE then a first-order TILT/TWIST coupling in the MOSFLM
+    /// ``XG``/``YG`` frame (``XG↔y_mm``, ``YG↔x_mm``).
     /// Returns false if the ray does not hit the plane with positive z.
     [[nodiscard]] bool lab_to_detector_mm(
         const Eigen::Vector3d& s1,

@@ -1,8 +1,8 @@
 /**
  * Known-indexed XDET/YDET: C++ PREDICT vs insulin MTZ pixel coordinates.
  *
- * Matches on exact HKL (ASU choice differs for many spots). Soft residual
- * gates while TILT/TWIST/YSCALE are not modelled in DetectorGeometry.
+ * Matches on exact HKL. Uses refined XCEN/YCEN/YSCALE/TILT/TWIST from the
+ * capture log (soft residual gates — full REEK detector model still ahead).
  */
 
 #include "mosflm/crystal/CrystalMetadata.hpp"
@@ -64,7 +64,11 @@ std::vector<MtzSpot> read_mtz_xdet(const std::filesystem::path& path) {
     return out;
 }
 
-PredictionRequest insulin_request() {
+PredictionRequest insulin_request(
+    double yscale,
+    double tilt_mrad,
+    double twist_mrad
+) {
     Eigen::Matrix3d A;
     A << -0.012237, -0.000358, -0.002626, 0.002191, 0.005616, -0.010974,
         0.001492, -0.011185, -0.005426;
@@ -74,7 +78,7 @@ PredictionRequest insulin_request() {
         78.190, 78.190, 78.190, 90.0, 90.0, 90.0, "I 2 3"
     );
     req.orientation = OrientationMatrix::from_mosflm_orientation_matrix(A);
-    req.detector.distance_mm = 160.0;
+    req.detector.distance_mm = 160.05;  // refined XTOFD
     req.detector.beam_x_mm = 0.0;
     req.detector.beam_y_mm = 0.0;
     req.detector.pixel_size_x_mm = 0.0816;
@@ -82,12 +86,86 @@ PredictionRequest insulin_request() {
     req.detector.nfast = 2304;
     req.detector.nslow = 2304;
     req.detector.wavelength_A = 0.9790;
+    req.detector.yscale = yscale;
+    req.detector.tilt_mrad = tilt_mrad;
+    req.detector.twist_mrad = twist_mrad;
     req.scan.phi_start_deg = 0.0;
     req.scan.phi_end_deg = 1.0;
     req.settings.dmin_A = 1.45;
     req.settings.ewald_tolerance_Ainv = 0.0025;
+    req.settings.mosaic_spread_deg = 0.30;
     req.settings.phi_step_deg = 0.025;
     return req;
+}
+
+struct ResidualStats {
+    std::size_t n{};
+    double median{};
+    double inlier_frac{};
+    double inlier_rms{};
+};
+
+ResidualStats measure(
+    const std::vector<MtzSpot>& refs,
+    double yscale,
+    double tilt_mrad,
+    double twist_mrad,
+    double beam_x_mm,
+    double beam_y_mm
+) {
+    const auto spots =
+        ReflectionPredictor{}.predict(insulin_request(yscale, tilt_mrad, twist_mrad))
+            .reflections;
+    std::map<Hkl, std::pair<double, double>> pred_mm;
+    for (const auto& s : spots) {
+        const Hkl key{s.h, s.k, s.l};
+        if (pred_mm.count(key) == 0U) {
+            pred_mm[key] = {s.x_mm, s.y_mm};
+        }
+    }
+    constexpr double kPixel = 0.0816;
+    std::vector<double> residuals;
+    residuals.reserve(refs.size());
+    for (const auto& ref : refs) {
+        const auto it = pred_mm.find({ref.h, ref.k, ref.l});
+        if (it == pred_mm.end()) {
+            continue;
+        }
+        double xdet = 0.0;
+        double ydet = 0.0;
+        mosflm::cpp_mm_to_mosflm_xdet(
+            it->second.first,
+            it->second.second,
+            beam_x_mm,
+            beam_y_mm,
+            kPixel,
+            kPixel,
+            xdet,
+            ydet
+        );
+        residuals.push_back(std::hypot(xdet - ref.xdet, ydet - ref.ydet));
+    }
+    ResidualStats st;
+    st.n = residuals.size();
+    if (st.n == 0U) {
+        return st;
+    }
+    std::sort(residuals.begin(), residuals.end());
+    st.median = residuals[residuals.size() / 2];
+    std::size_t n_inlier = 0;
+    double inlier_sum2 = 0.0;
+    for (double r : residuals) {
+        if (r < 100.0) {
+            ++n_inlier;
+            inlier_sum2 += r * r;
+        }
+    }
+    st.inlier_frac =
+        static_cast<double>(n_inlier) / static_cast<double>(residuals.size());
+    st.inlier_rms =
+        n_inlier > 0 ? std::sqrt(inlier_sum2 / static_cast<double>(n_inlier))
+                     : 0.0;
+    return st;
 }
 
 }  // namespace
@@ -109,8 +187,9 @@ int main() {
         }
     }
 
-    constexpr double kBeamXmm = 94.0;
-    constexpr double kBeamYmm = 94.7;
+    // Refined beam from ipmosflm.log (XCEN/YCEN after detector refine).
+    constexpr double kBeamXmm = 94.09;
+    constexpr double kBeamYmm = 95.20;
     constexpr double kPixel = 0.0816;
 
     std::vector<double> residuals;
@@ -159,11 +238,10 @@ int main() {
               << " inlier<100frac=" << inlier_frac
               << " inlier_rms_px=" << inlier_rms << '\n';
 
-    // Soft gates: lab/detector axis map is right; flat-detector model lacks
-    // MOSFLM TILT/TWIST/YSCALE (~0.25 mm refine residual in the capture log).
-    CHECK_MSG(median < 50.0, "median XDET residual above 50 px");
+    // Soft gates with YSCALE/TILT/TWIST; full REEK detector model still ahead.
+    CHECK_MSG(median < 45.0, "median XDET residual above 45 px");
     CHECK_MSG(inlier_frac > 0.70, "inlier fraction below 0.70");
-    CHECK_MSG(inlier_rms < 50.0, "inlier RMS above 50 px");
+    CHECK_MSG(inlier_rms < 45.0, "inlier RMS above 45 px");
 
     return mosflm_test::finish("insulin_xdet");
 }

@@ -44,5 +44,19 @@ int main() {
     CHECK((det.lab_to_detector_mm({0.0, 0.0, 1.0}, x, y)));
     CHECK_CLOSE(x, 10.0, 1e-12);
 
+    // YSCALE stretches MOSFLM YG ↔ C++ x_mm (not C++ y).
+    det.beam_x_mm = 0.0;
+    det.yscale = 2.0;
+    CHECK((det.lab_to_detector_mm({0.5, 0.0, 0.5}, x, y)));
+    CHECK_CLOSE(x, 200.0, 1e-9);
+    CHECK_CLOSE(y, 0.0, 1e-9);
+
+    // First-order TWIST couples YG into XG (→ C++ y_mm).
+    det.yscale = 1.0;
+    det.twist_mrad = 1000.0;  // 1 rad
+    CHECK((det.lab_to_detector_mm({0.5, 0.0, 0.5}, x, y)));
+    CHECK_CLOSE(x, 100.0, 1e-9);
+    CHECK_CLOSE(y, 100.0, 1e-9);
+
     return mosflm_test::finish("detector");
 }

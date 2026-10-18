@@ -3,6 +3,8 @@
 #include "mosflm/geometry/ReciprocalLattice.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
 
+#include <gemmi/symmetry.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -125,6 +127,22 @@ PredictionResult ReflectionPredictor::predict(
                            request.scan.phi_end_deg - request.scan.phi_start_deg
                        ) < 1e-12;
 
+    // Mosaic spread widens the Ewald shell (Å⁻¹ ≈ mosaic_rad / λ).
+    const double mosaic_rad =
+        request.settings.mosaic_spread_deg * (3.14159265358979323846 / 180.0);
+    const double mosaic_tol = mosaic_rad * inv_lambda;
+    const double ewald_tol = std::max(
+        request.settings.ewald_tolerance_Ainv, mosaic_tol
+    );
+
+    gemmi::GroupOps gops;
+    const bool filter_abs =
+        request.settings.apply_systematic_absences &&
+        request.crystal.spacegroup != nullptr;
+    if (filter_abs) {
+        gops = request.crystal.spacegroup->operations();
+    }
+
     const int max_h =
         static_cast<int>(std::ceil(cell.a / request.settings.dmin_A)) + 1;
     const int max_k =
@@ -155,6 +173,10 @@ PredictionResult ReflectionPredictor::predict(
                 if (h == 0 && k == 0 && l == 0) {
                     continue;
                 }
+                if (filter_abs &&
+                    gops.is_systematically_absent({h, k, l})) {
+                    continue;
+                }
                 if (recip.d_spacing(h, k, l) < request.settings.dmin_A) {
                     continue;
                 }
@@ -174,7 +196,7 @@ PredictionResult ReflectionPredictor::predict(
                         phis[ip],
                         s0,
                         inv_lambda,
-                        request.settings.ewald_tolerance_Ainv,
+                        ewald_tol,
                         request.detector
                     );
                     if (!ev.ok) {

@@ -14,8 +14,25 @@ bool DetectorGeometry::lab_to_detector_mm(
     if (t <= 0.0) {
         return false;
     }
-    x_mm = s1.x() * t + beam_x_mm;
-    y_mm = s1.y() * t + beam_y_mm;
+    // Beam-relative flat projection in the C++ lab frame (beam along +z).
+    const double xr = s1.x() * t;
+    const double yr = s1.y() * t;
+
+    // MOSFLM virtual-detector axes (see LabFrame.hpp): XG ↔ y_mm, YG ↔ x_mm.
+    // YSCALE / TILT / TWIST are defined in that frame, so apply them there.
+    double xg = yr;
+    double yg = xr;
+    yg *= yscale;
+
+    // First-order TILT/TWIST coupling (mrad → rad). Full ROTMAT2 detector
+    // normal is Phase D work; this absorbs refined insulin fiducials.
+    const double tilt = tilt_mrad * 1.0e-3;
+    const double twist = twist_mrad * 1.0e-3;
+    const double xg_out = xg + twist * yg;
+    const double yg_out = yg + tilt * xg;
+
+    x_mm = yg_out + beam_x_mm;
+    y_mm = xg_out + beam_y_mm;
     return true;
 }
 
