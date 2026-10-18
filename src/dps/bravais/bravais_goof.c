@@ -239,7 +239,7 @@ float get_goof(int lattice, struct matrix_3x3 *om)
 		goof=goof+fabs(2*fabs(tensor.D+tensor.E+tensor.F)
 		    -(tensor.A+tensor.B));	/* 2|D+E+F| = A+B */
 		goof=goof+fabs(tensor.D-tensor.E); /* D = E */
-		/* nonono!	goof=goof+fabs(tensor.E-tensor.F); /* E = F */
+		/* nonono! goof=goof+fabs(tensor.E-tensor.F);  E = F */
 		break;
 	case 7:		
 	  /* tI */
@@ -298,7 +298,7 @@ float get_goof(int lattice, struct matrix_3x3 *om)
 		goof=goof_general(2, &tensor);
 		goof=goof+goof_group(2, &tensor);
 		goof=goof+fabs(tensor.D-tensor.E); /* D = E */
-		/*no!	goof=goof+fabs(tensor.E-tensor.F); /* E = F */
+		/* no! goof=goof+fabs(tensor.E-tensor.F);  E = F */
 		break;
 	case 15:	
 	  /* tI */
@@ -315,7 +315,7 @@ float get_goof(int lattice, struct matrix_3x3 *om)
 		goof=goof+fabs(2*fabs(tensor.D+tensor.E+tensor.F)
 		    -(tensor.A+tensor.B));	/* 2|D+E+F| = A+B */
 		goof=goof+fabs(tensor.D-tensor.E); /* D = E */
-		/*no! goof=goof+fabs(tensor.E-tensor.F); /* E = F */
+		/* no! goof=goof+fabs(tensor.E-tensor.F);  E = F */
 		break;
 	case 17:	
 	  /* mC */

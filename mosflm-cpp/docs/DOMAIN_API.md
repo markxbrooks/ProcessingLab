@@ -9,7 +9,7 @@ objects**. The Fortran/C boundary stays flat and builds those requests.
 | Summation integrate | `SummationIntegrator::integrate` | `IntegrationRequest` |
 | Profile fit | `ProfileFitter::fit` | `ProfileFitRequest` |
 | Known-indexed PROCESS | `ProcessPipeline::run` | `ProcessRequest` → `ProcessResult` |
-| MEAS boxes | `MeasIntegrator::integrate` | `MeasurementBoxSettings` → `MeasObservation` |
+| MEAS boxes | `MeasIntegrator::integrate` | `MeasurementBoxSettings` → `MeasObservation` (tilted `BackgroundPlane`, SEPARATION / BGREJECT; no Fortran stripe I/O) |
 | Standard profile | `StandardProfileFitter::fit` | `StandardProfileSettings` → `ProfileObservation` |
 | Post-refinement | `PostRefiner::refine` | observations + settings → `PostRefinementResult` |
 | CONTROL script | `ControlSession::run_script` | `.in` keywords → `ControlGoResult` / PROCESS |

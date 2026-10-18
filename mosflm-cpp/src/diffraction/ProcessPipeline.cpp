@@ -122,6 +122,7 @@ ProcessRequest ProcessPipeline::known_indexed_insulin(
         0.001492, -0.011185, -0.005426;
 
     DetectorGeometry det = image.metadata.to_detector_geometry();
+    // Predictor uses beam-centred mm; image-frame beam is in IntegrationSettings.
     det.beam_x_mm = 0.0;
     det.beam_y_mm = 0.0;
     if (det.distance_mm <= 0.0) {
@@ -134,6 +135,11 @@ ProcessRequest ProcessPipeline::known_indexed_insulin(
         det.pixel_size_x_mm = 0.0816;
         det.pixel_size_y_mm = 0.0816;
     }
+    // Refined fiducials from oracle PROCESS (insulin_1_001).
+    det.yscale = 0.9921;
+    det.tilt_mrad = -83.0;
+    det.twist_mrad = -140.0;
+    det.use_rotmat2 = true;
 
     ScanRange scan;
     scan.phi_start_deg = image.metadata.oscillation_start_deg;

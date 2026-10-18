@@ -791,7 +791,7 @@ char * cbf_encode32k_bit_op(unsigned char *txt, size_t size, size_t *size2)
 }
 
 /*Determine whether the machine is little endian*/
-int cbf_isBigEndian()
+int cbf_isBigEndian(void)
 {
 	long tmp = 1;
 	

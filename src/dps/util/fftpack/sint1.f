@@ -5,14 +5,16 @@
       XH(I) = WAR(I)                                                            
       WAR(I) = X(I)                                                             
   100 CONTINUE                                                                  
-      IF (N-2) 101,102,103                                                      
-  101 XH(1) = XH(1)+XH(1)                                                       
-      GO TO 106                                                                 
-  102 XHOLD = SQRT3*(XH(1)+XH(2))                                               
-      XH(2) = SQRT3*(XH(1)-XH(2))                                               
-      XH(1) = XHOLD                                                             
-      GO TO 106                                                                 
-  103 NP1 = N+1                                                                 
+      IF (N .LT. 2) THEN
+         XH(1) = XH(1)+XH(1)
+         GO TO 106
+      ELSE IF (N .EQ. 2) THEN
+         XHOLD = SQRT3*(XH(1)+XH(2))
+         XH(2) = SQRT3*(XH(1)-XH(2))
+         XH(1) = XHOLD
+         GO TO 106
+      END IF
+      NP1 = N+1
       NS2 = N/2                                                                 
       X(1) = 0.                                                                 
       DO 104 K=1,NS2                                                            

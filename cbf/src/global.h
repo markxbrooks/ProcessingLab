@@ -25,11 +25,12 @@ documentation and/or software.
 
 /* PROTOTYPES should be set to one if and only if the compiler supports
   function argument prototyping.
-The following makes PROTOTYPES default to 0 if it has not already
-  been defined with C compiler flags.
+  Default to 1: every C compiler CBFlib targets today supports prototypes.
+  (Historical RSAREF defaulted this to 0, which made PROTO_LIST expand to
+  () and produced non-prototype declarations.)
  */
 #ifndef PROTOTYPES
-#define PROTOTYPES 0
+#define PROTOTYPES 1
 #endif
 
 /* POINTER defines a generic pointer type */

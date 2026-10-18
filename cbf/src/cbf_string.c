@@ -309,9 +309,13 @@ int cbf_cistrncmp (const char *s1, const char *s2, size_t n)
         
         size_t m1, m2;
         
-        for (m1 = 0; m1 < n && s1[m1]; m1++); t1 = (char *)s1+m1;
-        
-        for (m2 = 0; m2 < n && s2[m2]; m2++); t2 = (char *)s2+m2;
+        for (m1 = 0; m1 < n && s1[m1]; m1++)
+            ;
+        t1 = (char *)s1 + m1;
+
+        for (m2 = 0; m2 < n && s2[m2]; m2++)
+            ;
+        t2 = (char *)s2 + m2;
         
         while (n > 0 && t1 >= s1 && t2 >=s2 && toupper (*t1) == toupper (*t2))
         {

@@ -36,9 +36,13 @@ void to_pixel(
     if (settings.mosflm_detector_axes) {
         double xdet = 0.0;
         double ydet = 0.0;
+        const double py =
+            (std::fabs(detector.yscale) > 1e-15)
+                ? (detector.pixel_size_y_mm / detector.yscale)
+                : detector.pixel_size_y_mm;
         mosflm::cpp_mm_to_mosflm_xdet(
             x_mm, y_mm, settings.image_beam_x_mm, settings.image_beam_y_mm,
-            detector.pixel_size_x_mm, detector.pixel_size_y_mm, xdet, ydet
+            detector.pixel_size_x_mm, py, xdet, ydet
         );
         col = static_cast<int>(std::lround(xdet));
         row = static_cast<int>(std::lround(ydet));
@@ -59,89 +63,6 @@ int derive_peak_half(
     const int hx = static_cast<int>(std::lround(0.5 * box.separation_x_mm / px));
     const int hy = static_cast<int>(std::lround(0.5 * box.separation_y_mm / py));
     return std::max(2, std::min(hx, hy));
-}
-
-struct BgPlane {
-    double a{0.0};
-    double b{0.0};
-    double c{0.0};
-    bool ok{false};
-};
-
-BgPlane fit_bg_plane(
-    const image::DiffractionImage& image,
-    int c0,
-    int r0,
-    int peak_half,
-    int outer,
-    const std::vector<int>& neigh_cols,
-    const std::vector<int>& neigh_rows
-) {
-    double spp = 0, sqq = 0, spq = 0, sp = 0, sq = 0, sn = 0;
-    double spod = 0, sqod = 0, sod = 0;
-    for (int dr = -outer; dr <= outer; ++dr) {
-        for (int dc = -outer; dc <= outer; ++dc) {
-            if (std::abs(dr) <= peak_half && std::abs(dc) <= peak_half) {
-                continue;
-            }
-            const int c = c0 + dc;
-            const int r = r0 + dr;
-            if (c < 0 || r < 0 || c >= image.metadata.width ||
-                r >= image.metadata.height) {
-                continue;
-            }
-            bool neigh = false;
-            for (std::size_t k = 0; k < neigh_cols.size(); ++k) {
-                if (std::abs(c - neigh_cols[k]) <= peak_half &&
-                    std::abs(r - neigh_rows[k]) <= peak_half) {
-                    neigh = true;
-                    break;
-                }
-            }
-            if (neigh) {
-                continue;
-            }
-            const double p = static_cast<double>(dc);
-            const double q = static_cast<double>(dr);
-            const double od = static_cast<double>(pixel_at(image, c, r));
-            spp += p * p;
-            sqq += q * q;
-            spq += p * q;
-            sp += p;
-            sq += q;
-            sn += 1.0;
-            spod += p * od;
-            sqod += q * od;
-            sod += od;
-        }
-    }
-    BgPlane out;
-    if (sn < 6.0) {
-        if (sn > 0.0) {
-            out.c = sod / sn;
-            out.ok = true;
-        }
-        return out;
-    }
-    const double det =
-        spp * (sqq * sn - sq * sq) - spq * (spq * sn - sq * sp) +
-        sp * (spq * sq - sqq * sp);
-    if (std::fabs(det) < 1e-12) {
-        out.c = sod / sn;
-        out.ok = true;
-        return out;
-    }
-    out.a = (spod * (sqq * sn - sq * sq) - spq * (sqod * sn - sq * sod) +
-             sp * (sqod * sq - sqq * sod)) /
-            det;
-    out.b = (spp * (sqod * sn - sq * sod) - spod * (spq * sn - sq * sp) +
-             sp * (spq * sod - sqod * sp)) /
-            det;
-    out.c = (spp * (sqq * sod - sqod * sq) - spq * (spq * sod - sqod * sp) +
-             spod * (spq * sq - sqq * sp)) /
-            det;
-    out.ok = true;
-    return out;
 }
 
 std::vector<double> make_gaussian_profile(int half, double sigma_px) {
@@ -335,8 +256,10 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             nc.push_back(col[static_cast<std::size_t>(j)]);
             nr.push_back(row[static_cast<std::size_t>(j)]);
         }
-        const BgPlane bg =
-            fit_bg_plane(image, c0, r0, peak_half, outer, nc, nr);
+        const BackgroundPlane bg = fit_background_plane(
+            image, c0, r0, peak_half, outer, nc, nr,
+            settings.box.bg_reject_nsigma
+        );
         if (!bg.ok) {
             continue;
         }
@@ -347,9 +270,9 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
                 const int c = c0 + dc;
                 const int r = r0 + dr;
                 const double od = static_cast<double>(pixel_at(image, c, r));
-                const double b =
-                    bg.a * static_cast<double>(dc) +
-                    bg.b * static_cast<double>(dr) + bg.c;
+                const double b = bg.at(
+                    static_cast<double>(dc), static_cast<double>(dr)
+                );
                 const double v = std::max(0.0, od - b);
                 const std::size_t idx = static_cast<std::size_t>(
                     (dr + peak_half) * side + (dc + peak_half)
@@ -420,8 +343,10 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             nc.push_back(col[static_cast<std::size_t>(j)]);
             nr.push_back(row[static_cast<std::size_t>(j)]);
         }
-        const BgPlane bg =
-            fit_bg_plane(image, c0, r0, peak_half, outer, nc, nr);
+        const BackgroundPlane bg = fit_background_plane(
+            image, c0, r0, peak_half, outer, nc, nr,
+            settings.box.bg_reject_nsigma
+        );
         obs.bg_a = bg.a;
         obs.bg_b = bg.b;
         obs.bg_c = bg.c;

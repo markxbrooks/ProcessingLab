@@ -218,7 +218,8 @@ int lfield, int lvalue, int lheader)
 
 void puthd (char* field, char* value, char* header)
 {
-	char   temp[5];
+	/* "%5d" writes 5 field characters plus NUL. */
+	char   temp[6];
 	int    i, diff;
 	char   *hp, *vp, *tp, *fp;
 
@@ -261,7 +262,7 @@ void puthd (char* field, char* value, char* header)
 	/*
  * Write the header length field
  */
-	sprintf (temp, "%5d", (int) (hp-header));
+	snprintf (temp, sizeof temp, "%5d", (int) (hp-header));
 	for (i=0,hp=header+15,tp=temp; i<5; i++) *hp++ = *tp++;
 
 }
@@ -271,7 +272,8 @@ void puthd (char* field, char* value, char* header)
 void padhd (char* header, int size)
 {
 	int i, diff;
-	char temp[5], *hp, *tp;
+	/* "%5d" writes 5 field characters plus NUL. */
+	char temp[6], *hp, *tp;
 
 	/*
    * find the } marking the end of the header
@@ -296,7 +298,7 @@ void padhd (char* header, int size)
 	/*
  * Write the header length field
  */
-	sprintf (temp, "%5d", (int) (hp-header));
+	snprintf (temp, sizeof temp, "%5d", (int) (hp-header));
 	for (i=0,hp=header+15,tp=temp; i<5; i++) *hp++ = *tp++;
 
 

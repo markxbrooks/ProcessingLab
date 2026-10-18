@@ -47,13 +47,16 @@ C
       SUBROUTINE EZFFTF (N,R,AZERO,A,B,WSAVE)                                   
       DIMENSION       R(*)       ,A(*)       ,B(*)       ,WSAVE(*)              
 C                                                                               
-      IF (N-2) 101,102,103                                                      
-  101 AZERO = R(1)                                                              
-      RETURN                                                                    
-  102 AZERO = .5*(R(1)+R(2))                                                    
-      A(1) = .5*(R(1)-R(2))                                                     
-      RETURN                                                                    
-  103 DO 104 I=1,N                                                              
+      IF (N .LT. 2) THEN
+         AZERO = R(1)
+         RETURN
+      ELSE IF (N .EQ. 2) THEN
+         AZERO = .5*(R(1)+R(2))
+         A(1) = .5*(R(1)-R(2))
+         RETURN
+      END IF
+      DO 104 I=1,N
+
          WSAVE(I) = R(I)                                                        
   104 CONTINUE                                                                  
       CALL RFFTF (N,WSAVE,WSAVE(N+1))                                           

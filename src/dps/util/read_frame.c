@@ -196,7 +196,9 @@ int read_frame(char *filename, FrameInfo *frame_info, od_type **od_pointer)
 	/* Assign memory for the optical densities */
 	*od_pointer = realloc(*od_pointer, frame_info->lenx * frame_info->leny * sizeof(od_type));
 	if(*od_pointer == NULL) {
-		printf("Unable to allocate memory; %d bytes\n",frame_info->lenx * frame_info->leny * sizeof(od_type));
+		printf("Unable to allocate memory; %zu bytes\n",
+		       (size_t)frame_info->lenx * (size_t)frame_info->leny *
+		           sizeof(od_type));
 		close(in_file);
 		return(3);
 	}

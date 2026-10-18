@@ -96,7 +96,7 @@ Boolean readinfo(FILE *in_file,  detector_setting *det_set)
 	while (fgets(line, sizeof(line), in_file) != 0) {
 		command_identified = FALSE;
 		line_count++;
-		if(sscanf(line, "%s", &command) <= 0) {
+		if(sscanf(line, "%s", command) <= 0) {
 			command[0]='\0';
 			command_identified = TRUE;
 		}
@@ -169,7 +169,7 @@ Boolean readinfo(FILE *in_file,  detector_setting *det_set)
 		if (strcmp(command, "BEAMSTOP") == 0) {
 			command_identified = TRUE;
 			/* Sorry for reusing start and end */
-			switch(sscanf(rest, "%s %f %s %f", &command, &start,  &name, &end)) {
+			switch(sscanf(rest, "%s %f %s %f", command, &start, name, &end)) {
 			case EOF:
 			case 0: 
 				printf("Error in line %d in the control input file: No data after BEAMSTOP keyword\n", line_count);

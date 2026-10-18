@@ -1,0 +1,2 @@
+export DYLD_LIBRARY_PATH=/Applications/ccp4-9/lib
+make dps-lib fortran-oracle 

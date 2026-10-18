@@ -36,13 +36,19 @@ void to_pixel(
     if (settings.mosflm_detector_axes) {
         double xdet = 0.0;
         double ydet = 0.0;
+        // YSCALE stretches YG ↔ C++ x_mm (second pixel pitch), matching
+        // ``cpp_mm_to_mosflm_xdet`` / insulin_xdet.
+        const double py =
+            (std::fabs(detector.yscale) > 1e-15)
+                ? (detector.pixel_size_y_mm / detector.yscale)
+                : detector.pixel_size_y_mm;
         mosflm::cpp_mm_to_mosflm_xdet(
             x_mm,
             y_mm,
             settings.image_beam_x_mm,
             settings.image_beam_y_mm,
             detector.pixel_size_x_mm,
-            detector.pixel_size_y_mm,
+            py,
             xdet,
             ydet
         );
@@ -68,7 +74,174 @@ int derive_peak_half(
     return std::max(2, std::min(hx, hy));
 }
 
+bool in_neighbour_peak(
+    int c,
+    int r,
+    int peak_half,
+    const std::vector<int>& neigh_cols,
+    const std::vector<int>& neigh_rows
+) {
+    for (std::size_t k = 0; k < neigh_cols.size(); ++k) {
+        if (std::abs(c - neigh_cols[k]) <= peak_half &&
+            std::abs(r - neigh_rows[k]) <= peak_half) {
+            return true;
+        }
+    }
+    return false;
+}
+
+struct BgSample {
+    double p{};
+    double q{};
+    double od{};
+};
+
+std::vector<BgSample> collect_bg_samples(
+    const image::DiffractionImage& image,
+    int c0,
+    int r0,
+    int peak_half,
+    int outer,
+    const std::vector<int>& neigh_cols,
+    const std::vector<int>& neigh_rows
+) {
+    std::vector<BgSample> samples;
+    samples.reserve(static_cast<std::size_t>((2 * outer + 1) * (2 * outer + 1)));
+    for (int dr = -outer; dr <= outer; ++dr) {
+        for (int dc = -outer; dc <= outer; ++dc) {
+            if (std::abs(dr) <= peak_half && std::abs(dc) <= peak_half) {
+                continue;
+            }
+            const int c = c0 + dc;
+            const int r = r0 + dr;
+            if (c < 0 || r < 0 || c >= image.metadata.width ||
+                r >= image.metadata.height) {
+                continue;
+            }
+            if (in_neighbour_peak(c, r, peak_half, neigh_cols, neigh_rows)) {
+                continue;
+            }
+            samples.push_back(
+                {static_cast<double>(dc), static_cast<double>(dr),
+                 static_cast<double>(pixel_at(image, c, r))}
+            );
+        }
+    }
+    return samples;
+}
+
+BackgroundPlane solve_plane(const std::vector<BgSample>& samples) {
+    BackgroundPlane out;
+    out.n_used = static_cast<int>(samples.size());
+    if (samples.empty()) {
+        return out;
+    }
+    double spp = 0, sqq = 0, spq = 0, sp = 0, sq = 0, sn = 0;
+    double spod = 0, sqod = 0, sod = 0;
+    for (const auto& s : samples) {
+        spp += s.p * s.p;
+        sqq += s.q * s.q;
+        spq += s.p * s.q;
+        sp += s.p;
+        sq += s.q;
+        sn += 1.0;
+        spod += s.p * s.od;
+        sqod += s.q * s.od;
+        sod += s.od;
+    }
+    if (sn < 6.0) {
+        out.c = sod / sn;
+        out.ok = true;
+        return out;
+    }
+    const double det =
+        spp * (sqq * sn - sq * sq) - spq * (spq * sn - sq * sp) +
+        sp * (spq * sq - sqq * sp);
+    if (std::fabs(det) < 1e-12) {
+        out.c = sod / sn;
+        out.ok = true;
+        return out;
+    }
+    out.a = (spod * (sqq * sn - sq * sq) - spq * (sqod * sn - sq * sod) +
+             sp * (sqod * sq - sqq * sod)) /
+            det;
+    out.b = (spp * (sqod * sn - sq * sod) - spod * (spq * sn - sq * sp) +
+             sp * (spq * sod - sqod * sp)) /
+            det;
+    out.c = (spp * (sqq * sod - sqod * sq) - spq * (spq * sod - sqod * sp) +
+             spod * (spq * sq - sqq * sp)) /
+            det;
+    out.ok = true;
+    return out;
+}
+
 }  // namespace
+
+BackgroundPlane fit_background_plane(
+    const image::DiffractionImage& image,
+    int c0,
+    int r0,
+    int peak_half,
+    int outer,
+    const std::vector<int>& neigh_cols,
+    const std::vector<int>& neigh_rows,
+    double reject_nsigma
+) {
+    auto samples =
+        collect_bg_samples(image, c0, r0, peak_half, outer, neigh_cols, neigh_rows);
+    const int n0 = static_cast<int>(samples.size());
+    BackgroundPlane plane = solve_plane(samples);
+    if (!plane.ok) {
+        plane.n_rejected = 0;
+        return plane;
+    }
+
+    if (reject_nsigma > 0.0 && samples.size() >= 6) {
+        for (int pass = 0; pass < 3; ++pass) {
+            std::vector<double> resid;
+            resid.reserve(samples.size());
+            for (const auto& s : samples) {
+                resid.push_back(s.od - plane.at(s.p, s.q));
+            }
+            double mean = 0.0;
+            for (double v : resid) {
+                mean += v;
+            }
+            mean /= static_cast<double>(resid.size());
+            double var = 0.0;
+            for (double v : resid) {
+                const double d = v - mean;
+                var += d * d;
+            }
+            const double sd =
+                std::sqrt(var / static_cast<double>(resid.size()));
+            if (sd < 1e-9) {
+                break;
+            }
+            const double lim = reject_nsigma * sd;
+            std::vector<BgSample> kept;
+            kept.reserve(samples.size());
+            for (std::size_t i = 0; i < samples.size(); ++i) {
+                if (std::fabs(resid[i] - mean) <= lim) {
+                    kept.push_back(samples[i]);
+                }
+            }
+            if (kept.size() == samples.size() || kept.size() < 6) {
+                samples.swap(kept);
+                break;
+            }
+            samples.swap(kept);
+            plane = solve_plane(samples);
+            if (!plane.ok) {
+                break;
+            }
+        }
+    }
+
+    plane.n_rejected = n0 - static_cast<int>(samples.size());
+    plane.n_used = static_cast<int>(samples.size());
+    return plane;
+}
 
 std::vector<MeasObservation> MeasIntegrator::integrate(
     const IntegrationRequest& request,
@@ -97,22 +270,22 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
     for (int i = 0; i < n; ++i) {
         to_pixel(
             detector, settings, predictions[static_cast<std::size_t>(i)].x_mm,
-            predictions[static_cast<std::size_t>(i)].y_mm, col[static_cast<std::size_t>(i)],
-            row[static_cast<std::size_t>(i)]
+            predictions[static_cast<std::size_t>(i)].y_mm,
+            col[static_cast<std::size_t>(i)], row[static_cast<std::size_t>(i)]
         );
     }
 
-    // OVERLAP: centres closer than SEPARATION (in pixels).
     const double sep_x_px =
         box.separation_x_mm / std::max(detector.pixel_size_x_mm, 1e-9);
     const double sep_y_px =
         box.separation_y_mm / std::max(detector.pixel_size_y_mm, 1e-9);
     std::vector<char> overlapped(static_cast<std::size_t>(n), 0);
-    // Neighbours within ~2*SEPARATION (enough to intrude into the bg rim).
     std::vector<std::vector<int>> neighbours(static_cast<std::size_t>(n));
     if (box.mark_overlaps) {
-        const double neigh_x = std::max(sep_x_px, static_cast<double>(2 * outer + 1));
-        const double neigh_y = std::max(sep_y_px, static_cast<double>(2 * outer + 1));
+        const double neigh_x =
+            std::max(sep_x_px, static_cast<double>(2 * outer + 1));
+        const double neigh_y =
+            std::max(sep_y_px, static_cast<double>(2 * outer + 1));
         for (int i = 0; i < n; ++i) {
             for (int j = i + 1; j < n; ++j) {
                 const double dx = static_cast<double>(
@@ -155,77 +328,72 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
 
         const int c0 = col[static_cast<std::size_t>(i)];
         const int r0 = row[static_cast<std::size_t>(i)];
-        const auto& neigh = neighbours[static_cast<std::size_t>(i)];
+        std::vector<int> nc;
+        std::vector<int> nr;
+        for (int j : neighbours[static_cast<std::size_t>(i)]) {
+            nc.push_back(col[static_cast<std::size_t>(j)]);
+            nr.push_back(row[static_cast<std::size_t>(j)]);
+        }
 
-        // Background candidates: outer square minus peak, minus neighbour peaks.
-        std::vector<double> bg_vals;
-        bg_vals.reserve(static_cast<std::size_t>((2 * outer + 1) * (2 * outer + 1)));
-        for (int dr = -outer; dr <= outer; ++dr) {
-            for (int dc = -outer; dc <= outer; ++dc) {
-                if (std::abs(dr) <= peak_half && std::abs(dc) <= peak_half) {
-                    continue;
-                }
-                const int c = c0 + dc;
-                const int rr = r0 + dr;
-                if (c < 0 || rr < 0 || c >= image.metadata.width ||
-                    rr >= image.metadata.height) {
-                    continue;
-                }
-                bool in_neighbour = false;
-                for (int j : neigh) {
-                    if (std::abs(c - col[static_cast<std::size_t>(j)]) <= peak_half &&
-                        std::abs(rr - row[static_cast<std::size_t>(j)]) <= peak_half) {
-                        in_neighbour = true;
+        BackgroundPlane bg;
+        if (box.use_bg_plane) {
+            bg = fit_background_plane(
+                image, c0, r0, peak_half, outer, nc, nr, box.bg_reject_nsigma
+            );
+        } else {
+            // Flat mean of rim (legacy path).
+            auto samples =
+                collect_bg_samples(image, c0, r0, peak_half, outer, nc, nr);
+            if (box.bg_reject_nsigma > 0.0 && samples.size() >= 4) {
+                for (int pass = 0; pass < 3; ++pass) {
+                    double sum = 0.0;
+                    for (const auto& s : samples) {
+                        sum += s.od;
+                    }
+                    const double mean = sum / static_cast<double>(samples.size());
+                    double var = 0.0;
+                    for (const auto& s : samples) {
+                        const double d = s.od - mean;
+                        var += d * d;
+                    }
+                    const double sd =
+                        std::sqrt(var / static_cast<double>(samples.size()));
+                    if (sd < 1e-9) {
                         break;
                     }
+                    const double lim = box.bg_reject_nsigma * sd;
+                    std::vector<BgSample> kept;
+                    for (const auto& s : samples) {
+                        if (std::fabs(s.od - mean) <= lim) {
+                            kept.push_back(s);
+                        }
+                    }
+                    if (kept.size() == samples.size() || kept.size() < 4) {
+                        samples.swap(kept);
+                        break;
+                    }
+                    samples.swap(kept);
                 }
-                if (in_neighbour) {
-                    continue;
+            }
+            bg.n_used = static_cast<int>(samples.size());
+            if (!samples.empty()) {
+                double sum = 0.0;
+                for (const auto& s : samples) {
+                    sum += s.od;
                 }
-                bg_vals.push_back(static_cast<double>(pixel_at(image, c, rr)));
+                bg.c = sum / static_cast<double>(samples.size());
+                bg.ok = true;
             }
         }
 
-        // Iterative sigma-clip (BGREJECT stand-in).
-        int n_rej = 0;
-        if (box.bg_reject_nsigma > 0.0 && bg_vals.size() >= 4) {
-            for (int pass = 0; pass < 3; ++pass) {
-                double sum = 0.0;
-                for (double v : bg_vals) {
-                    sum += v;
-                }
-                const double mean = sum / static_cast<double>(bg_vals.size());
-                double var = 0.0;
-                for (double v : bg_vals) {
-                    const double d = v - mean;
-                    var += d * d;
-                }
-                const double sd =
-                    std::sqrt(var / static_cast<double>(bg_vals.size()));
-                if (sd < 1e-9) {
-                    break;
-                }
-                const double lim = box.bg_reject_nsigma * sd;
-                std::vector<double> kept;
-                kept.reserve(bg_vals.size());
-                for (double v : bg_vals) {
-                    if (std::fabs(v - mean) <= lim) {
-                        kept.push_back(v);
-                    } else {
-                        ++n_rej;
-                    }
-                }
-                if (kept.size() == bg_vals.size() || kept.size() < 4) {
-                    bg_vals.swap(kept);
-                    break;
-                }
-                bg_vals.swap(kept);
-            }
-        }
-        r.n_bg_rejected = n_rej;
-        r.npix_bg = static_cast<int>(bg_vals.size());
+        r.n_bg_rejected = bg.n_rejected;
+        r.npix_bg = bg.n_used;
+        r.bg_a = bg.a;
+        r.bg_b = bg.b;
+        r.bg_c = bg.c;
 
         double peak_sum = 0.0;
+        double bg_under_peak = 0.0;
         int n_peak = 0;
         for (int dr = -peak_half; dr <= peak_half; ++dr) {
             for (int dc = -peak_half; dc <= peak_half; ++dc) {
@@ -236,6 +404,11 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
                     continue;
                 }
                 peak_sum += static_cast<double>(pixel_at(image, c, rr));
+                if (bg.ok) {
+                    bg_under_peak += bg.at(
+                        static_cast<double>(dc), static_cast<double>(dr)
+                    );
+                }
                 ++n_peak;
             }
         }
@@ -246,21 +419,17 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
             continue;
         }
 
-        double bg_mean = 0.0;
-        if (!bg_vals.empty()) {
-            double sum = 0.0;
-            for (double v : bg_vals) {
-                sum += v;
-            }
-            bg_mean = sum / static_cast<double>(bg_vals.size());
+        if (!bg.ok) {
+            bg_under_peak = 0.0;
         }
-        r.intensity = peak_sum - bg_mean * static_cast<double>(n_peak);
+        r.intensity = peak_sum - bg_under_peak;
+        // Counting-stats stand-in: peak variance + bg contribution.
         const double var =
             std::fabs(peak_sum) +
             (r.npix_bg > 0
                  ? (static_cast<double>(n_peak * n_peak) /
                     static_cast<double>(r.npix_bg)) *
-                       std::fabs(bg_mean)
+                       std::fabs(bg_under_peak / std::max(n_peak, 1))
                  : 0.0);
         r.sigma = std::sqrt(std::max(var, 1.0));
         if (settings.apply_lp) {

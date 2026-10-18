@@ -214,7 +214,7 @@ int choose_non_lin(	int dumpch,float sinthmin, float volmin, float hkldev, float
 	  for (c = -2; c <= 2; c++) {
 	    if (a == 0 && b < 0) continue;
 	    if (a == 0 && b == 0 && c < 0) continue; // avoid redundancy
-	    if (fabs(a) + fabs(b) + fabs(c) > 4) continue;
+	    if (abs(a) + abs(b) + abs(c) > 4) continue;
 	    tmp.x = a * orig_cell.r[0].x + b * orig_cell.r[1].x + c * orig_cell.r[2].x;
 	    tmp.y = a * orig_cell.r[0].y + b * orig_cell.r[1].y + c * orig_cell.r[2].y;
 	    tmp.z = a * orig_cell.r[0].z + b * orig_cell.r[1].z + c * orig_cell.r[2].z;

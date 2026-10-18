@@ -79,13 +79,16 @@ C
       SUBROUTINE EZFFTB (N,R,AZERO,A,B,WSAVE)                                   
       DIMENSION       R(*)       ,A(*)       ,B(*)       ,WSAVE(*)              
 C                                                                               
-      IF (N-2) 101,102,103                                                      
-  101 R(1) = AZERO                                                              
-      RETURN                                                                    
-  102 R(1) = AZERO+A(1)                                                         
-      R(2) = AZERO-A(1)                                                         
-      RETURN                                                                    
-  103 NS2 = (N-1)/2                                                             
+      IF (N .LT. 2) THEN
+         R(1) = AZERO
+         RETURN
+      ELSE IF (N .EQ. 2) THEN
+         R(1) = AZERO+A(1)
+         R(2) = AZERO-A(1)
+         RETURN
+      END IF
+      NS2 = (N-1)/2
+
       DO 104 I=1,NS2                                                            
          R(2*I) = .5*A(I)                                                       
          R(2*I+1) = -.5*B(I)                                                    

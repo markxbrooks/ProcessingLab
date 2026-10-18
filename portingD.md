@@ -280,17 +280,12 @@ Optional transitional: splice C++ INTEG/INTEG2 behind PROCESS via ABI while D1 C
 
 Exit: Pure C++ insulin PROCESS CTest green.
 
-D2 — MEAS measurement boxes (3–6 weeks)
+D2 — MEAS measurement boxes (3–6 weeks) — **In progress**
 
-
-
-
-
-Port measurement-box / background / overlap contract from Fortran MEAS (~amalgamation 119126).
-
-
-
-Soft intensity/sigma differential vs oracle I/SIGI on matched HKL.
+`MeasIntegrator`: SEPARATION overlap, rim BGREJECT, shared tilted
+`BackgroundPlane` (EVAL ``bg = a·p+b·q+c``) used by summation + standard
+profile. YSCALE in MOSFLM pixel map. Soft `insulin_isi` gate green. Fortran
+stripe I/O buffer not ported (random-access image replaces it).
 
 Exit: C++ PROCESS path no longer needs Fortran MEAS for insulin.
 

@@ -51,12 +51,16 @@ C
       NM1 = N-1                                                                 
       NP1 = N+1                                                                 
       NS2 = N/2                                                                 
-      IF (N-2) 106,101,102                                                      
-  101 X1H = X(1)+X(2)                                                           
-      X(2) = X(1)-X(2)                                                          
-      X(1) = X1H                                                                
-      RETURN                                                                    
-  102 IF (N .GT. 3) GO TO 103                                                   
+      IF (N .LT. 2) THEN
+         RETURN
+      ELSE IF (N .EQ. 2) THEN
+         X1H = X(1)+X(2)
+         X(2) = X(1)-X(2)
+         X(1) = X1H
+         RETURN
+      END IF
+      IF (N .GT. 3) GO TO 103
+
       X1P3 = X(1)+X(3)                                                          
       TX2 = X(2)+X(2)                                                           
       X(2) = X(1)-X(3)                                                          

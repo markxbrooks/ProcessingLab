@@ -17,9 +17,6 @@ struct ProfileObservation : MeasObservation {
     double profile_sigma{};
     double summation_intensity{};
     double summation_sigma{};
-    double bg_a{};
-    double bg_b{};
-    double bg_c{};
     double pkratio{};  ///< ``|I_sum − I_prf| / max(|I_prf|,1)``
     bool profile_ok{false};
     /// Detector-region index ``iy * n_bins_x + ix`` (0 if global-only).

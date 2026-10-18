@@ -10,7 +10,11 @@
          CH(IDO,2,K) = CC(1,K,1)-CC(1,K,3)                                      
          CH(1,3,K) = CC(1,K,4)-CC(1,K,2)                                        
   101 CONTINUE                                                                  
-      IF (IDO-2) 107,105,102                                                    
+      IF (IDO .LT. 2) THEN
+         GO TO 107
+      ELSE IF (IDO .EQ. 2) THEN
+         GO TO 105
+      END IF
   102 IDP2 = IDO+2                                                              
       DO 104 K=1,L1                                                             
          DO 103 I=3,IDO,2                                                       

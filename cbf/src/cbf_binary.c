@@ -308,7 +308,8 @@ int cbf_get_bintext (const cbf_node  *column, unsigned int row,
 
   char digest_text [25];
   
-  char byteorder_text [14];
+  /* "%14s" writes up to 14 chars plus NUL ? need 15 bytes. */
+  char byteorder_text [15];
 
   const char *text;
 

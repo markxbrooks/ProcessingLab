@@ -26,25 +26,10 @@ documentation and/or software.
 #ifndef _MD5_H_
 #define _MD5_H_
 
+#include "global.h"
+
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-#ifndef PROTOTYPES
-#define PROTOTYPES
-#endif
-
-
-/* PROTO_LIST is defined depending on how PROTOTYPES is defined above.
-          If using PROTOTYPES, then PROTO_LIST returns the list, otherwise it
-          returns an empty list. */
-
-#ifdef PROTOTYPES
-#ifndef PROTO_LIST
-#define PROTO_LIST(list) list
-#else
-#define PROTO_LIST(list) ()
-#endif
 #endif
 
 /* MD5 context. */
@@ -54,11 +39,16 @@ typedef struct {
   unsigned char buffer[64];                         /* input buffer */
 } MD5_CTX;
 
-void MD5Init PROTO_LIST ((MD5_CTX *));
-void MD5Update PROTO_LIST
-  ((MD5_CTX *, unsigned char *, unsigned int));
-void MD5Final PROTO_LIST ((unsigned char [16], MD5_CTX *));
-    
+/* ANSI C prototypes (match md5c.c). Do not use PROTO_LIST here:
+ * CBFlib's global.h historically defaults PROTOTYPES to 0, which made
+ * PROTO_LIST expand to () and triggered -Wstrict-prototypes / C23
+ * -Wdeprecated-non-prototype on call sites such as cbf_codes.c. */
+void MD5Init(MD5_CTX *context);
+/* ``input`` is treated as an opaque byte buffer (``const void *`` so
+ * ``char *`` / ``unsigned char *`` call sites type-check cleanly). */
+void MD5Update(MD5_CTX *context, const void *input, unsigned int inputLen);
+void MD5Final(unsigned char digest[16], MD5_CTX *context);
+
 #ifdef __cplusplus
 }
 #endif

@@ -61,24 +61,28 @@ int ltmpfil, int lfilnam)
 
 void namfil (char* tmpfil, int num, char* filnam)
 {
-	char cnum[15];
-	int  len, fsthsh, lcnum, i, istat;
+	/* "%15d" writes 15 field characters plus a NUL → need 16 bytes. */
+	char cnum[16];
+	char *p_hash;
+	int  len, fsthsh, lcnum, i;
 
-	istat = 0;
 	len = strlen(tmpfil);
 	strcpy (filnam, tmpfil);
 
 	/*
    *  Put integer NUM into string CNUM.
    */
-	sprintf (cnum, "%15d", ABS(num));
+	snprintf (cnum, sizeof cnum, "%15d", ABS(num));
 	lcnum = 14;
 
 	/*
    *  Find first hash in FILNAM, it will hold sign if NUM is negative and
    *  there is room for it.
    */
-	fsthsh = (int) strchr(filnam, '#')- (int) filnam;
+	p_hash = strchr(filnam, '#');
+	if (p_hash == NULL)
+		return;
+	fsthsh = (int)(p_hash - filnam);
 	if (fsthsh > 0)
 	{
 		for (i = len-1; i>=fsthsh; i--)

@@ -238,7 +238,8 @@ int as1, int as2, int *is1, int *is2 )
 				for (i=0; i<n; i++) *mp++=val;
 			}
 			if (filec_debug)
-				printf("Restored %d bytes in MSB\n", mp-msb);
+				printf("Restored %ld bytes in MSB\n",
+				       (long)(mp - msb));
 
 			/*
            * Rebuild array
@@ -276,7 +277,8 @@ int as1, int as2, int *is1, int *is2 )
 			for (i=0; i<n; i++) *mp++=val;
 		}
 		if (filec_debug)
-			printf("Restored %d bytes in MSB\n", mp-msb);
+			printf("Restored %ld bytes in MSB\n",
+			       (long)(mp - msb));
 
 
 		/*
