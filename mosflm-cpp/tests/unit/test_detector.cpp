@@ -44,12 +44,12 @@ int main() {
     CHECK((det.lab_to_detector_mm({0.0, 0.0, 1.0}, x, y)));
     CHECK_CLOSE(x, 10.0, 1e-12);
 
-    // YSCALE stretches MOSFLM YG ↔ C++ x_mm (not C++ y).
+    // YSCALE adjusts YG ↔ C++ x_mm pixel pitch in mm_to_pixel.
     det.beam_x_mm = 0.0;
     det.yscale = 2.0;
-    CHECK((det.lab_to_detector_mm({0.5, 0.0, 0.5}, x, y)));
-    CHECK_CLOSE(x, 200.0, 1e-9);
-    CHECK_CLOSE(y, 0.0, 1e-9);
+    det.mm_to_pixel(10.0, 10.0, xf, yf);
+    CHECK_CLOSE(xf, 200.0, 1e-12);
+    CHECK_CLOSE(yf, 100.0, 1e-12);
 
     // First-order TWIST couples YG into XG (→ C++ y_mm).
     det.yscale = 1.0;

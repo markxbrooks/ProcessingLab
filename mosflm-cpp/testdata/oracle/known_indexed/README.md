@@ -28,11 +28,13 @@ are **not** from `ipmosflm`.
 | `insulin_hkl_overlap` | C++ PREDICT vs `insulin_1_001.mtz` after `mosflm_amat_to_cpp_ub`; ASU/Friedel-aware recall |
 | `insulin_xdet` | Exact-HKL `XDET`/`YDET` residuals via `cpp_mm_to_mosflm_xdet` |
 
-**Baseline (2026-10-17):** ASU-aware HKL recall **100%** (1463 / 1463) with
+**Baseline (2026-10-17 / D0):** ASU-aware HKL recall **100%** (1463 / 1463) with
 `R = [[0,0,1],[0,-1,0],[1,0,0]]`. Exact-index recall ~22% (SG/Friedel choice).
 `XDET`/`YDET`: `XDET↔y_mm`, `YDET↔x_mm` relative to BEAM (94.0, 94.7) mm;
-exact-HKL median residual ~**37 px** (~3 mm), inlier RMS ~38 px (no TILT/TWIST).
-See `../images/known_indexed/geometry.txt`.
+YSCALE as slow-axis pixel aspect; exact-HKL median residual ~**40 px**, inlier
+RMS ~37 px (flat detector; first-order TILT/TWIST not yet better than flat —
+ROTMAT2 ahead). See `../images/known_indexed/geometry.txt`.
 
 **PROCESS splice:** `make MOSFLM_CPP_PREDICT=1 ipmosflm` then capture →
 `../known_indexed_cpp_predict/` (~89% exact-HKL recall vs this oracle MTZ).
+CTest `insulin_process_mtz` gates recall ≥ 0.85.

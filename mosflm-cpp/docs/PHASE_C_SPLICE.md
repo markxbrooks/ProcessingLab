@@ -1,5 +1,9 @@
 # Phase C: splicing C++ PREDICT into the amalgamation
 
+**Status: Done** (D0 closed). Insulin PROCESS with `MOSFLM_CPP_PREDICT=1` reaches
+~89% exact-HKL recall; CTests `insulin_hkl_overlap` / `insulin_xdet` /
+`insulin_process_mtz` gate the differentials.
+
 ## Goal
 
 Route Fortran reflection generation through the C++ predictor (lab-frame AMAT
@@ -61,8 +65,11 @@ Orientation: `UB_cpp = mosflm_lab_to_cpp() * AMAT`. Detector: `XG↔y_mm`,
 
 ## Limits vs full REEK
 
-C++ path is fine-sliced Ewald prediction (no mosaicity / divergence / ice rings).
-Expect PROCESS differences vs Fortran REEK until those are ported.
+C++ path is fine-sliced Ewald prediction with mosaic shell width and systematic
+absences. Still missing: beam divergence, ice rings, full ROTMAT2 detector
+normal (TILT/TWIST fields exist; first-order coupling does not yet beat flat
+on insulin XDET). Expect residual PROCESS differences until those are ported
+(Phase D).
 
 ## Verification
 

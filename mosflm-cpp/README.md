@@ -3,11 +3,12 @@
 C++ computational core for **ProcessingLab** (MOSFLM port). See
 [`../porting.md`](../porting.md) for strategy and legacy build notes.
 
-**Status (Phase B advanced / Phase C in progress):** geometry + Gemmi crystal +
-miniCBF I/O + DPS Bravais façade + stills/oscillation `PREDICT` + box summation
-+ **2D Gaussian profile fit** + LP correction + C ABI (`MosflmCApi.h`) + MTZ
-write + amalgamation `MOSFLM_CPP_PREDICT` hook. Post-refinement and known-indexed
-oracle captures remain ahead (`tools/capture_ipmosflm_oracle.sh`).
+**Status (Phase C Done):** geometry + Gemmi crystal + miniCBF I/O + DPS Bravais
+façade + stills/oscillation `PREDICT` (mosaicity / absences) + box summation +
+**2D Gaussian profile fit** + LP correction + C ABI (`MosflmCApi.h`) + MTZ write
++ amalgamation `MOSFLM_CPP_PREDICT` hook. Known-indexed CTests:
+`insulin_hkl_overlap`, `insulin_xdet`, `insulin_process_mtz`. Next: Phase D
+(`../portingD.md`).
 
 Phase A–D table and vertical-slice checklist: [`../porting.md`](../porting.md)
 (section *Current status* and §3 / §5).

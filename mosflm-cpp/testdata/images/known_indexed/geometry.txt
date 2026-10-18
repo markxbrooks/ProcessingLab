@@ -40,9 +40,8 @@
 #
 # Detector pixels (mosflm::cpp_mm_to_mosflm_xdet): GENDATA XG∥lab Y, YG∥lab Z;
 # after R, insulin match is XDET = BEAM_x/px + y_mm/px, YDET = BEAM_y/px + x_mm/px
-# (BEAM 94.0, 94.7 mm). CTest insulin_xdet: exact-HKL median ~37 px (~3 mm);
-# inliers lack TILT/TWIST/YSCALE. Hook GENDATA still 1:1 until PHASE_C_SPLICE
-# adopts this swap.
+# (BEAM 94.0, 94.7 mm). CTest insulin_xdet: exact-HKL median ~40 px with YSCALE
+# pixel aspect; TILT/TWIST fields wired (ROTMAT2 still Phase D).
 # PROCESS splice verified: make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
-# → testdata/oracle/known_indexed_cpp_predict/ (~89% exact-HKL vs Fortran MTZ).
-# See mosflm-cpp/docs/PHASE_C_SPLICE.md.
+# → testdata/oracle/known_indexed_cpp_predict/ (~89% exact-HKL vs Fortran MTZ);
+# CTest insulin_process_mtz. See mosflm-cpp/docs/PHASE_C_SPLICE.md. Phase C Done.
