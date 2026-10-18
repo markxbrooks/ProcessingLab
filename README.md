@@ -3,7 +3,7 @@
 Progressive C++ port of the MOSFLM diffraction-processing core.
 
 **Phase D Done:** default build/install is the C++ core. The release binary is
-**`IntegrationLab`** (`IntegrationLab.exe` on Windows) — a thin CONTROL →
+**`ProcessingLab`** (`ProcessingLab.exe` on Windows) — a thin CONTROL →
 PROCESS driver that does **not** link the Fortran amalgamation. Autotools
 `mosflm/` remains an optional scientific oracle named **`ipmosflm`** (F77).
 
@@ -12,7 +12,7 @@ PROCESS driver that does **not** link the Fortran amalgamation. Autotools
 | [`mosflm-cpp/`](mosflm-cpp/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
 | [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle** → `bin/ipmosflm`) |
 | [`porting.md`](porting.md) | Migration roadmap and current status |
-| `bin/IntegrationLab` | C++ CONTROL binary (default; `.exe` on Windows) |
+| `bin/ProcessingLab` | C++ CONTROL binary (default; `.exe` on Windows) |
 | `bin/mosflm_cpp_cli` | Full C++ CLI |
 | `bin/ipmosflm` | F77 oracle only (`make fortran-oracle`) |
 
@@ -21,9 +21,9 @@ PROCESS driver that does **not** link the Fortran amalgamation. Autotools
 ```bash
 make cpp          # builds cbf/lib/libcbf.a then mosflm-cpp
 make test         # ctest in mosflm-cpp/build
-./bin/IntegrationLab version
+./bin/ProcessingLab version
 ./bin/mosflm_cpp_cli process-insulin
-./bin/IntegrationLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
+./bin/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   mosflm-cpp/testdata/images/known_indexed/cpp_process.in
 # C++ vs F77 PROCESS wall-time (CCP4 ipmosflm by default):
 ./mosflm-cpp/tools/bench_ipmosflm_perf.sh
@@ -39,7 +39,7 @@ Top-level CMake (`-S .`) adds `mosflm-cpp` when `PROCESSINGLAB_BUILD_CPP=ON`
 Requires CCP4. See [`porting.md`](porting.md) for macOS notes.
 
 ```bash
-make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite IntegrationLab)
+make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite ProcessingLab)
 # or:
 #   ./configure --with-ccp4-prefix=/Applications/ccp4-9
 #   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm
@@ -47,6 +47,20 @@ make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite IntegrationLab
 #   cmake -S mosflm-cpp -B mosflm-cpp/build -DMOSFLM_FORTRAN_ORACLE=ON
 #   cmake --build mosflm-cpp/build --target mosflm_predict_hook
 #   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm
+```
+
+# Usage
+
+```commandline
+./bin/ProcessingLab HKLOUT /tmp/thaumatin_9_1_master.mtz \
+  --image ~/Downloads/thaumatin_9_1_master.h5 <<'EOF'
+PROCESS 1 TO 1
+AUTOINDEX
+GO
+PROCESS 1 TO 1
+GO
+EXIT
+EOF
 ```
 
 ## License

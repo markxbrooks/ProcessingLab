@@ -28,12 +28,20 @@ Eigen::Matrix3d rotation_x_deg(double phi_deg) {
     return R;
 }
 
-bool on_detector(const DetectorGeometry& det, double x_mm, double y_mm) {
+bool on_detector(
+    const DetectorGeometry& det,
+    double x_mm,
+    double y_mm,
+    double margin_px
+) {
     double xf = 0.0;
     double yf = 0.0;
     det.mm_to_pixel(x_mm, y_mm, xf, yf);
-    return std::fabs(xf) < 0.5 * static_cast<double>(det.nfast) &&
-           std::fabs(yf) < 0.5 * static_cast<double>(det.nslow);
+    const double half_f =
+        0.5 * static_cast<double>(det.nfast) - margin_px;
+    const double half_s =
+        0.5 * static_cast<double>(det.nslow) - margin_px;
+    return std::fabs(xf) < half_f && std::fabs(yf) < half_s;
 }
 
 /// MOSFLM DPSCHOOSE / REEK ice-ring resolution bands (Å), high→low inclusive.
@@ -65,7 +73,8 @@ EvalPhi evaluate_phi(
     const Eigen::Vector3d& s0,
     double inv_lambda,
     double ewald_tol,
-    const DetectorGeometry& det
+    const DetectorGeometry& det,
+    double margin_px
 ) {
     EvalPhi out;
     const Eigen::Vector3d q = rotation_x_deg(phi_deg) * q0;
@@ -76,7 +85,7 @@ EvalPhi evaluate_phi(
     if (!det.lab_to_detector_mm(s1, out.x_mm, out.y_mm)) {
         return out;
     }
-    if (!on_detector(det, out.x_mm, out.y_mm)) {
+    if (!on_detector(det, out.x_mm, out.y_mm, margin_px)) {
         return out;
     }
     out.ok = true;
@@ -151,10 +160,13 @@ PredictionResult ReflectionPredictor::predict(
     const double div_rad =
         std::max(request.settings.divh_deg, request.settings.divv_deg) *
         kDeg2Rad;
-    const double angle_tol = (mosaic_rad + div_rad) * inv_lambda;
-    const double ewald_tol = std::max(
-        request.settings.ewald_tolerance_Ainv, angle_tol
-    );
+    const double angle_tol =
+        (mosaic_rad + div_rad) * inv_lambda *
+        std::max(0.0, request.settings.mosaic_ewald_scale);
+    const double ewald_tol =
+        request.settings.widen_ewald_with_mosaic
+            ? std::max(request.settings.ewald_tolerance_Ainv, angle_tol)
+            : request.settings.ewald_tolerance_Ainv;
 
     gemmi::GroupOps gops;
     const bool filter_abs =
@@ -202,11 +214,26 @@ PredictionResult ReflectionPredictor::predict(
                 if (d_A < request.settings.dmin_A) {
                     continue;
                 }
+                if (d_A > request.settings.dmax_A) {
+                    continue;
+                }
                 if (request.settings.exclude_ice_rings &&
                     in_ice_ring_shell(d_A)) {
                     continue;
                 }
                 const Eigen::Vector3d q0 = UB * Eigen::Vector3d(h, k, l);
+                if (request.settings.exclude_cusp) {
+                    const double qn = q0.norm();
+                    if (qn > 1e-12 &&
+                        std::fabs(q0.x()) / qn <
+                            request.settings.cusp_fraction) {
+                        continue;
+                    }
+                }
+                const double margin_px =
+                    request.settings.apply_reek_detector_margin
+                        ? request.settings.detector_margin_px
+                        : 0.0;
 
                 double phi_first = 0.0;
                 double phi_last = 0.0;
@@ -223,7 +250,8 @@ PredictionResult ReflectionPredictor::predict(
                         s0,
                         inv_lambda,
                         ewald_tol,
-                        request.detector
+                        request.detector,
+                        margin_px
                     );
                     if (!ev.ok) {
                         continue;
@@ -248,6 +276,11 @@ PredictionResult ReflectionPredictor::predict(
                     ++n_on;
                 }
                 if (n_on == 0) {
+                    continue;
+                }
+                const double phi_width = phi_last - phi_first;
+                if (request.settings.max_phi_width_deg > 0.0 &&
+                    phi_width > request.settings.max_phi_width_deg) {
                     continue;
                 }
 

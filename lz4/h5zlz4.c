@@ -22,8 +22,13 @@
 #include <winsock2.h>
 #endif
 
+/* macOS / BSD already define these in <sys/_endian.h> via <arpa/inet.h>. */
+#ifndef htonll
 #define htonll(x) ( ( (uint64_t)(htonl( (uint32_t)((x << 32) >> 32)))<< 32) | htonl( ((uint32_t)(x >> 32)) ))
+#endif
+#ifndef ntohll
 #define ntohll(x) htonll(x)
+#endif
 
 #define htobe16t(x) htons(x)
 #define htobe32t(x) htonl(x)

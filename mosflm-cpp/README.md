@@ -6,7 +6,7 @@ C++ computational core for **ProcessingLab** (MOSFLM port). See
 **Status (Phase D Done / D6):** geometry + Gemmi crystal + miniCBF + **SMV** I/O
 + DPS Bravais façade + stills/oscillation `PREDICT` + **MEAS** boxes +
 **Rossmann standard-profile** + Stage 2 **`PostRefiner`** + CONTROL
-**`ControlSession`** + **`IntegrationLab`** (default release binary; no
+**`ControlSession`** + **`ProcessingLab`** (default release binary; no
 amalgamation; `.exe` on Windows) + LP + C ABI + MTZ + pure-C++ `ProcessPipeline`.
 F77 oracle remains `ipmosflm` (`make fortran-oracle`). Oracle splice library
 `mosflm_predict_hook` only with `-DMOSFLM_FORTRAN_ORACLE=ON`. CTests include
@@ -25,14 +25,18 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 #   cmake -S . -B build -DMOSFLM_FORTRAN_ORACLE=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
-# Install IntegrationLab + mosflm_cpp_cli:
+# Install ProcessingLab + mosflm_cpp_cli:
 #   cmake --install build --prefix /path/to/prefix
 ```
 
 Requires CMake ≥ 3.24, a C++20 compiler, ZLIB, vendored `../cbf/lib/libcbf.a`
 (`make -C ../cbf` or top-level `make cpp`), and network access on first
 configure (FetchContent: Eigen, Gemmi). DPS Bravais tests need
-`../lib/dps_index.a` and `../lib/libdps.a`.
+`../lib/dps_index.a` and `../lib/libdps.a`. Optional **HDF5** (Homebrew /
+CCP4) enables `Hdf5ImageReader` for Dectris Eiger NeXus masters
+(`*_master.h5` / `.nxs`) via vendored bitshuffle+LZ4 filters; keep
+`data_*.h5` beside the master. Soft-skip fixture test without
+`MOSFLM_HDF5_FIXTURE`.
 
 ## CLI
 
@@ -50,8 +54,8 @@ configure (FetchContent: Eigen, Gemmi). DPS Bravais tests need
 # Keyword-driven PROCESS (D5):
 ./build/mosflm_cpp_cli run testdata/images/known_indexed/cpp_process.in \
   --image /path/to/insulin_1_001.img /tmp/control.mtz
-# Default release binary (D6/E; IntegrationLab.exe on Windows):
-./build/IntegrationLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
+# Default release binary (D6/E; ProcessingLab.exe on Windows):
+./build/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   testdata/images/known_indexed/cpp_process.in
 # Wall-time vs F77 ipmosflm (CCP4 default /apps/ccp4/ccp4-9/bin/ipmosflm):
 ./tools/bench_ipmosflm_perf.sh
@@ -64,7 +68,7 @@ configure (FetchContent: Eigen, Gemmi). DPS Bravais tests need
 | ---- | ---- |
 | `include/mosflm/geometry` | UnitCell, ReciprocalLattice, Orientation, Detector, Dstar, Rotmat, Clcalc, Matset |
 | `include/mosflm/crystal` | Gemmi CrystalMetadata / SpaceGroup / MtzAdapter |
-| `include/mosflm/image` | `CbfImageReader`, `SmvImageReader` (ADSC insulin) |
+| `include/mosflm/image` | `CbfImageReader`, `SmvImageReader`, `Hdf5ImageReader` (Eiger `*_master.h5` / `.nxs`) |
 | `include/mosflm/diffraction` | Predict / integrate / `ProcessPipeline`; see `docs/DOMAIN_API.md` |
 | `include/mosflm/refinement` | Stage 2 `PostRefiner` (POSTREFL-class φ LS) |
 | `include/mosflm/control` | CONTROL keyword subset → `ProcessPipeline` |

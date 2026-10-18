@@ -48,9 +48,13 @@ struct ProcessResult {
     std::vector<IntegratedReflection> integrated;
     std::vector<MeasObservation> meas_observations;
     std::vector<ProfileObservation> profile_observations;
+    /// Simple H/K/L/I/SIGI view (always filled from ``mosflm_reflections``).
     std::vector<crystal::SimpleReflection> mtz_reflections;
+    /// Full MOSFLM PROCESS rows (FLAG / XDET / FRACTIONCALC / …).
+    std::vector<crystal::MosflmReflection> mosflm_reflections;
     std::size_t n_overlapped{0};
     std::size_t n_profile_ok{0};
+    std::size_t n_omitted{0};  ///< IGFLAG 0 / −64 / −128 style skips
     refinement::PostRefinementResult postrefinement{};
 };
 
@@ -59,7 +63,7 @@ class ProcessPipeline {
 public:
     [[nodiscard]] ProcessResult run(const ProcessRequest& request) const;
 
-    /// Write ``result.mtz_reflections`` via :class:`MtzAdapter`.
+    /// Write ``result.mosflm_reflections`` (18-col MOSFLM) via :class:`MtzAdapter`.
     static void write_mtz(
         const std::filesystem::path& path,
         const crystal::CrystalMetadata& crystal,

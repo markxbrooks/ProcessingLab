@@ -50,12 +50,20 @@ struct ControlState {
     double pixel_y_mm{0.0816};
     double mosaic_deg{0.30};
     /// Beam divergence full-angles (degrees); MOSFLM ``DIVERGENCE`` / DIVH,DIVV.
-    double divh_deg{0.02};
-    double divv_deg{0.02};
+    /// Default 0 unless ``DIVERGENCE`` is set (matches known-indexed insulin).
+    double divh_deg{0.0};
+    double divv_deg{0.0};
     double separation_x_mm{0.57};
     double separation_y_mm{0.57};
     double dmin_A{1.45};
     double dmax_A{200.0};
+    /// Predictor φ sample step (degrees); 0.025 matches known_indexed_insulin.
+    double phi_step_deg{0.025};
+    /// Oracle-refined detector fiducials (insulin PROCESS / geometry.txt).
+    double yscale{0.9921};
+    double tilt_mrad{-83.0};
+    double twist_mrad{-140.0};
+    bool use_rotmat2{true};
 
     UnitCell cell{78.19, 78.19, 78.19, 90.0, 90.0, 90.0};
     int symmetry_number{1};

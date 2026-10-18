@@ -64,4 +64,18 @@ public:
     [[nodiscard]] DiffractionImage read(const std::filesystem::path& path) const;
 };
 
+/// Dectris Eiger NeXus / ``*_master.h5`` and DLS-style ``.nxs`` reader.
+///
+/// Requires HDF5 at build time (``MOSFLM_HAS_HDF5``). Registers vendored
+/// bitshuffle + LZ4 filters. ``frame`` is 1-based (MOSFLM PROCESS convention).
+class Hdf5ImageReader {
+public:
+    [[nodiscard]] DiffractionImage read(
+        const std::filesystem::path& path,
+        int frame = 1
+    ) const;
+
+    [[nodiscard]] int num_images(const std::filesystem::path& path) const;
+};
+
 }  // namespace mosflm::image

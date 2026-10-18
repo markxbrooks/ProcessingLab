@@ -1,6 +1,6 @@
-# Phase E: CCP4 drop-in for C++ IntegrationLab
+# Phase E: CCP4 drop-in for C++ ProcessingLab
 
-Progressive drop-in of thin `bin/IntegrationLab` toward Mosflm 7.4.0
+Progressive drop-in of thin `bin/ProcessingLab` toward Mosflm 7.4.0
 CONTROL/science. Fortran amalgamation remains `make fortran-oracle` →
 `bin/ipmosflm` (not the default `make`).
 
@@ -11,16 +11,17 @@ CONTROL/science. Fortran amalgamation remains `make fortran-oracle` →
 | E2 | NMASKS / POSTREFINE / NADD CONTROL + `PostRefiner::refine_joint` | **Done** (joint IDXREF model still thin) |
 | E3 | STRATEGY CONTROL (completeness estimate scaffold) | **Done** (oracle dump TBD) |
 | E4 | MULTILATTICE store + REFIX explicit error | **Done** |
-| E5 | ImageIO by extension (SMV/CBF; HDF5 message) | **Done** |
+| E5 | ImageIO by extension (SMV/CBF; HDF5 decode for Eiger/DLS masters) | **Done** |
 | E6 | iMosflm socket façade (`ImosflmSocketServer`) | **Done** (protocol TBD) |
 | E7 | Packaging / Makefile clarity + oracle rpath helper | **Done** |
+| E8 | PROCESS parity vs F77 (REEK-ish predict, 18-col MTZ, ASU/`M/ISYM`, `FLAG`) | **Done** (soft count gate; tighten toward 1603 rows) |
 
 ## Build
 
 ```bash
-# Thin C++ (default) → IntegrationLab (.exe on Windows)
+# Thin C++ (default) → ProcessingLab (.exe on Windows)
 make cpp
-./bin/IntegrationLab </dev/null   # banner + NO "RUN" CARD GIVEN
+./bin/ProcessingLab </dev/null   # banner + NO "RUN" CARD GIVEN
 
 # Fortran oracle (does NOT use MOSFLM_FORTRAN_ORACLE=1 alone at repo root)
 make dps-lib fortran-oracle       # → bin/ipmosflm
@@ -32,12 +33,31 @@ export DYLD_LIBRARY_PATH=/Applications/ccp4-9/lib
 
 `integrationlab`, `control_session`, `control_autoindex` (if DPS), `image_io`,
 `imosflm_socket`, `cbf_process_compare` (F77 vs C++ CBF PROCESS; soft-skip),
-plus existing insulin PROCESS suite.
+`smv_process_compare` (F77 vs ProcessingLab insulin PROCESS — cell/SG, ASU +
+exact HKL recall, soft count/I-ratio; release gate for E8),
+`smv_dials_compare` (DIALS vs ProcessingLab on the same SMV — cell/SG, XDET
+proximity, soft count/I-ratio; soft-skip without DIALS), `image_io` (SMV +
+optional `MOSFLM_HDF5_FIXTURE` for Eiger masters), plus existing insulin
+PROCESS suite (`insulin_cpp_process`, `insulin_control`, `insulin_isi`,
+`insulin_xdet`, `insulin_profile`).
+
+### HDF5 / NeXus masters
+
+With HDF5 at configure time, ProcessingLab can load Dectris Eiger
+`*_master.h5` (and DLS-style `.nxs`) via `Hdf5ImageReader`. CONTROL
+`PROCESS` first-image selects the 1-based frame. External `data_*.h5`
+chunks must sit next to the master. Example (script still required for
+`GO`):
+
+```bash
+./bin/ProcessingLab HKLOUT /tmp/out.mtz \
+  --image /path/to/thaumatin_9_1_master.h5 your_process.in
+```
 
 ## DiffractionLab
 
-Sibling app [`DiffractionLab`](../DiffractionLab) can drive `IntegrationLab` via
+Sibling app [`DiffractionLab`](../DiffractionLab) can drive `ProcessingLab` via
 CONTROL scripts (`diffraction_lab/processinglab_client.py`). After AUTOINDEX,
-`IntegrationLab` prints `INTEGRATIONLAB_CELL` / `INTEGRATIONLAB_MATRIX` (and
+`ProcessingLab` prints `INTEGRATIONLAB_CELL` / `INTEGRATIONLAB_MATRIX` (and
 writes `integrationlab_index.txt`). Set `DIFFRACTIONLAB_BACKEND=processinglab`
 or `DIFFRACTIONLAB_PREFER_PROCESSINGLAB=1`.
