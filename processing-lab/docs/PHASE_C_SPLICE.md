@@ -41,8 +41,8 @@ writes `/GENDATA/` + `/IOSP/`.
 ## Enabling
 
 ```bash
-cmake -S diffraction-lab -B diffraction-lab/build -DMOSFLM_WITH_FORTRAN=ON
-cmake --build diffraction-lab/build --target mosflm_predict_hook
+cmake -S processing-lab -B processing-lab/build -DMOSFLM_WITH_FORTRAN=ON
+cmake --build processing-lab/build --target mosflm_predict_hook
 cd mosflm
 rm -f mosflm_all_ip_inc_noX.o
 make MOSFLM_CPP_PREDICT=1 ipmosflm
@@ -73,7 +73,7 @@ fiducials; further closure needs POSTREFL orientation.
 ## Verification
 
 ```bash
-ctest --test-dir diffraction-lab/build -R 'predict_cpp_from_common|predict_gendata|insulin_'
+ctest --test-dir processing-lab/build -R 'predict_cpp_from_common|predict_gendata|insulin_'
 # Insulin PROCESS with CPP PREDICT:
-#   IPMOSFLM=bin/ipmosflm diffraction-lab/tools/capture_ipmosflm_oracle.sh
+#   IPMOSFLM=bin/ipmosflm processing-lab/tools/capture_ipmosflm_oracle.sh
 ```

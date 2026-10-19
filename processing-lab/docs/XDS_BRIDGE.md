@@ -25,7 +25,7 @@ Follow the [XDSwiki Installation](https://wiki.uni-konstanz.de/xds/index.php/Ins
 
 - Do **not** vendor XDS binaries into this repository.
 - Do **not** add Neggia/Durin as link-time dependencies of `bin/ProcessingLab`,
-  `bin/ipmosflm` (oracle), or `diffraction-lab`.
+  `bin/ipmosflm` (oracle), or `processing-lab`.
 - Do **not** treat `2cbf` as a runtime requirement for every image open.
 
 ## Importing Xia2 `.xinfo` / `XDS.INP`

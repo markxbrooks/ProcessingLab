@@ -73,7 +73,7 @@ def main():
         )
         return 2
 
-    # Orthorhombic cell used across diffraction-lab geometry tests.
+    # Orthorhombic cell used across processing-lab geometry tests.
     params = (58.0, 72.0, 90.0, 90.0, 90.0, 90.0)
     uc = uctbx.unit_cell(params)
     m_vol = mosflm_volume(*params)

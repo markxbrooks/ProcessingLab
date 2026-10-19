@@ -7,7 +7,7 @@ back into thaumatin_process.in when --write is set.
 
 Usage (from ProcessingLab root)::
 
-  python3 diffraction-lab/tools/tune_thaumatin_matrix.py --write
+  python3 processing-lab/tools/tune_thaumatin_matrix.py --write
 """
 from __future__ import annotations
 

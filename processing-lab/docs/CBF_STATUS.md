@@ -58,7 +58,7 @@ Symlink / copy under [`testdata/cbf/`](../testdata/cbf/README.md). Preferred sam
 
 ### `mosflm::image::CbfImageReader` (Oct 2026)
 
-C++ reader in `diffraction-lab` links vendored `cbf/lib/libcbf.a`:
+C++ reader in `processing-lab` links vendored `cbf/lib/libcbf.a`:
 
 - Decodes pixels via `cbf_get_image` (CTest `cbf_image_reader`: 1475×1679, non-empty).
 - Fills `ImageMetadata` from CIF when present; for miniCBF gaps, parses `#` comment

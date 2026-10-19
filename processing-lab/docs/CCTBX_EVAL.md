@@ -24,7 +24,7 @@ on vendored CBFlib.
 `mosflm_geometry`.
 
 ```bash
-# From diffraction-lab/
+# From processing-lab/
 /Applications/phenix-1.20.1-4487/build/bin/cctbx.python tools/cctbx_cell_poc.py
 ```
 
@@ -62,7 +62,7 @@ Not used (and not needed for Bravais validation): `dxtbx`, `rstbx`, full
 | Default domain layer (`UnitCell`, MTZ, space groups) | **Keep Gemmi** | Already in-tree; CTest `gemmi_crystal` green; zero CCTBX link cost |
 | DPS Bravais algorithm | **Keep port / façade** (`mosflm::indexing::BravaisClassifier`) | Proven MOSFLM path; critique: wrap, do not rewrite yet |
 | CCTBX as Bravais / CoB validator | **Adopt (optional)** | Independent metric check when Phenix/`cctbx.python` available |
-| CCTBX as hard dependency of `diffraction-lab` | **Defer / reject for day one** | `libtbx` bootstrap cost; no dxtbx locally; Gemmi covers infra |
+| CCTBX as hard dependency of `processing-lab` | **Defer / reject for day one** | `libtbx` bootstrap cost; no dxtbx locally; Gemmi covers infra |
 | dxtbx image models | **Out of scope** | Missing from local `cctbx_project`; CBF → CBFlib |
 
 ## CMake hook
