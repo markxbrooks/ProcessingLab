@@ -255,28 +255,27 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
         PUBLIC
             mosflm_geometry
         PRIVATE
-            ${MOSFLM_DPS_INDEX_LIB}
-            ${MOSFLM_DPS_UTIL_LIB}
             m
     )
+    # findlen.f is required by ind_gen_direct but not in libdps_index.a.
+    set(MOSFLM_FINDLEN_F "${MOSFLM_IPMOSFLM_ROOT}/src/dps/index/findlen.f")
+    # Order matters for single-pass ld; RESCAN is applied on consumers below.
+    set(MOSFLM_DPS_LINK_LIBS
+        ${MOSFLM_DPS_INDEX_LIB}
+        ${MOSFLM_DPS_UTIL_LIB}
+    )
     if(MOSFLM_HAS_DPS_INDEXER)
-        target_link_libraries(mosflm_indexing PRIVATE
-            ${MOSFLM_DPS_INDEXER_LIB}
-        )
+        list(APPEND MOSFLM_DPS_LINK_LIBS ${MOSFLM_DPS_INDEXER_LIB})
         if(EXISTS "${MOSFLM_DPS_FFTPACK_LIB}")
-            target_link_libraries(mosflm_indexing PRIVATE
-                ${MOSFLM_DPS_FFTPACK_LIB}
-            )
+            list(APPEND MOSFLM_DPS_LINK_LIBS ${MOSFLM_DPS_FFTPACK_LIB})
         endif()
-        # findlen.f is required by ind_gen_direct but not in libdps_index.a.
-        set(MOSFLM_FINDLEN_F "${MOSFLM_IPMOSFLM_ROOT}/src/dps/index/findlen.f")
         if(MOSFLM_HAS_FORTRAN AND EXISTS "${MOSFLM_FINDLEN_F}")
             target_sources(mosflm_indexing PRIVATE ${MOSFLM_FINDLEN_F})
             set_source_files_properties(${MOSFLM_FINDLEN_F}
                 PROPERTIES Fortran_FORMAT FIXED
             )
             if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
-                target_link_libraries(mosflm_indexing PRIVATE gfortran)
+                list(APPEND MOSFLM_DPS_LINK_LIBS gfortran)
             endif()
         else()
             message(WARNING
@@ -284,6 +283,9 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
                 "insulin_autoindex may fail to link")
         endif()
     endif()
+    # Propagate DPS archives to executables (PUBLIC) so they appear on the
+    # final link line; consumers wrap them in LINK_GROUP:RESCAN.
+    target_link_libraries(mosflm_indexing PUBLIC ${MOSFLM_DPS_LINK_LIBS})
 endif()
 
 add_executable(mosflm_cpp_cli
@@ -305,7 +307,11 @@ target_link_libraries(ProcessingLab
         mosflm_geometry
 )
 if(TARGET mosflm_indexing AND MOSFLM_HAS_DPS_INDEXER)
-    target_link_libraries(ProcessingLab PRIVATE mosflm_indexing)
+    # RESCAN: libdps_index needs dps_malloc/num_ok_hkl from libdps (later on
+    # the line) and findlen_ from mosflm_indexing.a (earlier on the line).
+    target_link_libraries(ProcessingLab PRIVATE
+        "$<LINK_GROUP:RESCAN,mosflm_indexing,${MOSFLM_DPS_LINK_LIBS}>"
+    )
     target_compile_definitions(ProcessingLab PRIVATE MOSFLM_HAS_INDEXING=1)
 endif()
 set_target_properties(ProcessingLab PROPERTIES

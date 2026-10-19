@@ -26,8 +26,8 @@ endif
 PROCESSINGLAB = ProcessingLab$(EXEEXT)
 bin_PROGRAMS = $(PROCESSINGLAB)
 
-.PHONY: all cpp cbf-lib dps-lib fortran-oracle libs force install uninstall \
-	clean distclean realclean test
+.PHONY: all cpp cpp-core cbf-lib dps-lib fortran-oracle libs force install \
+	uninstall clean distclean realclean test
 
 all: cpp
 
@@ -39,13 +39,21 @@ cbf-lib:
 	fi
 
 # DPS archives for BravaisClassifier / AutoIndexer.
+# Needs gfortran (invert.f, fftpack/*.f, index/error_exit.f).
 dps-lib:
+	@if ! command -v gfortran >/dev/null 2>&1; then \
+		echo "error: gfortran not found (required for DPS util/fftpack)."; \
+		echo "  Ubuntu/Debian:  sudo apt install gfortran"; \
+		echo "  Fedora/RHEL:    sudo dnf install gcc-gfortran"; \
+		echo "  Or skip indexing and build C++ only:  make cpp-core"; \
+		exit 1; \
+	fi
 	cd index && ${MAKE}
 	cd src/dps/util && ${MAKE}
 	cd src/dps/index && ${MAKE}
 
-# Default release artifact: processing-lab CLI + ProcessingLab (C++ CONTROL).
-cpp: cbf-lib dps-lib
+# C++ CONTROL binary without DPS archives (no Bravais / AutoIndex tests).
+cpp-core: cbf-lib
 	cmake -S processing-lab -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
 		-DMOSFLM_FORTRAN_ORACLE=OFF
 	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli ProcessingLab
@@ -53,6 +61,17 @@ cpp: cbf-lib dps-lib
 	cp -f $(CPP_BUILD)/$(PROCESSINGLAB) bin/$(PROCESSINGLAB)
 	cp -f $(CPP_BUILD)/mosflm_cpp_cli$(EXEEXT) bin/mosflm_cpp_cli$(EXEEXT)
 	@echo "Installed thin binaries under bin/ (ProcessingLab; no amalgamation)."
+
+# Default release: C++ + DPS when gfortran is available.
+cpp: cbf-lib
+	@if command -v gfortran >/dev/null 2>&1; then \
+		$(MAKE) dps-lib; \
+	else \
+		echo "warning: gfortran not found — skipping dps-lib (no Bravais/AutoIndex)."; \
+		echo "  Install with:  sudo apt install gfortran"; \
+		echo "  Then re-run:   make dps-lib"; \
+	fi
+	$(MAKE) cpp-core
 
 test: cpp
 	ctest --test-dir $(CPP_BUILD) --output-on-failure
