@@ -27,6 +27,11 @@ struct AutoIndexControlSettings {
     int prefer_character{0};
     std::string prefer_system;
     int image_number{1};
+    /// XDS IDXREF knobs (Δ-vector path).
+    float sepmin{6.0f};
+    float cluster_radius{2.0f};
+    bool use_diff_vector{true};
+    float min_indexed_frac{0.70f};
 };
 
 /// FINDSPOTS settings (DiffractionLab-style peak finder → ``.spt``).

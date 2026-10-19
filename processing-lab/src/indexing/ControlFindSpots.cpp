@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -176,6 +177,14 @@ void run_findspots(
     if (state.autoindex.spot_file.empty()) {
         state.autoindex.spot_file = out;
     }
+
+    // COLSPOT.LP-style summary (XDS COLSPOT diagnostics).
+    const int n_images = (last >= first) ? (last - first + 1) : 1;
+    std::cout << "  COLSPOT: images=" << n_images << " (" << first << "-"
+              << last << ") spots=" << spots.spots.size()
+              << " maxspots=" << state.findspots.max_spots
+              << " thr=" << state.findspots.threshold_sigma << " → " << out
+              << '\n';
 }
 
 }  // namespace

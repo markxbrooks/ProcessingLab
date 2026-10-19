@@ -39,6 +39,10 @@ void run_autoindex(control::ControlState& state) {
     settings.nvref = state.autoindex.nvref;
     settings.prefer_character = state.autoindex.prefer_character;
     settings.prefer_system = state.autoindex.prefer_system;
+    settings.sepmin = state.autoindex.sepmin;
+    settings.cluster_radius = state.autoindex.cluster_radius;
+    settings.use_diff_vector = state.autoindex.use_diff_vector;
+    settings.min_indexed_frac = state.autoindex.min_indexed_frac;
 
     const AutoIndexResult result = AutoIndexer{}.index(spots, geo, settings);
     if (!result.ok || result.ierr != 0) {

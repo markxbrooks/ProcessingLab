@@ -53,11 +53,17 @@ struct AutoIndexSettings {
     /// Max Bravais penalty for SUGGLATT-style highest-symmetry pick
     /// (DiffractionLab ``max_penalty_to_refine`` / Mosflm soft cut).
     float max_penalty{50.0f};
-    /// BESTSOLAR-lite: require at least this fraction of DPS spots to index
-    /// (``|Δh|,|Δk|,|Δl| ≤ hkldev``). Fail → try next LASTGOOD candidate.
-    float min_indexed_frac{0.45f};
+    /// BESTSOLAR-lite / XDS IDXREF: require at least this fraction of spots
+    /// to index (``|Δh|,|Δk|,|Δl| ≤ hkldev``). Default 0.70 matches XDS.
+    float min_indexed_frac{0.70f};
     /// Max RMS fractional HKL residual for indexed spots.
     float max_rmsd_hkl{0.25f};
+    /// Kabsch Δ-vector lattice search (XDS IDXREF) as a second candidate.
+    bool use_diff_vector{true};
+    /// XDS ``SEPMIN=`` (units of ``0.001/WAVE``).
+    float sepmin{6.0f};
+    /// XDS ``CLUSTER_RADIUS=`` (same units as SEPMIN).
+    float cluster_radius{2.0f};
 };
 
 /// Spot-vs-AMAT indexing quality (BESTSOLAR-lite).
@@ -82,6 +88,8 @@ struct AutoIndexResult {
     int selected_symmetry_number{1};
     std::size_t n_spots_used{0};
     IndexFitStats fit{};
+    /// ``"dps"`` or ``"delta"`` — which lattice path won INDEXFIT ranking.
+    std::string index_method{"dps"};
 };
 
 /// Stage 1 AUTOINDEX façade: MOSFLM ``.spt`` → DPS ``index_fortran_`` → AMAT.

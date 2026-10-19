@@ -374,8 +374,8 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         }
 
         double sumprod = 0.0;
-        double spkod = 0.0;
-        double spkodsq = 0.0;
+        double bg_under = 0.0;
+        int n_peak = 0;
         for (int dr = -peak_half; dr <= peak_half; ++dr) {
             for (int dc = -peak_half; dc <= peak_half; ++dc) {
                 const int c = c0 + dc;
@@ -385,8 +385,10 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
                     (dr + peak_half) * side + (dc + peak_half)
                 )];
                 sumprod += P * od;
-                spkod += od;
-                spkodsq += od * od;
+                // Background plane under the peak (for Poisson σ model).
+                bg_under += bg.a * static_cast<double>(dc) +
+                            bg.b * static_cast<double>(dr) + bg.c;
+                ++n_peak;
             }
         }
 
@@ -394,10 +396,25 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             sumprod - pr.pr1 * bg.a - pr.pr2 * bg.b - pr.pr3 * bg.c;
         const double iprf = numer * pr.pr3 / pr.pr4;
         obs.profile_intensity = iprf;
-        const double xj = (pr.pr3 > 0.0) ? (iprf / pr.pr3) : 0.0;
-        double var = xj * xj * pr.pr4 + std::fabs(spkodsq);
+        // Counting-stats stand-in (same shape as MeasurementBox summation):
+        // σ² ≈ |I| + (n_peak² / n_bg) · |⟨bg⟩|.  Do NOT use Σ od² — that
+        // dwarfs I for Pilatus ADUs and caps I/σ near ~1–2.
+        const double bg_mean =
+            (n_peak > 0) ? (bg_under / static_cast<double>(n_peak)) : 0.0;
+        const int n_bg = std::max(1, obs.npix_bg);
+        double var = std::fabs(iprf);
+        if (n_peak > 0) {
+            var += (static_cast<double>(n_peak * n_peak) /
+                    static_cast<double>(n_bg)) *
+                   std::fabs(bg_mean);
+        }
         var = std::max(var, 1.0);
         obs.profile_sigma = std::sqrt(var);
+        // Never report a worse σ than summation for the same box.
+        if (obs.summation_sigma > 0.0 &&
+            obs.profile_sigma > 3.0 * obs.summation_sigma) {
+            obs.profile_sigma = obs.summation_sigma;
+        }
         obs.pkratio =
             std::fabs(obs.summation_intensity - iprf) /
             std::max(std::fabs(iprf), 1.0);

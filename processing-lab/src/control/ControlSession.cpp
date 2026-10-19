@@ -217,6 +217,30 @@ void ControlSession::parse_autoindex_args(const std::vector<std::string>& args) 
             state_.autoindex.prefer_system = args[++i];
             continue;
         }
+        if (u == "SEPMIN" && i + 1 < args.size()) {
+            state_.autoindex.sepmin =
+                static_cast<float>(require_double(args[++i], "AUTOINDEX"));
+            continue;
+        }
+        if ((u == "CLUSTER_RADIUS" || u == "CLUSTERRADIUS") &&
+            i + 1 < args.size()) {
+            state_.autoindex.cluster_radius =
+                static_cast<float>(require_double(args[++i], "AUTOINDEX"));
+            continue;
+        }
+        if (u == "MININDEXED" && i + 1 < args.size()) {
+            state_.autoindex.min_indexed_frac =
+                static_cast<float>(require_double(args[++i], "AUTOINDEX"));
+            continue;
+        }
+        if (u == "DELTA" || u == "DIFFVECTOR" || u == "IDXREF") {
+            state_.autoindex.use_diff_vector = true;
+            continue;
+        }
+        if (u == "NODELTA" || u == "NODIFFVECTOR" || u == "DPSONLY") {
+            state_.autoindex.use_diff_vector = false;
+            continue;
+        }
     }
 }
 
@@ -1333,6 +1357,15 @@ std::filesystem::path ControlSession::resolve_image_path(
     int frame
 ) const {
     const int use_frame = (frame > 0) ? frame : state_.process_first;
+    // TEMPLATE must win over --image / IMAGE for multi-frame CBF/SMV: those
+    // formats ignore the frame argument to read_diffraction_image, so reusing
+    // a single --image path clones frame-1 pixels, φ, XDET and I onto every
+    // batch (I/σ collapses to noise about the same empty boxes).
+    if (!state_.image_template.empty()) {
+        const std::string name =
+            expand_template(state_.image_template, use_frame);
+        return state_.directory / name;
+    }
     if (image_override && !image_override->empty()) {
         return *image_override;
     }
@@ -1341,11 +1374,6 @@ std::filesystem::path ControlSession::resolve_image_path(
             return state_.image_path;
         }
         return state_.directory / state_.image_path;
-    }
-    if (!state_.image_template.empty()) {
-        const std::string name =
-            expand_template(state_.image_template, use_frame);
-        return state_.directory / name;
     }
     (void)use_frame;
     throw std::runtime_error(

@@ -1,12 +1,14 @@
 #include "mosflm/indexing/AutoIndexer.hpp"
 
 #include "mosflm/indexing/BravaisSelect.hpp"
+#include "mosflm/indexing/DiffVectorIndex.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 extern "C" {
@@ -326,47 +328,6 @@ AutoIndexResult AutoIndexer::index(
     );
 
     result.ierr = ierr;
-    if (ierr != 0) {
-        return result;
-    }
-
-    result.amat << a9[0], a9[1], a9[2], a9[3], a9[4], a9[5], a9[6], a9[7],
-        a9[8];
-
-    // Recover DPS OM from AMAT packing for cell + Bravais.
-    struct matrix_3x3 om{};
-    const double inv_w = 1.0 / geometry.wavelength_A;
-    om.r[0].z = static_cast<float>(a9[0] * inv_w);
-    om.r[0].x = static_cast<float>(a9[1] * inv_w);
-    om.r[0].y = static_cast<float>(a9[2] * inv_w);
-    om.r[1].z = static_cast<float>(a9[3] * inv_w);
-    om.r[1].x = static_cast<float>(a9[4] * inv_w);
-    om.r[1].y = static_cast<float>(a9[5] * inv_w);
-    om.r[2].z = static_cast<float>(a9[6] * inv_w);
-    om.r[2].x = static_cast<float>(a9[7] * inv_w);
-    om.r[2].y = static_cast<float>(a9[8] * inv_w);
-
-    struct cell_struct cell{};
-    dircell_from_om(om, &cell);
-    result.cell = cell_from_dps(cell);
-
-    Eigen::Matrix3d om_e;
-    for (int i = 0; i < 3; ++i) {
-        om_e(i, 0) = om.r[i].x;
-        om_e(i, 1) = om.r[i].y;
-        om_e(i, 2) = om.r[i].z;
-    }
-    result.bravais = BravaisClassifier{}.classify(om_e, 1);
-
-    const std::size_t sugg = select_suggested_bravais(
-        result.bravais,
-        settings.max_penalty,
-        settings.prefer_character,
-        settings.prefer_system
-    );
-    const bool user_prefer =
-        settings.prefer_character > 0 || !settings.prefer_system.empty();
-    const int lastgood = find_lastgood_rank(result.bravais);
 
     struct TrialScore {
         std::size_t idx{0};
@@ -375,160 +336,338 @@ AutoIndexResult AutoIndexer::index(
         UnitCell cell{};
     };
 
-    auto apply_candidate = [&](std::size_t idx) -> TrialScore {
-        TrialScore ts;
-        ts.idx = idx;
-        if (idx >= result.bravais.size()) {
-            return ts;
-        }
-        const auto& c = result.bravais[idx];
-        const struct matrix_3x3 om_pick = eigen_to_dps(c.orientation);
-        ts.amat = amat_from_dps_om(om_pick, geometry.wavelength_A);
-        struct cell_struct cell2{};
-        dircell_from_om(om_pick, &cell2);
-        ts.cell = cell_from_dps(cell2);
-        ts.fit = score_amat_vs_xyz(ts.amat, x, y, z, settings.hkldev);
-        return ts;
+    struct PathPick {
+        bool ok{false};
+        std::string method{"dps"};
+        std::vector<BravaisCandidate> bravais;
+        TrialScore chosen{};
+        std::size_t chosen_idx{static_cast<std::size_t>(-1)};
     };
 
-    std::size_t chosen = static_cast<std::size_t>(-1);
-    TrialScore chosen_ts;
+    auto pick_from_bravais =
+        [&](std::vector<BravaisCandidate> bravais,
+            const std::string& method) -> PathPick {
+        PathPick pick;
+        pick.method = method;
+        pick.bravais = std::move(bravais);
+        if (pick.bravais.empty()) {
+            return pick;
+        }
 
-    if (user_prefer && sugg != static_cast<std::size_t>(-1) &&
-        sugg < result.bravais.size()) {
-        // Explicit SYSTEM / CHARACTER: keep SUGGLATT prefer pick (insulin path).
-        chosen_ts = apply_candidate(sugg);
-        chosen = sugg;
-    } else {
-        // Unconstrained: BESTSOLAR-lite among LASTGOOD (+ aP fallback).
-        std::vector<std::size_t> trial;
-        trial.reserve(result.bravais.size());
-        auto push_unique = [&](std::size_t idx) {
-            if (idx >= result.bravais.size()) {
-                return;
+        const std::size_t sugg = select_suggested_bravais(
+            pick.bravais,
+            settings.max_penalty,
+            settings.prefer_character,
+            settings.prefer_system
+        );
+        const bool user_prefer =
+            settings.prefer_character > 0 || !settings.prefer_system.empty();
+        const int lastgood = find_lastgood_rank(pick.bravais);
+
+        auto apply_candidate = [&](std::size_t idx) -> TrialScore {
+            TrialScore ts;
+            ts.idx = idx;
+            if (idx >= pick.bravais.size()) {
+                return ts;
             }
-            if (std::find(trial.begin(), trial.end(), idx) == trial.end()) {
-                trial.push_back(idx);
-            }
+            const auto& c = pick.bravais[idx];
+            const struct matrix_3x3 om_pick = eigen_to_dps(c.orientation);
+            ts.amat = amat_from_dps_om(om_pick, geometry.wavelength_A);
+            struct cell_struct cell2{};
+            dircell_from_om(om_pick, &cell2);
+            ts.cell = cell_from_dps(cell2);
+            ts.fit = score_amat_vs_xyz(ts.amat, x, y, z, settings.hkldev);
+            return ts;
         };
-        push_unique(sugg);
-        std::vector<std::size_t> by_pen(result.bravais.size());
-        for (std::size_t i = 0; i < by_pen.size(); ++i) {
-            by_pen[i] = i;
-        }
-        std::stable_sort(
-            by_pen.begin(), by_pen.end(),
-            [&](std::size_t a, std::size_t b) {
-                if (result.bravais[a].criterion !=
-                    result.bravais[b].criterion) {
-                    return result.bravais[a].criterion <
-                           result.bravais[b].criterion;
-                }
-                return result.bravais[a].character <
-                       result.bravais[b].character;
-            }
-        );
-        const int lim =
-            std::max(1, std::min(lastgood, static_cast<int>(by_pen.size())));
-        for (int rank = 1; rank <= lim; ++rank) {
-            push_unique(by_pen[static_cast<std::size_t>(rank - 1)]);
-        }
-        for (std::size_t i = 0; i < result.bravais.size(); ++i) {
-            if (result.bravais[i].system_id == "aP") {
-                push_unique(i);
-            }
-        }
 
-        std::vector<TrialScore> scored;
-        scored.reserve(trial.size());
-        for (const std::size_t idx : trial) {
-            scored.push_back(apply_candidate(idx));
-        }
+        std::size_t chosen = static_cast<std::size_t>(-1);
+        TrialScore chosen_ts;
 
-        // Prefer mP over mC when indexed fractions are within 5%.
-        std::stable_sort(
-            scored.begin(), scored.end(),
-            [&](const TrialScore& a, const TrialScore& b) {
-                const auto& ca = result.bravais[a.idx];
-                const auto& cb = result.bravais[b.idx];
-                const double fa = a.fit.indexed_frac;
-                const double fb = b.fit.indexed_frac;
-                if (std::fabs(fa - fb) > 0.05) {
-                    return fa > fb;
+        if (user_prefer && sugg != static_cast<std::size_t>(-1) &&
+            sugg < pick.bravais.size()) {
+            chosen_ts = apply_candidate(sugg);
+            chosen = sugg;
+        } else {
+            std::vector<std::size_t> trial;
+            trial.reserve(pick.bravais.size());
+            auto push_unique = [&](std::size_t idx) {
+                if (idx >= pick.bravais.size()) {
+                    return;
                 }
-                const int pa = monoclinic_prefer_key(ca.system_id);
-                const int pb = monoclinic_prefer_key(cb.system_id);
-                if (pa != pb) {
-                    return pa > pb;
+                if (std::find(trial.begin(), trial.end(), idx) == trial.end()) {
+                    trial.push_back(idx);
                 }
-                if (a.fit.rmsd_hkl != b.fit.rmsd_hkl) {
-                    return a.fit.rmsd_hkl < b.fit.rmsd_hkl;
-                }
-                return ca.criterion < cb.criterion;
+            };
+            push_unique(sugg);
+            std::vector<std::size_t> by_pen(pick.bravais.size());
+            for (std::size_t i = 0; i < by_pen.size(); ++i) {
+                by_pen[i] = i;
             }
-        );
+            std::stable_sort(
+                by_pen.begin(), by_pen.end(),
+                [&](std::size_t a, std::size_t b) {
+                    if (pick.bravais[a].criterion !=
+                        pick.bravais[b].criterion) {
+                        return pick.bravais[a].criterion <
+                               pick.bravais[b].criterion;
+                    }
+                    return pick.bravais[a].character <
+                           pick.bravais[b].character;
+                }
+            );
+            const int lim = std::max(
+                1, std::min(lastgood, static_cast<int>(by_pen.size()))
+            );
+            for (int rank = 1; rank <= lim; ++rank) {
+                push_unique(by_pen[static_cast<std::size_t>(rank - 1)]);
+            }
+            for (std::size_t i = 0; i < pick.bravais.size(); ++i) {
+                if (pick.bravais[i].system_id == "aP") {
+                    push_unique(i);
+                }
+            }
 
-        for (const auto& ts : scored) {
-            if (fit_passes(
-                    ts.fit, settings.min_indexed_frac, settings.max_rmsd_hkl
-                )) {
-                chosen = ts.idx;
-                chosen_ts = ts;
-                break;
+            std::vector<TrialScore> scored;
+            scored.reserve(trial.size());
+            for (const std::size_t idx : trial) {
+                scored.push_back(apply_candidate(idx));
             }
-        }
-        // No gate passer: keep SUGGLATT unless an mP clearly out-indexes mC.
-        if (chosen == static_cast<std::size_t>(-1) && !scored.empty()) {
-            TrialScore sugg_ts;
-            bool have_sugg = false;
+
+            std::stable_sort(
+                scored.begin(), scored.end(),
+                [&](const TrialScore& a, const TrialScore& b) {
+                    const auto& ca = pick.bravais[a.idx];
+                    const auto& cb = pick.bravais[b.idx];
+                    const double fa = a.fit.indexed_frac;
+                    const double fb = b.fit.indexed_frac;
+                    if (std::fabs(fa - fb) > 0.05) {
+                        return fa > fb;
+                    }
+                    const int pa = monoclinic_prefer_key(ca.system_id);
+                    const int pb = monoclinic_prefer_key(cb.system_id);
+                    if (pa != pb) {
+                        return pa > pb;
+                    }
+                    if (a.fit.rmsd_hkl != b.fit.rmsd_hkl) {
+                        return a.fit.rmsd_hkl < b.fit.rmsd_hkl;
+                    }
+                    return ca.criterion < cb.criterion;
+                }
+            );
+
             for (const auto& ts : scored) {
-                if (ts.idx == sugg) {
-                    sugg_ts = ts;
-                    have_sugg = true;
+                if (fit_passes(
+                        ts.fit, settings.min_indexed_frac, settings.max_rmsd_hkl
+                    )) {
+                    chosen = ts.idx;
+                    chosen_ts = ts;
                     break;
                 }
             }
-            const auto& best = scored.front();
-            const bool sugg_is_mc =
-                have_sugg &&
-                (result.bravais[sugg].system_id == "mC" ||
-                 result.bravais[sugg].system_id == "mI");
-            const bool best_is_mp =
-                result.bravais[best.idx].system_id == "mP";
-            if (sugg_is_mc && best_is_mp &&
-                best.fit.indexed_frac + 1e-12 >=
-                    sugg_ts.fit.indexed_frac - 0.02) {
-                chosen = best.idx;
-                chosen_ts = best;
-            } else if (have_sugg) {
-                chosen = sugg;
-                chosen_ts = sugg_ts;
-            } else {
-                chosen = best.idx;
-                chosen_ts = best;
+            if (chosen == static_cast<std::size_t>(-1) && !scored.empty()) {
+                TrialScore sugg_ts;
+                bool have_sugg = false;
+                for (const auto& ts : scored) {
+                    if (ts.idx == sugg) {
+                        sugg_ts = ts;
+                        have_sugg = true;
+                        break;
+                    }
+                }
+                const auto& best = scored.front();
+                const bool sugg_is_mc =
+                    have_sugg &&
+                    (pick.bravais[sugg].system_id == "mC" ||
+                     pick.bravais[sugg].system_id == "mI");
+                const bool best_is_mp =
+                    pick.bravais[best.idx].system_id == "mP";
+                if (sugg_is_mc && best_is_mp &&
+                    best.fit.indexed_frac + 1e-12 >=
+                        sugg_ts.fit.indexed_frac - 0.02) {
+                    chosen = best.idx;
+                    chosen_ts = best;
+                } else if (have_sugg) {
+                    chosen = sugg;
+                    chosen_ts = sugg_ts;
+                } else {
+                    chosen = best.idx;
+                    chosen_ts = best;
+                }
+            }
+        }
+
+        if (chosen != static_cast<std::size_t>(-1) &&
+            chosen < pick.bravais.size()) {
+            pick.ok = chosen_ts.cell.is_valid();
+            pick.chosen = chosen_ts;
+            pick.chosen_idx = chosen;
+        }
+        return pick;
+    };
+
+    PathPick dps_pick;
+    if (ierr == 0) {
+        result.amat << a9[0], a9[1], a9[2], a9[3], a9[4], a9[5], a9[6],
+            a9[7], a9[8];
+
+        struct matrix_3x3 om{};
+        const double inv_w = 1.0 / geometry.wavelength_A;
+        om.r[0].z = static_cast<float>(a9[0] * inv_w);
+        om.r[0].x = static_cast<float>(a9[1] * inv_w);
+        om.r[0].y = static_cast<float>(a9[2] * inv_w);
+        om.r[1].z = static_cast<float>(a9[3] * inv_w);
+        om.r[1].x = static_cast<float>(a9[4] * inv_w);
+        om.r[1].y = static_cast<float>(a9[5] * inv_w);
+        om.r[2].z = static_cast<float>(a9[6] * inv_w);
+        om.r[2].x = static_cast<float>(a9[7] * inv_w);
+        om.r[2].y = static_cast<float>(a9[8] * inv_w);
+
+        struct cell_struct cell{};
+        dircell_from_om(om, &cell);
+        result.cell = cell_from_dps(cell);
+
+        Eigen::Matrix3d om_e;
+        for (int i = 0; i < 3; ++i) {
+            om_e(i, 0) = om.r[i].x;
+            om_e(i, 1) = om.r[i].y;
+            om_e(i, 2) = om.r[i].z;
+        }
+        dps_pick = pick_from_bravais(
+            BravaisClassifier{}.classify(om_e, 1), "dps"
+        );
+    }
+
+    PathPick delta_pick;
+    if (settings.use_diff_vector) {
+        // Try a few SEPMIN scales (large cells often need lower SEPMIN).
+        const float sep_scales[] = {1.0f, 0.5f, 0.25f};
+        for (float scale : sep_scales) {
+            DiffVectorSettings dvs;
+            dvs.sepmin = settings.sepmin * scale;
+            dvs.cluster_radius = settings.cluster_radius * scale;
+            const DiffVectorResult dv = find_diff_vector_basis(
+                x, y, z, geometry.wavelength_A, dvs, geometry.dmax_A
+            );
+            std::cout << "  DIFFVECTOR: sep×" << scale
+                      << " diffs=" << dv.n_diff_vectors
+                      << " clusters=" << dv.n_clusters
+                      << " explained=" << dv.n_explained;
+            if (dv.ok) {
+                std::cout << " cell=" << std::fixed << std::setprecision(2)
+                          << dv.cell.a << " " << dv.cell.b << " " << dv.cell.c
+                          << " β=" << dv.cell.beta_deg;
+            }
+            std::cout << '\n';
+            if (!dv.ok) {
+                continue;
+            }
+            PathPick trial = pick_from_bravais(
+                BravaisClassifier{}.classify(dv.reciprocal_om, 1), "delta"
+            );
+            if (!trial.ok) {
+                continue;
+            }
+            if (!delta_pick.ok ||
+                trial.chosen.fit.indexed_frac >
+                    delta_pick.chosen.fit.indexed_frac + 0.02 ||
+                (std::fabs(
+                     trial.chosen.fit.indexed_frac -
+                     delta_pick.chosen.fit.indexed_frac
+                 ) <= 0.02 &&
+                 trial.chosen.fit.rmsd_hkl < delta_pick.chosen.fit.rmsd_hkl)) {
+                delta_pick = std::move(trial);
             }
         }
     }
 
-    if (chosen != static_cast<std::size_t>(-1) &&
-        chosen < result.bravais.size()) {
-        const auto& c = result.bravais[chosen];
-        result.amat = chosen_ts.amat;
-        result.cell = chosen_ts.cell;
-        result.fit = chosen_ts.fit;
-        result.selected_character = c.character;
-        result.selected_system = c.system_id;
-        result.selected_symmetry_number =
-            symmetry_number_for_lattice(c.system_id);
-        std::cout << std::fixed;
-        std::cout << "  INDEXFIT: system=" << c.system_id
-                  << " char=" << c.character << " indexed="
+    auto better = [&](const PathPick& a, const PathPick& b) -> bool {
+        // Is path ``a`` better than ``b``?
+        if (!a.ok) {
+            return false;
+        }
+        if (!b.ok) {
+            return true;
+        }
+        const bool a_pass = fit_passes(
+            a.chosen.fit, settings.min_indexed_frac, settings.max_rmsd_hkl
+        );
+        const bool b_pass = fit_passes(
+            b.chosen.fit, settings.min_indexed_frac, settings.max_rmsd_hkl
+        );
+        if (a_pass != b_pass) {
+            return a_pass;
+        }
+        const double fa = a.chosen.fit.indexed_frac;
+        const double fb = b.chosen.fit.indexed_frac;
+        // Weak Δ-vector solutions must clearly beat DPS before replacing it.
+        if (a.method == "delta" && b.method == "dps" && !a_pass &&
+            fa < fb + 0.10) {
+            return false;
+        }
+        if (std::fabs(fa - fb) > 0.05) {
+            return fa > fb;
+        }
+        const auto& ca = a.bravais[a.chosen_idx];
+        const auto& cb = b.bravais[b.chosen_idx];
+        const int pa = monoclinic_prefer_key(ca.system_id);
+        const int pb = monoclinic_prefer_key(cb.system_id);
+        if (pa != pb) {
+            return pa > pb;
+        }
+        return a.chosen.fit.rmsd_hkl < b.chosen.fit.rmsd_hkl;
+    };
+
+    PathPick winner;
+    if (better(delta_pick, dps_pick)) {
+        winner = delta_pick;
+    } else if (dps_pick.ok) {
+        winner = dps_pick;
+    } else if (delta_pick.ok) {
+        winner = delta_pick;
+    }
+
+    if (!winner.ok) {
+        // DPS failed and Δ-vector found nothing usable.
+        if (ierr != 0) {
+            return result;
+        }
+        result.bravais = dps_pick.bravais;
+        result.orientation =
+            OrientationMatrix::from_mosflm_orientation_matrix(result.amat);
+        result.ok = result.cell.is_valid();
+        return result;
+    }
+
+    // Δ-vector alone can recover when DPS ierr ≠ 0.
+    result.ierr = 0;
+    result.bravais = winner.bravais;
+    result.amat = winner.chosen.amat;
+    result.cell = winner.chosen.cell;
+    result.fit = winner.chosen.fit;
+    result.index_method = winner.method;
+    const auto& c = winner.bravais[winner.chosen_idx];
+    result.selected_character = c.character;
+    result.selected_system = c.system_id;
+    result.selected_symmetry_number =
+        symmetry_number_for_lattice(c.system_id);
+
+    std::cout << std::fixed;
+    std::cout << "  INDEXFIT: method=" << winner.method
+              << " system=" << c.system_id << " char=" << c.character
+              << " indexed="
+              << static_cast<int>(std::lround(100.0 * result.fit.indexed_frac))
+              << "% rmsd_hkl=" << std::setprecision(3) << result.fit.rmsd_hkl
+              << " (n=" << result.fit.n_indexed << "/" << result.fit.n_total
+              << ")\n";
+    if (!fit_passes(
+            result.fit, settings.min_indexed_frac, settings.max_rmsd_hkl
+        )) {
+        std::cout << "  INDEXFIT: INSUFFICIENT percentage of indexed "
+                     "reflections (need ≥"
                   << static_cast<int>(
-                         std::lround(100.0 * result.fit.indexed_frac)
+                         std::lround(100.0 * settings.min_indexed_frac)
                      )
-                  << "% rmsd_hkl=" << std::setprecision(3)
-                  << result.fit.rmsd_hkl << " (n=" << result.fit.n_indexed
-                  << "/" << result.fit.n_total << ")\n";
+                  << "%; XDS-style gate)\n";
     }
 
     result.orientation =
