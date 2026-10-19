@@ -392,6 +392,90 @@ DiffVectorResult find_diff_vector_basis(
         return result;
     }
 
+    // Shorten basis vectors when a denser cluster is an integer sub-multiple
+    // (common large-cell failure: 3b* chosen instead of b*).
+    {
+        Eigen::Vector3d b[3] = {
+            best_om.row(0), best_om.row(1), best_om.row(2)
+        };
+        bool changed = true;
+        int guard = 0;
+        while (changed && guard++ < 8) {
+            changed = false;
+            for (int i = 0; i < 3; ++i) {
+                const double bi_len = b[i].norm();
+                if (!(bi_len > 1e-12)) {
+                    continue;
+                }
+                const Eigen::Vector3d bi_u = b[i] / bi_len;
+                for (const auto& cl : clusters) {
+                    const double cl_len = cl.center.norm();
+                    if (cl_len < len_lo || cl_len >= bi_len * 0.85) {
+                        continue;
+                    }
+                    const double ratio = bi_len / cl_len;
+                    const int n = static_cast<int>(std::lround(ratio));
+                    if (n < 2 || n > 8) {
+                        continue;
+                    }
+                    if (std::fabs(ratio - static_cast<double>(n)) > 0.12) {
+                        continue;
+                    }
+                    const Eigen::Vector3d cu = cl.center / cl_len;
+                    if (std::fabs(bi_u.dot(cu)) < 0.97) {
+                        continue;
+                    }
+                    Eigen::Vector3d trial[3] = {b[0], b[1], b[2]};
+                    trial[i] = cl.center;
+                    // Keep orientation (same hemisphere as original).
+                    if (trial[i].dot(b[i]) < 0.0) {
+                        trial[i] = -trial[i];
+                    }
+                    if (!nearly_independent(
+                            trial[0], trial[1], trial[2], min_det
+                        )) {
+                        continue;
+                    }
+                    // Accept if INDEXFIT-style cluster explanation does not drop.
+                    Eigen::Matrix3d Bt;
+                    Bt.col(0) = trial[0];
+                    Bt.col(1) = trial[1];
+                    Bt.col(2) = trial[2];
+                    Eigen::FullPivLU<Eigen::Matrix3d> lu(Bt);
+                    if (!lu.isInvertible()) {
+                        continue;
+                    }
+                    const Eigen::Matrix3d Binv = lu.inverse();
+                    int explained = 0;
+                    for (const auto& c2 : clusters) {
+                        const Eigen::Vector3d hkl = Binv * c2.center;
+                        double max_dev = 0.0;
+                        for (int k = 0; k < 3; ++k) {
+                            max_dev = std::max(
+                                max_dev,
+                                std::fabs(hkl[k] - std::round(hkl[k]))
+                            );
+                        }
+                        if (max_dev <= static_cast<double>(settings.index_tol)) {
+                            explained += c2.count;
+                        }
+                    }
+                    if (explained + 5 >= best_explained) {
+                        b[0] = trial[0];
+                        b[1] = trial[1];
+                        b[2] = trial[2];
+                        best_explained = std::max(best_explained, explained);
+                        best_om.row(0) = b[0];
+                        best_om.row(1) = b[1];
+                        best_om.row(2) = b[2];
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     result.reciprocal_om = best_om;
     result.cell = cell_from_reciprocal_basis(best_om);
     result.n_explained = best_explained;

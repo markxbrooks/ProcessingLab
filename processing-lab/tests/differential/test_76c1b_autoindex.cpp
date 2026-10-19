@@ -58,20 +58,24 @@ int main() {
     ControlSession session;
     session.parse_line("DIRECTORY " + dir.string());
     session.parse_line("TEMPLATE 76c1b_0002212_1_####.cbf");
-    // Prefer image-header geometry; XDS beam as soft override via env.
     session.parse_line("DMAX 320");
-    if (const char* use_xds_beam = std::getenv("MOSFLM_76C1B_XDS_BEAM")) {
-        if (use_xds_beam[0] == '1') {
-            session.parse_line("DISTANCE 384.979");
-            session.parse_line("WAVELENGTH 0.979490");
-            session.parse_line("PIXEL 0.172 0.172");
-            session.parse_line("BEAM 210.2356 206.6442");
+    // Prefer Xia2/XDS index-stage geometry when present (beam is critical for
+    // Δ-vector / DPS on large cells). Opt out with MOSFLM_76C1B_XDS_BEAM=0.
+    const bool use_xds_beam = [] {
+        if (const char* e = std::getenv("MOSFLM_76C1B_XDS_BEAM")) {
+            return e[0] != '0';
         }
+        return true;
+    }();
+    if (use_xds_beam) {
+        session.parse_line("DISTANCE 384.979");
+        session.parse_line("WAVELENGTH 0.979490");
+        session.parse_line("PIXEL 0.172 0.172");
+        session.parse_line("BEAM 210.2356 206.6442");
     }
-    // Light xy merge across neighbouring φ; keep 3D coverage over ~10°.
+    // Per-frame 3D COLSPOT (no xy merge) — matches XDS_BRIDGE indexing advice.
     session.parse_line(
-        "FINDSPOTS THRESHOLD 5 MAXSPOTS 1500 MERGE_XY 0.25 MERGE_PHI 0.6 "
-        "FIND 1 FILE " +
+        "FINDSPOTS THRESHOLD 5 MAXSPOTS 1500 FIND 1 FILE " +
         (work / "76c1b.spt").string() + " MULTIFRAME RANGE 1 50"
     );
     {

@@ -57,9 +57,64 @@ SpotList find_spots_multiframe(
     out.header = header;
 
     // No merge: keep 3D (xy,φ) observations — needed for large-cell DPS.
+    // Stratify by φ so MAXSPOTS does not collapse onto the brightest frames.
     if (settings.merge_xy_mm <= 0.0) {
-        if (static_cast<int>(raw.size()) > settings.max_spots) {
-            raw.resize(static_cast<std::size_t>(settings.max_spots));
+        if (static_cast<int>(raw.size()) > settings.max_spots &&
+            settings.max_spots > 0) {
+            double phi_lo = 1e100;
+            double phi_hi = -1e100;
+            for (const auto& s : raw) {
+                const double p = mid_phi(s);
+                phi_lo = std::min(phi_lo, p);
+                phi_hi = std::max(phi_hi, p);
+            }
+            const int n_bins = std::max(
+                1, std::min(last_frame - first_frame + 1, settings.max_spots)
+            );
+            const double span = std::max(1e-6, phi_hi - phi_lo);
+            std::vector<std::vector<Spot>> bins(
+                static_cast<std::size_t>(n_bins)
+            );
+            for (auto& s : raw) {
+                const double p = mid_phi(s);
+                int b = static_cast<int>(
+                    std::floor((p - phi_lo) / span * n_bins)
+                );
+                if (b < 0) {
+                    b = 0;
+                }
+                if (b >= n_bins) {
+                    b = n_bins - 1;
+                }
+                bins[static_cast<std::size_t>(b)].push_back(std::move(s));
+            }
+            const int per_bin = std::max(1, settings.max_spots / n_bins);
+            std::vector<Spot> stratified;
+            stratified.reserve(static_cast<std::size_t>(settings.max_spots));
+            for (auto& bin : bins) {
+                std::sort(
+                    bin.begin(), bin.end(),
+                    [](const Spot& a, const Spot& b) {
+                        return a.intensity > b.intensity;
+                    }
+                );
+                const std::size_t take = std::min(
+                    bin.size(), static_cast<std::size_t>(per_bin)
+                );
+                for (std::size_t i = 0; i < take; ++i) {
+                    stratified.push_back(std::move(bin[i]));
+                }
+            }
+            std::sort(
+                stratified.begin(), stratified.end(),
+                [](const Spot& a, const Spot& b) {
+                    return a.intensity > b.intensity;
+                }
+            );
+            if (static_cast<int>(stratified.size()) > settings.max_spots) {
+                stratified.resize(static_cast<std::size_t>(settings.max_spots));
+            }
+            raw = std::move(stratified);
         }
         out.spots = std::move(raw);
         return out;
