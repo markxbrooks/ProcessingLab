@@ -53,6 +53,19 @@ struct AutoIndexSettings {
     /// Max Bravais penalty for SUGGLATT-style highest-symmetry pick
     /// (DiffractionLab ``max_penalty_to_refine`` / Mosflm soft cut).
     float max_penalty{50.0f};
+    /// BESTSOLAR-lite: require at least this fraction of DPS spots to index
+    /// (``|Δh|,|Δk|,|Δl| ≤ hkldev``). Fail → try next LASTGOOD candidate.
+    float min_indexed_frac{0.45f};
+    /// Max RMS fractional HKL residual for indexed spots.
+    float max_rmsd_hkl{0.25f};
+};
+
+/// Spot-vs-AMAT indexing quality (BESTSOLAR-lite).
+struct IndexFitStats {
+    double indexed_frac{0.0};
+    double rmsd_hkl{0.0};
+    std::size_t n_indexed{0};
+    std::size_t n_total{0};
 };
 
 struct AutoIndexResult {
@@ -68,6 +81,7 @@ struct AutoIndexResult {
     /// Default space-group number for ``selected_system`` (Mosflm SPGMIN).
     int selected_symmetry_number{1};
     std::size_t n_spots_used{0};
+    IndexFitStats fit{};
 };
 
 /// Stage 1 AUTOINDEX façade: MOSFLM ``.spt`` → DPS ``index_fortran_`` → AMAT.

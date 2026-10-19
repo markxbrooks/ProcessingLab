@@ -283,6 +283,14 @@ void ControlSession::parse_findspots_args(const std::vector<std::string>& args) 
         }
         // Ignore MOSFLM FINDSPOTS noise keywords (LOCAL, AUTORESLN, …).
     }
+    // MULTIFRAME without RANGE: default a 50-frame COLSPOT wedge from FIND.
+    if (state_.findspots.multiframe && state_.findspots.range_last <= 0) {
+        const int start = state_.findspots.image_number > 0
+                              ? state_.findspots.image_number
+                              : 1;
+        state_.findspots.range_first = start;
+        state_.findspots.range_last = start + 49;
+    }
 }
 
 void ControlSession::apply_keyword(

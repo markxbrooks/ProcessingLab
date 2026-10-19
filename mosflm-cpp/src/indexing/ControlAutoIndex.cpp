@@ -65,6 +65,8 @@ void run_autoindex(control::ControlState& state) {
     state.autoindex_system = result.selected_system;
     state.autoindex_character = result.selected_character;
     state.autoindex_n_spots = result.n_spots_used;
+    state.autoindex_indexed_frac = result.fit.indexed_frac;
+    state.autoindex_rmsd_hkl = result.fit.rmsd_hkl;
     // SUGGLATT → default SYMMETRY when the user did not set SYMMETRY.
     if (!state.has_symmetry && result.selected_symmetry_number > 0) {
         state.symmetry_number = result.selected_symmetry_number;

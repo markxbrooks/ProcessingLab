@@ -127,9 +127,15 @@ void run_findspots(
         mfs.merge_phi_tol_deg = state.findspots.merge_phi_tol_deg;
         mfs.min_frames = state.findspots.min_frames;
         mfs.max_spots = state.findspots.max_spots;
+        // CBF/SMV ignore the frame argument to read_diffraction_image — resolve
+        // TEMPLATE / IMAGE path for each frame index (HDF5 masters still use f).
         spots = find_spots_multiframe(
             first, last,
-            [&](int f) { return image::read_diffraction_image(img_path, f); },
+            [&](int f) {
+                const auto path_f =
+                    resolve_findspots_image_path(state, image_override, f);
+                return image::read_diffraction_image(path_f, f);
+            },
             mfs
         );
     } else {

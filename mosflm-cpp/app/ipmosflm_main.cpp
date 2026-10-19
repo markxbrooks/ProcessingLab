@@ -17,6 +17,7 @@
 #include "mosflm/indexing/ControlAutoIndex.hpp"
 #endif
 
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -95,6 +96,16 @@ void emit_autoindex_dump(const mosflm::control::ControlState& state) {
     if (state.autoindex_n_spots > 0) {
         std::cout << "PROCESSINGLAB_NSPOTS " << state.autoindex_n_spots << '\n';
     }
+    if (state.autoindex_indexed_frac > 0.0 || state.autoindex_n_spots > 0) {
+        std::cout << "PROCESSINGLAB_INDEXED "
+                  << static_cast<int>(
+                         std::lround(100.0 * state.autoindex_indexed_frac)
+                     )
+                  << '\n';
+        std::cout << std::setprecision(4);
+        std::cout << "PROCESSINGLAB_RMSD_HKL " << state.autoindex_rmsd_hkl
+                  << '\n';
+    }
 
     // Sidecar next to cwd for tools that prefer files over stdout.
     try {
@@ -120,6 +131,13 @@ void emit_autoindex_dump(const mosflm::control::ControlState& state) {
             if (state.autoindex_n_spots > 0) {
                 out << "NSPOTS " << state.autoindex_n_spots << '\n';
             }
+            out << "INDEXED "
+                << static_cast<int>(
+                       std::lround(100.0 * state.autoindex_indexed_frac)
+                   )
+                << '\n';
+            out << std::setprecision(4);
+            out << "RMSD_HKL " << state.autoindex_rmsd_hkl << '\n';
         }
     } catch (...) {
         // Best-effort sidecar; stdout dump is enough for DiffractionLab.

@@ -14,7 +14,8 @@ namespace mosflm::indexing {
 struct MultiFrameSpotSettings {
     SpotFindSettings per_frame{};
     /// Merge spots if xy distance (mm) below this and |Δφ| below phi_tol_deg.
-    double merge_xy_mm{0.3};
+    /// ``≤ 0`` keeps every per-frame spot (better for DPS / large cells).
+    double merge_xy_mm{0.0};
     double merge_phi_tol_deg{0.5};
     /// Minimum number of frames a merged spot must appear on.
     int min_frames{1};

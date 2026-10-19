@@ -53,6 +53,18 @@ SpotList find_spots_multiframe(
         [](const Spot& a, const Spot& b) { return a.intensity > b.intensity; }
     );
 
+    SpotList out;
+    out.header = header;
+
+    // No merge: keep 3D (xy,φ) observations — needed for large-cell DPS.
+    if (settings.merge_xy_mm <= 0.0) {
+        if (static_cast<int>(raw.size()) > settings.max_spots) {
+            raw.resize(static_cast<std::size_t>(settings.max_spots));
+        }
+        out.spots = std::move(raw);
+        return out;
+    }
+
     std::vector<Acc> clusters;
     std::vector<char> used(raw.size(), 0);
     const double xy2 = settings.merge_xy_mm * settings.merge_xy_mm;
@@ -97,8 +109,6 @@ SpotList find_spots_multiframe(
         clusters.resize(static_cast<std::size_t>(settings.max_spots));
     }
 
-    SpotList out;
-    out.header = header;
     out.spots.reserve(clusters.size());
     for (const auto& c : clusters) {
         Spot s;

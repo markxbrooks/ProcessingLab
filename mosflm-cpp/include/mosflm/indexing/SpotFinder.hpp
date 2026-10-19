@@ -11,8 +11,9 @@ struct SpotFindSettings {
     float threshold_sigma{5.0f};
     /// Minimum separation between accepted peaks (pixels).
     int min_distance{8};
-    /// Cap on returned spots (strongest first).
-    int max_spots{500};
+    /// Cap on returned spots (strongest first). Default sized for
+    /// AUTOINDEX on large cells (single-frame ≤500 often yields sublattices).
+    int max_spots{1500};
     /// Border (pixels) excluded from search.
     int border{20};
     /// φ start / end (degrees). If ``phi_end <= phi_start`` and the image has

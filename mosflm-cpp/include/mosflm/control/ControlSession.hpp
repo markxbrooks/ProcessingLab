@@ -37,7 +37,8 @@ struct FindSpotsControlSettings {
     int range_first{0};
     int range_last{0};
     bool multiframe{false};
-    double merge_xy_mm{0.3};
+    /// ``≤ 0`` (default): keep per-frame spots for DPS; set ``MERGE_XY`` to cluster.
+    double merge_xy_mm{0.0};
     double merge_phi_tol_deg{0.5};
     int min_frames{1};
     double phi_start_deg{0.0};
@@ -45,7 +46,8 @@ struct FindSpotsControlSettings {
     bool has_phi{false};
     float threshold_sigma{5.0f};
     int min_distance{8};
-    int max_spots{500};
+    /// Cap for indexing COLSPOT (large cells need ≫500 single-frame spots).
+    int max_spots{1500};
     int border{20};
 };
 
@@ -159,6 +161,10 @@ struct ControlState {
     std::string autoindex_system;
     int autoindex_character{0};
     std::size_t autoindex_n_spots{0};
+    /// Fraction of I/σ-filtered spots indexed by the chosen AMAT (0–1).
+    double autoindex_indexed_frac{0.0};
+    /// RMS fractional HKL residual for indexed spots.
+    double autoindex_rmsd_hkl{0.0};
 
     /// Multi-lattice: additional orientation matrices (first is ``amat``).
     std::vector<Eigen::Matrix3d> extra_lattices;

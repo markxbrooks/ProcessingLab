@@ -2,7 +2,10 @@
 
 #include "mosflm/indexing/BravaisSelect.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
@@ -90,6 +93,85 @@ struct matrix_3x3 eigen_to_dps(const Eigen::Matrix3d& M) {
         om.r[i].z = static_cast<float>(M(i, 2));
     }
     return om;
+}
+
+/// Score how well MOSFLM AMAT indexes reciprocal xyz (x = A · hkl).
+IndexFitStats score_amat_vs_xyz(
+    const Eigen::Matrix3d& amat,
+    const std::vector<float>& x,
+    const std::vector<float>& y,
+    const std::vector<float>& z,
+    float hkldev
+) {
+    IndexFitStats stats;
+    const std::size_t n = x.size();
+    stats.n_total = n;
+    if (n == 0) {
+        return stats;
+    }
+    Eigen::FullPivLU<Eigen::Matrix3d> lu(amat);
+    if (!lu.isInvertible()) {
+        return stats;
+    }
+    const Eigen::Matrix3d Ainv = lu.inverse();
+    const double tol = static_cast<double>(hkldev);
+    double sum_sq = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const Eigen::Vector3d r(
+            static_cast<double>(x[i]),
+            static_cast<double>(y[i]),
+            static_cast<double>(z[i])
+        );
+        const Eigen::Vector3d hkl = Ainv * r;
+        double max_dev = 0.0;
+        double sq = 0.0;
+        for (int j = 0; j < 3; ++j) {
+            const double nearest = std::round(hkl[j]);
+            const double d = hkl[j] - nearest;
+            max_dev = std::max(max_dev, std::fabs(d));
+            sq += d * d;
+        }
+        if (max_dev <= tol) {
+            ++stats.n_indexed;
+            sum_sq += sq;
+        }
+    }
+    stats.indexed_frac =
+        static_cast<double>(stats.n_indexed) / static_cast<double>(n);
+    if (stats.n_indexed > 0) {
+        stats.rmsd_hkl =
+            std::sqrt(sum_sq / (3.0 * static_cast<double>(stats.n_indexed)));
+    }
+    return stats;
+}
+
+bool fit_passes(
+    const IndexFitStats& fit,
+    float min_frac,
+    float max_rmsd
+) {
+    if (fit.n_total == 0) {
+        return false;
+    }
+    if (fit.indexed_frac + 1e-12 < static_cast<double>(min_frac)) {
+        return false;
+    }
+    if (fit.n_indexed > 0 &&
+        fit.rmsd_hkl > static_cast<double>(max_rmsd) + 1e-12) {
+        return false;
+    }
+    return true;
+}
+
+/// Prefer primitive monoclinic over C-centered when fits are comparable.
+int monoclinic_prefer_key(std::string_view system_id) {
+    if (system_id == "mP") {
+        return 2;
+    }
+    if (system_id == "mC" || system_id == "mI") {
+        return 0;
+    }
+    return 1;
 }
 
 }  // namespace
@@ -276,24 +358,177 @@ AutoIndexResult AutoIndexer::index(
     }
     result.bravais = BravaisClassifier{}.classify(om_e, 1);
 
-    const std::size_t pick = select_suggested_bravais(
+    const std::size_t sugg = select_suggested_bravais(
         result.bravais,
         settings.max_penalty,
         settings.prefer_character,
         settings.prefer_system
     );
-    if (pick != static_cast<std::size_t>(-1) && pick < result.bravais.size()) {
-        const auto& c = result.bravais[pick];
+    const bool user_prefer =
+        settings.prefer_character > 0 || !settings.prefer_system.empty();
+    const int lastgood = find_lastgood_rank(result.bravais);
+
+    struct TrialScore {
+        std::size_t idx{0};
+        IndexFitStats fit{};
+        Eigen::Matrix3d amat{Eigen::Matrix3d::Identity()};
+        UnitCell cell{};
+    };
+
+    auto apply_candidate = [&](std::size_t idx) -> TrialScore {
+        TrialScore ts;
+        ts.idx = idx;
+        if (idx >= result.bravais.size()) {
+            return ts;
+        }
+        const auto& c = result.bravais[idx];
+        const struct matrix_3x3 om_pick = eigen_to_dps(c.orientation);
+        ts.amat = amat_from_dps_om(om_pick, geometry.wavelength_A);
+        struct cell_struct cell2{};
+        dircell_from_om(om_pick, &cell2);
+        ts.cell = cell_from_dps(cell2);
+        ts.fit = score_amat_vs_xyz(ts.amat, x, y, z, settings.hkldev);
+        return ts;
+    };
+
+    std::size_t chosen = static_cast<std::size_t>(-1);
+    TrialScore chosen_ts;
+
+    if (user_prefer && sugg != static_cast<std::size_t>(-1) &&
+        sugg < result.bravais.size()) {
+        // Explicit SYSTEM / CHARACTER: keep SUGGLATT prefer pick (insulin path).
+        chosen_ts = apply_candidate(sugg);
+        chosen = sugg;
+    } else {
+        // Unconstrained: BESTSOLAR-lite among LASTGOOD (+ aP fallback).
+        std::vector<std::size_t> trial;
+        trial.reserve(result.bravais.size());
+        auto push_unique = [&](std::size_t idx) {
+            if (idx >= result.bravais.size()) {
+                return;
+            }
+            if (std::find(trial.begin(), trial.end(), idx) == trial.end()) {
+                trial.push_back(idx);
+            }
+        };
+        push_unique(sugg);
+        std::vector<std::size_t> by_pen(result.bravais.size());
+        for (std::size_t i = 0; i < by_pen.size(); ++i) {
+            by_pen[i] = i;
+        }
+        std::stable_sort(
+            by_pen.begin(), by_pen.end(),
+            [&](std::size_t a, std::size_t b) {
+                if (result.bravais[a].criterion !=
+                    result.bravais[b].criterion) {
+                    return result.bravais[a].criterion <
+                           result.bravais[b].criterion;
+                }
+                return result.bravais[a].character <
+                       result.bravais[b].character;
+            }
+        );
+        const int lim =
+            std::max(1, std::min(lastgood, static_cast<int>(by_pen.size())));
+        for (int rank = 1; rank <= lim; ++rank) {
+            push_unique(by_pen[static_cast<std::size_t>(rank - 1)]);
+        }
+        for (std::size_t i = 0; i < result.bravais.size(); ++i) {
+            if (result.bravais[i].system_id == "aP") {
+                push_unique(i);
+            }
+        }
+
+        std::vector<TrialScore> scored;
+        scored.reserve(trial.size());
+        for (const std::size_t idx : trial) {
+            scored.push_back(apply_candidate(idx));
+        }
+
+        // Prefer mP over mC when indexed fractions are within 5%.
+        std::stable_sort(
+            scored.begin(), scored.end(),
+            [&](const TrialScore& a, const TrialScore& b) {
+                const auto& ca = result.bravais[a.idx];
+                const auto& cb = result.bravais[b.idx];
+                const double fa = a.fit.indexed_frac;
+                const double fb = b.fit.indexed_frac;
+                if (std::fabs(fa - fb) > 0.05) {
+                    return fa > fb;
+                }
+                const int pa = monoclinic_prefer_key(ca.system_id);
+                const int pb = monoclinic_prefer_key(cb.system_id);
+                if (pa != pb) {
+                    return pa > pb;
+                }
+                if (a.fit.rmsd_hkl != b.fit.rmsd_hkl) {
+                    return a.fit.rmsd_hkl < b.fit.rmsd_hkl;
+                }
+                return ca.criterion < cb.criterion;
+            }
+        );
+
+        for (const auto& ts : scored) {
+            if (fit_passes(
+                    ts.fit, settings.min_indexed_frac, settings.max_rmsd_hkl
+                )) {
+                chosen = ts.idx;
+                chosen_ts = ts;
+                break;
+            }
+        }
+        // No gate passer: keep SUGGLATT unless an mP clearly out-indexes mC.
+        if (chosen == static_cast<std::size_t>(-1) && !scored.empty()) {
+            TrialScore sugg_ts;
+            bool have_sugg = false;
+            for (const auto& ts : scored) {
+                if (ts.idx == sugg) {
+                    sugg_ts = ts;
+                    have_sugg = true;
+                    break;
+                }
+            }
+            const auto& best = scored.front();
+            const bool sugg_is_mc =
+                have_sugg &&
+                (result.bravais[sugg].system_id == "mC" ||
+                 result.bravais[sugg].system_id == "mI");
+            const bool best_is_mp =
+                result.bravais[best.idx].system_id == "mP";
+            if (sugg_is_mc && best_is_mp &&
+                best.fit.indexed_frac + 1e-12 >=
+                    sugg_ts.fit.indexed_frac - 0.02) {
+                chosen = best.idx;
+                chosen_ts = best;
+            } else if (have_sugg) {
+                chosen = sugg;
+                chosen_ts = sugg_ts;
+            } else {
+                chosen = best.idx;
+                chosen_ts = best;
+            }
+        }
+    }
+
+    if (chosen != static_cast<std::size_t>(-1) &&
+        chosen < result.bravais.size()) {
+        const auto& c = result.bravais[chosen];
+        result.amat = chosen_ts.amat;
+        result.cell = chosen_ts.cell;
+        result.fit = chosen_ts.fit;
         result.selected_character = c.character;
         result.selected_system = c.system_id;
         result.selected_symmetry_number =
             symmetry_number_for_lattice(c.system_id);
-        // Always apply Bravais OM → CELL / AMAT (SUGGLATT + prefer_*).
-        const struct matrix_3x3 om_pick = eigen_to_dps(c.orientation);
-        result.amat = amat_from_dps_om(om_pick, geometry.wavelength_A);
-        struct cell_struct cell2{};
-        dircell_from_om(om_pick, &cell2);
-        result.cell = cell_from_dps(cell2);
+        std::cout << std::fixed;
+        std::cout << "  INDEXFIT: system=" << c.system_id
+                  << " char=" << c.character << " indexed="
+                  << static_cast<int>(
+                         std::lround(100.0 * result.fit.indexed_frac)
+                     )
+                  << "% rmsd_hkl=" << std::setprecision(3)
+                  << result.fit.rmsd_hkl << " (n=" << result.fit.n_indexed
+                  << "/" << result.fit.n_total << ")\n";
     }
 
     result.orientation =

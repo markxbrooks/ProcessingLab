@@ -180,3 +180,63 @@ Kabsch, W. (1993). J. Appl. Cryst.26, 795–800.
 Kabsch, W. (2010). Acta Cryst. D66, 133–144. [DOI] [PMC free article] [PubMed] [Google Scholar]
 Kursula, P. (2004). J. Appl. Cryst.37, 347–348.
 Weiss, M. S. (2001). J. Appl. Cryst.34, 130–135.
+
+
+Please compare these 2 runs:
+
+ of reflection intensity I
+            estimated from sample statistics
+
+ R-meas   = redundancy independent R-factor (intensities)
+            Diederichs & Karplus (1997), Nature Struct. Biol. 4, 269-275.
+
+ CC(1/2)  = percentage of correlation between intensities from
+            random half-datasets. Correlation significant at
+            the 0.1% level is marked by an asterisk.
+            Karplus & Diederichs (2012), Science 336, 1030-33
+ Anomal   = percentage of correlation between random half-sets
+  Corr      of anomalous intensity differences. Correlation
+            significant at the 0.1% level is marked.
+ SigAno   = mean anomalous difference in units of its estimated
+            standard deviation (|F(+)-F(-)|/Sigma). F(+), F(-)
+            are structure factor estimates obtained from the
+            merged intensity observations in each parity class.
+  Nano    = Number of unique reflections used to calculate
+            Anomal_Corr & SigAno. At least two observations
+            for each (+ and -) parity are required.
+
+
+ SUBSET OF INTENSITY DATA WITH SIGNAL/NOISE >= -3.0 AS FUNCTION OF RESOLUTION
+ RESOLUTION     NUMBER OF REFLECTIONS    COMPLETENESS R-FACTOR  R-FACTOR COMPARED I/SIGMA   R-meas  CC(1/2)  Anomal  SigAno   Nano
+   LIMIT     OBSERVED  UNIQUE  POSSIBLE     OF DATA   observed  expected                                      Corr
+
+    12.33        1800       2        91        2.2%        0.0%    261.7%     1800   10.41      0.0%     0.0      0   0.000       0
+     6.36        8100       9       553        1.6%        0.0%    202.8%     8100   15.81      0.0%   100.0*     0   0.000       0
+     4.29        9000      10      1422        0.7%        0.0%    133.9%     9000   13.49      0.0%   100.0*     0   0.000       0
+     3.23       18000      20      2730        0.7%        0.0%    234.4%    18000   10.48      0.0%   100.0*     0   0.000       0
+     2.59       14400      16      4426        0.4%        0.0%    190.4%    14400   13.61      0.0%   100.0*     0   0.000       0
+     2.17       27000      30      6581        0.5%        0.0%    194.3%    27000   13.43      0.0%   100.0*     0   0.000       0
+     1.86       21600      24      9112        0.3%        0.0%    144.5%    21600   19.80      0.0%   100.0*     0   0.000       0
+     1.63        9000      10     12091        0.1%        0.0%    215.8%     9000   13.90      0.0%   100.0*     0   0.000       0
+     1.45        3600       4     15485        0.0%        0.0%    196.0%     3600   15.38      0.0%   100.0*     0   0.000       0
+    total      112500     125     52491        0.2%        0.0%    186.0%   112500   14.43      0.0%   100.0*     0   0.000       0
+
+
+ NUMBER OF REFLECTIONS IN SELECTED SUBSET OF IMAGES  112500
+ NUMBER OF REJECTED MISFITS                           68400
+ NUMBER OF SYSTEMATIC ABSENT REFLECTIONS                  0
+ NUMBER OF ACCEPTED OBSERVATIONS                     112500
+ NUMBER OF UNIQUE ACCEPTED REFLECTIONS                  125
+
+  Wrote GXPARM: "/Users/brooks/Personal/xtal/building/20140929_76c1b_0002212/76c1b_0002212/GXPARM.XDS"
+  FINDSPOTS: FINDSPOTS wrote /tmp/2212.spt (300 spots)
+  AUTOINDEX: AUTOINDEX complete
+PROCESSINGLAB_CELL 42.9079756410 117.6838001982 60.1490984196 90.0000000000 94.7035209766 90.0000000000
+PROCESSINGLAB_MATRIX -0.0228358728 0.0004276760 -0.0017315897 0.0000123905 0.0079117725 0.0025850543 -0.0000710298 0.0051437149 -0.0155086480
+PROCESSINGLAB_SYSTEM mC
+PROCESSINGLAB_CHARACTER 28
+PROCESSINGLAB_NSPOTS 300
+  PROCESS: image="/Users/brooks/Personal/xtal/building/20140929_76c1b_0002212/76c1b_0002212/76c1b_0002212_1_0001.cbf" frames=1-900 preds=266400 integrated=180900 → "76c1b.mtz"
+
+s /Users/brooks/Personal/xtal/building/20140929_76c1b_0002212/76c1b_0002212/xia2/DEFAULT/NATIVE/SWEEP1/integrate/12_CORRECT.LP
+

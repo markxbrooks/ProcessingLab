@@ -372,6 +372,12 @@ if(BUILD_TESTING)
     target_link_libraries(test_detector_init PRIVATE mosflm_geometry)
     add_test(NAME detector_init COMMAND test_detector_init)
 
+    add_executable(test_partial_absorb
+        tests/unit/test_partial_absorb.cpp
+    )
+    target_link_libraries(test_partial_absorb PRIVATE mosflm_geometry)
+    add_test(NAME partial_absorb COMMAND test_partial_absorb)
+
     add_executable(test_orientation
         tests/unit/test_orientation.cpp
     )
@@ -981,6 +987,16 @@ if(BUILD_TESTING)
         add_test(
             NAME control_autoindex
             COMMAND test_control_autoindex
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_76c1b_autoindex
+            tests/differential/test_76c1b_autoindex.cpp
+        )
+        target_link_libraries(test_76c1b_autoindex PRIVATE mosflm_indexing)
+        add_test(
+            NAME 76c1b_autoindex
+            COMMAND test_76c1b_autoindex
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

@@ -49,4 +49,34 @@ CORRECT-lite: `POLARIZATION ρ` (default 0.98) in LP; `AIR` path-length absorpti
 
 INTEGRATE-lite: `PARTIALSCALE` (I÷FRACTIONCALC), `AUTOSIGMA` (σM/σD from partials), PEAKHALF clamped to half SEPARATION, trusted-mask profile bg.
 
+### IDXREF / AUTOINDEX (COLSPOT coverage)
+
+XDS IDXREF uses multi-image COLSPOT (often thousands of spots). ProcessingLab
+`FINDSPOTS` defaults to `MAXSPOTS 1500`. For large cells, **single-frame
+`MAXSPOTS ≤ 500` is unsafe** — DPS can lock onto a short-vector / sublattice
+(e.g. 76c1b wrongly indexing as ~43×118×60 mC instead of ~62×187×72 mP).
+
+Recommended CONTROL for indexing:
+
+```text
+FINDSPOTS THRESHOLD 5 MAXSPOTS 1500 FIND 1 FILE spots.spt MULTIFRAME RANGE 1 50
+GO
+AUTOINDEX DPS THRESHOLD 15 …
+GO
+```
+
+`MULTIFRAME` without `RANGE` defaults to a 50-frame wedge from `FIND`.
+For CBF/SMV templates, each frame path is resolved separately (HDF5 masters
+still use the frame index). Default `MERGE_XY 0` keeps per-frame 3D spots;
+set `MERGE_XY` / `MERGE_PHI` only when clustering persistent peaks.
+DiffractionLab `build_findspots_commands(..., for_indexing=True)` emits the
+same MULTIFRAME pattern with `MAXSPOTS 1500`.
+
+After DPS + Bravais SUGGLATT, ProcessingLab applies a BESTSOLAR-lite gate
+(`%indexed` / RMSD HKL) and may fall back among LASTGOOD candidates (preferring
+`mP` over a poorly indexing `mC`). Look for `INDEXFIT:` / `PROCESSINGLAB_INDEXED`
+in the log. If AUTOINDEX still fails, seed from Xia2/XDS with `--xparm`
+pointing at an **index-stage** `XPARM.XDS` (not a prior bad ProcessingLab
+`GXPARM.XDS`).
+
 Optional multi-image COLSPOT: `FINDSPOTS MULTIFRAME RANGE first last …`. Multi-frame PROCESS runs periodic post-refinement (`POSTREFINE PERIOD n`, default every 25 frames).
