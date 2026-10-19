@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+
+__version__ = "0.1.0"
+__author__ = "Pierre Legrand (pierre.legrand@synchrotron-soleil.fr)"
+__date__ = "20-12-2004"
+__copyright__ = "Copyright (c) 2004  Pierre Legrand"
+__license__ = "LGPL"
+
+import os, sys
+from xupy import XParam, xdsInp2Param, opReadCl, opWriteCl, saveLastVersion, LP_names
+import popen2
+import re
+
+stepmark = re.compile(r"^( [*]{5} (\w{4,}) [*]{5}  )")
+XDSHOME = '/home/legrand/prog/pxsoft/XDS/XDS-linux_ifc_Intel+AMD'
+
+class XDS:
+
+    def __init__(self,obj=None):
+        """Constructor for the Param classes from file or string."""
+        
+        self.__cancelled = 0
+        self.__lastOutp = 0
+        self.__execfile = os.path.join(XDSHOME,"xds_par")
+        self.running = 0
+        self.inpParam = XParam()
+        if type(obj) == file:
+            exec obj.read() in self.inpParam.__dict__
+            obj.close()
+        if type(obj) == str:
+            exec obj in self.inpParam.__dict__
+
+    def cancel (self):
+        self.__cancelled = 1
+
+    def getOutp(self):
+        if not self.__cancelled:
+            nLine = len(self.outp)
+            diff = nLine - self.__lastOutp
+            self.__lastOutp = nLine
+            if diff:
+                return "".join(self.outp[-diff:])[:-1]
+            else: return ""
+    
+    def run(self, rdir, rsave=None):
+        self.__cancelled = 0
+        self.running = 1
+        self.step = 0
+        self.step_name = ""
+        self.outp = []
+        result = 0
+        #In = xdsInp2Param(inp_str=opReadCl("XDS.INP"))
+        #self.inpParam.mix(In)
+        
+        if rdir:
+            if not os.path.exists(rdir):
+                try: os.mkdir(rdir)
+                except:
+                    print "STOP! Can't creat xds working directory:",rdir
+                    sys.exit()
+            if os.path.isdir(rdir):
+                os.chdir(rdir)
+        
+        opWriteCl("XDS.INP", "%s" % self.inpParam)
+        xdsProcess = popen2.Popen3(self.__execfile)
+        while self.running:
+            self.status = xdsProcess.poll() 
+            if self.status != -1:
+                self.running = 0
+                break
+            if self.__cancelled:
+                os.kill(xdsProcess.pid, 9)
+                break
+            nl = xdsProcess.fromchild.readline()
+            sm = stepmark.match(nl)
+            if sm:
+                self.step += 1
+                self.step_name = sm.group(2)
+                print sm.group(2), self.step
+            if nl: self.outp.append(nl)
+            
+        self.step += 1
+        self.step_name = "FINISHED"
+        if self.__cancelled: result = -1
+        if rsave: saveLastVersion(LP_names)
+        print "End of XDS run"
+        os.chdir("../")
+        return 1
+
+if __name__ == "__main__":
+    In = xdsInp2Param(inp_str=opReadCl("XDS.INP"))
+    newrun = XDS()
+    newrun.inpParam.mix(In)
+    newrun.run("xds_run1")
