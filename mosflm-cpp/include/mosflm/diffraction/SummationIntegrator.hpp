@@ -29,8 +29,10 @@ struct IntegrationSettings {
     int box_half_px{3};
     /// Background frame thickness outside the peak box (pixels).
     int bg_frame_px{2};
-    /// If true, scale intensity/sigma by unpolarized ``lp_factor``.
+    /// If true, scale intensity/sigma by ``lp_factor``.
     bool apply_lp{false};
+    /// XDS ``FRACTION_OF_POLARIZATION`` (0 = unpolarized; ~0.98 synchrotron).
+    double polarization_fraction{0.0};
     /// If true, map beam-relative mm to ADSC/MOSFLM image pixels via
     /// :func:`cpp_mm_to_mosflm_xdet` (``XG↔y_mm``, ``YG↔x_mm``) using
     /// ``image_beam_*_mm``. Default false keeps the synthetic centre-origin

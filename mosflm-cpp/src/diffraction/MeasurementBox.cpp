@@ -36,19 +36,14 @@ void to_pixel(
     if (settings.mosflm_detector_axes) {
         double xdet = 0.0;
         double ydet = 0.0;
-        // YSCALE stretches YG ↔ C++ x_mm (second pixel pitch), matching
-        // ``cpp_mm_to_mosflm_xdet`` / insulin_xdet.
-        const double py =
-            (std::fabs(detector.yscale) > 1e-15)
-                ? (detector.pixel_size_y_mm / detector.yscale)
-                : detector.pixel_size_y_mm;
-        mosflm::cpp_mm_to_mosflm_xdet(
+        mosflm::cpp_mm_to_mosflm_xdet_yscale(
             x_mm,
             y_mm,
             settings.image_beam_x_mm,
             settings.image_beam_y_mm,
             detector.pixel_size_x_mm,
-            py,
+            detector.pixel_size_y_mm,
+            detector.yscale,
             xdet,
             ydet
         );
@@ -73,6 +68,71 @@ int derive_peak_half(
     const int hy = static_cast<int>(std::lround(0.5 * box.separation_y_mm / py));
     return std::max(2, std::min(hx, hy));
 }
+
+}  // namespace (helpers above stay local)
+
+void refine_centroid_com(
+    const image::DiffractionImage& image,
+    int& col,
+    int& row,
+    int half,
+    double max_shift_px
+) {
+    if (half < 1 || max_shift_px <= 0.0) {
+        return;
+    }
+    const int w = image.metadata.width;
+    const int h = image.metadata.height;
+    double sum = 0.0;
+    double sx = 0.0;
+    double sy = 0.0;
+    double vmax = 0.0;
+    int n_pix = 0;
+    for (int dr = -half; dr <= half; ++dr) {
+        for (int dc = -half; dc <= half; ++dc) {
+            const int c = col + dc;
+            const int r = row + dr;
+            if (c < 0 || r < 0 || c >= w || r >= h) {
+                continue;
+            }
+            const auto idx =
+                static_cast<std::size_t>(r) * static_cast<std::size_t>(w) +
+                static_cast<std::size_t>(c);
+            const double v = static_cast<double>(image.pixels[idx]);
+            if (v <= 0.0) {
+                continue;
+            }
+            sum += v;
+            sx += v * static_cast<double>(c);
+            sy += v * static_cast<double>(r);
+            vmax = std::max(vmax, v);
+            ++n_pix;
+        }
+    }
+    if (sum < 1e-6 || n_pix < 4) {
+        return;
+    }
+    // Skip weak / flat windows — COM walks to noise and hurts I correlation.
+    const double mean = sum / static_cast<double>(n_pix);
+    if (!(vmax > 1.5 * mean + 1.0)) {
+        return;
+    }
+    const double c_new = sx / sum;
+    const double r_new = sy / sum;
+    const double dx = c_new - static_cast<double>(col);
+    const double dy = r_new - static_cast<double>(row);
+    const double shift = std::hypot(dx, dy);
+    if (shift > max_shift_px) {
+        const double s = max_shift_px / shift;
+        col = static_cast<int>(std::lround(static_cast<double>(col) + dx * s));
+        row = static_cast<int>(std::lround(static_cast<double>(row) + dy * s));
+    } else {
+        col = static_cast<int>(std::lround(c_new));
+        row = static_cast<int>(std::lround(r_new));
+    }
+}
+
+namespace {
 
 bool in_neighbour_peak(
     int c,
@@ -103,10 +163,13 @@ std::vector<BgSample> collect_bg_samples(
     int peak_half,
     int outer,
     const std::vector<int>& neigh_cols,
-    const std::vector<int>& neigh_rows
+    const std::vector<int>& neigh_rows,
+    const std::vector<std::uint8_t>* trusted_mask = nullptr,
+    int trusted_width = 0
 ) {
     std::vector<BgSample> samples;
     samples.reserve(static_cast<std::size_t>((2 * outer + 1) * (2 * outer + 1)));
+    const int w = image.metadata.width;
     for (int dr = -outer; dr <= outer; ++dr) {
         for (int dc = -outer; dc <= outer; ++dc) {
             if (std::abs(dr) <= peak_half && std::abs(dc) <= peak_half) {
@@ -114,9 +177,18 @@ std::vector<BgSample> collect_bg_samples(
             }
             const int c = c0 + dc;
             const int r = r0 + dr;
-            if (c < 0 || r < 0 || c >= image.metadata.width ||
-                r >= image.metadata.height) {
+            if (c < 0 || r < 0 || c >= w || r >= image.metadata.height) {
                 continue;
+            }
+            if (trusted_mask != nullptr && trusted_width > 0 &&
+                !trusted_mask->empty()) {
+                const auto idx =
+                    static_cast<std::size_t>(r) *
+                        static_cast<std::size_t>(trusted_width) +
+                    static_cast<std::size_t>(c);
+                if (idx >= trusted_mask->size() || (*trusted_mask)[idx] == 0) {
+                    continue;
+                }
             }
             if (in_neighbour_peak(c, r, peak_half, neigh_cols, neigh_rows)) {
                 continue;
@@ -185,10 +257,14 @@ BackgroundPlane fit_background_plane(
     int outer,
     const std::vector<int>& neigh_cols,
     const std::vector<int>& neigh_rows,
-    double reject_nsigma
+    double reject_nsigma,
+    const std::vector<std::uint8_t>* trusted_mask,
+    int trusted_width
 ) {
-    auto samples =
-        collect_bg_samples(image, c0, r0, peak_half, outer, neigh_cols, neigh_rows);
+    auto samples = collect_bg_samples(
+        image, c0, r0, peak_half, outer, neigh_cols, neigh_rows, trusted_mask,
+        trusted_width
+    );
     const int n0 = static_cast<int>(samples.size());
     BackgroundPlane plane = solve_plane(samples);
     if (!plane.ok) {
@@ -273,6 +349,13 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
             predictions[static_cast<std::size_t>(i)].y_mm,
             col[static_cast<std::size_t>(i)], row[static_cast<std::size_t>(i)]
         );
+        if (box.refine_centroid) {
+            refine_centroid_com(
+                image, col[static_cast<std::size_t>(i)],
+                row[static_cast<std::size_t>(i)], box.centroid_half_px,
+                box.centroid_max_shift_px
+            );
+        }
     }
 
     const double sep_x_px =
@@ -335,15 +418,20 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
             nr.push_back(row[static_cast<std::size_t>(j)]);
         }
 
+        const std::vector<std::uint8_t>* tmask =
+            box.trusted_mask.empty() ? nullptr : &box.trusted_mask;
+        const int tw = box.trusted_width;
         BackgroundPlane bg;
         if (box.use_bg_plane) {
             bg = fit_background_plane(
-                image, c0, r0, peak_half, outer, nc, nr, box.bg_reject_nsigma
+                image, c0, r0, peak_half, outer, nc, nr, box.bg_reject_nsigma,
+                tmask, tw
             );
         } else {
             // Flat mean of rim (legacy path).
-            auto samples =
-                collect_bg_samples(image, c0, r0, peak_half, outer, nc, nr);
+            auto samples = collect_bg_samples(
+                image, c0, r0, peak_half, outer, nc, nr, tmask, tw
+            );
             if (box.bg_reject_nsigma > 0.0 && samples.size() >= 4) {
                 for (int pass = 0; pass < 3; ++pass) {
                     double sum = 0.0;
@@ -433,7 +521,10 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
                  : 0.0);
         r.sigma = std::sqrt(std::max(var, 1.0));
         if (settings.apply_lp) {
-            apply_lp_inplace(detector, r.x_mm, r.y_mm, r.intensity, r.sigma);
+            apply_lp_inplace(
+                detector, r.x_mm, r.y_mm, r.intensity, r.sigma,
+                settings.polarization_fraction
+            );
         }
         r.ok = true;
         out.push_back(r);

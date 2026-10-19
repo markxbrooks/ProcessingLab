@@ -1,5 +1,5 @@
 /**
- * Phase D / E: IntegrationLab (C++ CONTROL) without Fortran amalgamation.
+ * Phase D / E: ProcessingLab (C++ CONTROL) without Fortran amalgamation.
  * Empty-stdin golden lines + EXIT smoke + optional PROCESS.
  *
  * Distinct from F77 ``ipmosflm`` (``make fortran-oracle``).
@@ -19,7 +19,7 @@ namespace fs = std::filesystem;
 namespace {
 
 fs::path find_integrationlab() {
-    if (const char* env = std::getenv("MOSFLM_INTEGRATIONLAB")) {
+    if (const char* env = std::getenv("MOSFLM_PROCESSINGLAB")) {
         return env;
     }
     // Back-compat with older test env name.
@@ -27,19 +27,19 @@ fs::path find_integrationlab() {
         return env;
     }
     const char* rels[] = {
-        "build/IntegrationLab",
-        "build/IntegrationLab.exe",
-        "./IntegrationLab",
-        "./IntegrationLab.exe",
-        "../build/IntegrationLab",
-        "../build/IntegrationLab.exe",
+        "build/ProcessingLab",
+        "build/ProcessingLab.exe",
+        "./ProcessingLab",
+        "./ProcessingLab.exe",
+        "../build/ProcessingLab",
+        "../build/ProcessingLab.exe",
     };
     for (const char* rel : rels) {
         if (fs::exists(rel)) {
             return rel;
         }
     }
-    return "build/IntegrationLab";
+    return "build/ProcessingLab";
 }
 
 fs::path find_insulin_img() {
@@ -78,7 +78,7 @@ std::string slurp(const fs::path& path) {
 
 int main() {
     const fs::path bin = find_integrationlab();
-    CHECK_MSG(fs::exists(bin), "missing IntegrationLab binary in build/");
+    CHECK_MSG(fs::exists(bin), "missing ProcessingLab binary in build/");
 
     // Empty stdin → Mosflm-like banner + NO RUN CARD + END OF PROCESSING.
     {
@@ -147,7 +147,7 @@ int main() {
                                 script.string() + " >/dev/null 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         CHECK_MSG(fs::exists(mtz) && fs::file_size(mtz) > 0,
-                  "IntegrationLab did not write MTZ");
+                  "ProcessingLab did not write MTZ");
         std::cout << "integrationlab: PROCESS MTZ ok (" << mtz << ")\n";
     } else {
         std::cout << "integrationlab: SKIP PROCESS (no insulin SMV)\n";

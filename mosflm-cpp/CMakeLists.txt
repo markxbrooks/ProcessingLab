@@ -112,8 +112,19 @@ if(MOSFLM_HAS_DPS_BRAVAIS AND EXISTS "${MOSFLM_DPS_INDEXER_LIB}")
     set(MOSFLM_HAS_DPS_INDEXER ON)
 endif()
 
-add_library(mosflm_geometry
+# Optional HDF5 for Eiger NeXus / *_master.h5 (Phase E / E5 decode).
+find_package(HDF5 COMPONENTS C HL)
+set(MOSFLM_HAS_HDF5 OFF)
+if(HDF5_FOUND)
+    set(MOSFLM_HAS_HDF5 ON)
+    message(STATUS "HDF5 found — enabling Hdf5ImageReader")
+else()
+    message(WARNING "HDF5 not found — Hdf5ImageReader stub only")
+endif()
+
+set(MOSFLM_GEOMETRY_SOURCES
     src/geometry/UnitCell.cpp
+    src/geometry/CellFix.cpp
     src/geometry/ReciprocalLattice.cpp
     src/geometry/OrientationMatrix.cpp
     src/geometry/DetectorGeometry.cpp
@@ -128,6 +139,7 @@ add_library(mosflm_geometry
     src/legacy/MosflmFortranAdapters.cpp
     src/image/CbfImageReader.cpp
     src/image/SmvImageReader.cpp
+    src/image/Hdf5ImageReader.cpp
     src/image/ImageIO.cpp
     src/imosflm/ImosflmSocket.cpp
     src/crystal/CrystalMetadata.cpp
@@ -137,15 +149,33 @@ add_library(mosflm_geometry
     src/diffraction/SummationIntegrator.cpp
     src/diffraction/ProcessPipeline.cpp
     src/diffraction/MeasurementBox.cpp
+    src/diffraction/TrustedRegion.cpp
+    src/diffraction/DetectorInit.cpp
     src/diffraction/StandardProfile.cpp
     src/diffraction/ProfileFitter.cpp
     src/diffraction/LpCorrection.cpp
+    src/diffraction/DataQualityStats.cpp
     src/refinement/PostRefinement.cpp
     src/control/ControlSession.cpp
+    src/io/ImportedSweepGeometry.cpp
+    src/io/XinfoImporter.cpp
+    src/io/XdsInpImporter.cpp
+    src/io/XparmIO.cpp
     ${gemmi_SOURCE_DIR}/src/mtz.cpp
     ${gemmi_SOURCE_DIR}/src/sprintf.cpp
     ${gemmi_SOURCE_DIR}/src/gz.cpp
 )
+
+if(MOSFLM_HAS_HDF5)
+    list(APPEND MOSFLM_GEOMETRY_SOURCES
+        ${MOSFLM_IPMOSFLM_ROOT}/lz4/lz4.c
+        ${MOSFLM_IPMOSFLM_ROOT}/lz4/h5zlz4.c
+        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle/bitshuffle.c
+        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle/bshuf_h5filter.c
+    )
+endif()
+
+add_library(mosflm_geometry ${MOSFLM_GEOMETRY_SOURCES})
 
 target_include_directories(mosflm_geometry
     PUBLIC
@@ -169,15 +199,45 @@ target_compile_definitions(mosflm_geometry
         GEMMI_WRITE_IMPLEMENTATION
 )
 
+if(MOSFLM_HAS_HDF5)
+    target_include_directories(mosflm_geometry PRIVATE
+        ${HDF5_INCLUDE_DIRS}
+        ${MOSFLM_IPMOSFLM_ROOT}/lz4
+        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle
+    )
+    # ${HDF5_LIBRARIES} is often only libhdf5; H5LT lives in libhdf5_hl.
+    target_link_libraries(mosflm_geometry PRIVATE ${HDF5_LIBRARIES})
+    if(TARGET hdf5::hdf5_hl)
+        target_link_libraries(mosflm_geometry PRIVATE hdf5::hdf5_hl)
+    elseif(HDF5_HL_LIBRARIES)
+        target_link_libraries(mosflm_geometry PRIVATE ${HDF5_HL_LIBRARIES})
+    else()
+        target_link_libraries(mosflm_geometry PRIVATE hdf5_hl)
+    endif()
+    target_compile_definitions(mosflm_geometry PUBLIC MOSFLM_HAS_HDF5=1)
+    # Vendored filter sources are C99.
+    set_source_files_properties(
+        ${MOSFLM_IPMOSFLM_ROOT}/lz4/lz4.c
+        ${MOSFLM_IPMOSFLM_ROOT}/lz4/h5zlz4.c
+        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle/bitshuffle.c
+        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle/bshuf_h5filter.c
+        PROPERTIES LANGUAGE C
+    )
+endif()
+
 if(MOSFLM_HAS_DPS_BRAVAIS)
     set(MOSFLM_INDEXING_SOURCES
         src/indexing/BravaisClassifier.cpp
+        src/indexing/BravaisSelect.cpp
         src/indexing/SpotList.cpp
+        src/indexing/SpotFinder.cpp
+        src/indexing/MultiFrameSpotFinder.cpp
     )
     if(MOSFLM_HAS_DPS_INDEXER)
         list(APPEND MOSFLM_INDEXING_SOURCES
             src/indexing/AutoIndexer.cpp
             src/indexing/ControlAutoIndex.cpp
+            src/indexing/ControlFindSpots.cpp
         )
     endif()
     add_library(mosflm_indexing ${MOSFLM_INDEXING_SOURCES})
@@ -236,23 +296,23 @@ target_link_libraries(mosflm_cpp_cli
 )
 
 # Default release binary (C++ CONTROL). Distinct from F77 ``ipmosflm`` oracle.
-# On Windows, CMake appends ``.exe`` → IntegrationLab.exe.
-add_executable(IntegrationLab
+# On Windows, CMake appends ``.exe`` → ProcessingLab.exe.
+add_executable(ProcessingLab
     app/ipmosflm_main.cpp
 )
-target_link_libraries(IntegrationLab
+target_link_libraries(ProcessingLab
     PRIVATE
         mosflm_geometry
 )
 if(TARGET mosflm_indexing AND MOSFLM_HAS_DPS_INDEXER)
-    target_link_libraries(IntegrationLab PRIVATE mosflm_indexing)
-    target_compile_definitions(IntegrationLab PRIVATE MOSFLM_HAS_INDEXING=1)
+    target_link_libraries(ProcessingLab PRIVATE mosflm_indexing)
+    target_compile_definitions(ProcessingLab PRIVATE MOSFLM_HAS_INDEXING=1)
 endif()
-set_target_properties(IntegrationLab PROPERTIES
-    OUTPUT_NAME IntegrationLab
+set_target_properties(ProcessingLab PROPERTIES
+    OUTPUT_NAME ProcessingLab
 )
 
-install(TARGETS mosflm_cpp_cli IntegrationLab
+install(TARGETS mosflm_cpp_cli ProcessingLab
     RUNTIME DESTINATION bin
 )
 install(TARGETS mosflm_geometry
@@ -287,6 +347,36 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_unit_cell PRIVATE mosflm_geometry)
     add_test(NAME unit_cell COMMAND test_unit_cell)
+
+    add_executable(test_cell_fix
+        tests/unit/test_cell_fix.cpp
+    )
+    target_link_libraries(test_cell_fix PRIVATE mosflm_geometry)
+    add_test(NAME cell_fix COMMAND test_cell_fix)
+
+    add_executable(test_xparm_io
+        tests/unit/test_xparm_io.cpp
+    )
+    target_link_libraries(test_xparm_io PRIVATE mosflm_geometry)
+    add_test(NAME xparm_io COMMAND test_xparm_io)
+
+    add_executable(test_trusted_region
+        tests/unit/test_trusted_region.cpp
+    )
+    target_link_libraries(test_trusted_region PRIVATE mosflm_geometry)
+    add_test(NAME trusted_region COMMAND test_trusted_region)
+
+    add_executable(test_detector_init
+        tests/unit/test_detector_init.cpp
+    )
+    target_link_libraries(test_detector_init PRIVATE mosflm_geometry)
+    add_test(NAME detector_init COMMAND test_detector_init)
+
+    add_executable(test_partial_absorb
+        tests/unit/test_partial_absorb.cpp
+    )
+    target_link_libraries(test_partial_absorb PRIVATE mosflm_geometry)
+    add_test(NAME partial_absorb COMMAND test_partial_absorb)
 
     add_executable(test_orientation
         tests/unit/test_orientation.cpp
@@ -368,6 +458,22 @@ if(BUILD_TESTING)
         COMMAND test_control_session
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
+
+    add_executable(test_xinfo_xds_import
+        tests/unit/test_xinfo_xds_import.cpp
+    )
+    target_link_libraries(test_xinfo_xds_import PRIVATE mosflm_geometry)
+    add_test(
+        NAME xinfo_xds_import
+        COMMAND test_xinfo_xds_import
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_data_quality_stats
+        tests/unit/test_data_quality_stats.cpp
+    )
+    target_link_libraries(test_data_quality_stats PRIVATE mosflm_geometry)
+    add_test(NAME data_quality_stats COMMAND test_data_quality_stats)
 
     add_executable(test_image_io tests/unit/test_image_io.cpp)
     target_link_libraries(test_image_io PRIVATE mosflm_geometry)
@@ -464,6 +570,58 @@ if(BUILD_TESTING)
     set_tests_properties(cbf_process_compare PROPERTIES
         ENVIRONMENT
             "MOSFLM_IPMOSFLM=${MOSFLM_IPMOSFLM_ROOT}/bin/ipmosflm.oracle"
+    )
+
+    # F77 ipmosflm vs ProcessingLab CLI on known-indexed insulin SMV PROCESS.
+    # Compares MTZ cell/SG + ASU-aware HKL recall (soft-skip if missing).
+    add_executable(test_smv_process_compare
+        tests/differential/test_smv_process_compare.cpp
+    )
+    target_link_libraries(test_smv_process_compare PRIVATE mosflm_geometry)
+    add_dependencies(test_smv_process_compare ProcessingLab)
+    add_test(
+        NAME smv_process_compare
+        COMMAND test_smv_process_compare
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    if(DEFINED ENV{CCP4} AND NOT "$ENV{CCP4}" STREQUAL "")
+        set(_MOSFLM_SMV_CCP4 "$ENV{CCP4}")
+    else()
+        set(_MOSFLM_SMV_CCP4 "/Applications/ccp4-9")
+    endif()
+    set_tests_properties(smv_process_compare PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_PROCESSINGLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${MOSFLM_IPMOSFLM_ROOT}/bin/ipmosflm.oracle;CCP4=${_MOSFLM_SMV_CCP4}"
+        TIMEOUT 300
+    )
+
+    # Thaumatin PL process MTZ vs DIALS integrated.mtz (soft-skip if missing).
+    add_executable(test_thaumatin_dials_mtz_compare
+        tests/differential/test_thaumatin_dials_mtz_compare.cpp
+    )
+    target_link_libraries(test_thaumatin_dials_mtz_compare PRIVATE mosflm_geometry)
+    add_test(
+        NAME thaumatin_dials_mtz_compare
+        COMMAND test_thaumatin_dials_mtz_compare
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+    )
+    set_tests_properties(thaumatin_dials_mtz_compare PROPERTIES TIMEOUT 120)
+
+    # ProcessingLab vs DIALS on known-indexed insulin SMV (soft-skip if no DIALS).
+    add_executable(test_smv_dials_compare
+        tests/differential/test_smv_dials_compare.cpp
+    )
+    target_link_libraries(test_smv_dials_compare PRIVATE mosflm_geometry)
+    add_dependencies(test_smv_dials_compare ProcessingLab)
+    add_test(
+        NAME smv_dials_compare
+        COMMAND test_smv_dials_compare
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(smv_dials_compare PROPERTIES
+        ENVIRONMENT
+            "MOSFLM_PROCESSINGLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_DIALS_BIN=${_MOSFLM_SMV_CCP4}/bin;CCP4=${_MOSFLM_SMV_CCP4}"
+        TIMEOUT 600
     )
 
     add_executable(test_profile_fitter
@@ -740,7 +898,7 @@ if(BUILD_TESTING)
     add_executable(test_integrationlab
         tests/differential/test_ipmosflm_thin.cpp
     )
-    add_dependencies(test_integrationlab IntegrationLab)
+    add_dependencies(test_integrationlab ProcessingLab)
     add_test(
         NAME integrationlab
         COMMAND test_integrationlab
@@ -748,15 +906,15 @@ if(BUILD_TESTING)
     )
     set_tests_properties(integrationlab PROPERTIES
         ENVIRONMENT
-            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/IntegrationLab${CMAKE_EXECUTABLE_SUFFIX}"
+            "MOSFLM_PROCESSINGLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX}"
     )
 
-    # Wall-time: IntegrationLab (C++) vs F77 ipmosflm on known-indexed PROCESS.
+    # Wall-time: ProcessingLab (C++) vs F77 ipmosflm on known-indexed PROCESS.
     # Soft-skips inside the binary if either side is missing / wrong arch.
     add_executable(test_ipmosflm_perf
         tests/differential/test_ipmosflm_perf.cpp
     )
-    add_dependencies(test_ipmosflm_perf IntegrationLab)
+    add_dependencies(test_ipmosflm_perf ProcessingLab)
     add_test(
         NAME ipmosflm_perf
         COMMAND test_ipmosflm_perf
@@ -769,7 +927,7 @@ if(BUILD_TESTING)
     endif()
     set_tests_properties(ipmosflm_perf PROPERTIES
         ENVIRONMENT
-            "MOSFLM_INTEGRATIONLAB=${CMAKE_CURRENT_BINARY_DIR}/IntegrationLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${_MOSFLM_PERF_CCP4}/bin/ipmosflm;CCP4=${_MOSFLM_PERF_CCP4}"
+            "MOSFLM_PROCESSINGLAB=${CMAKE_CURRENT_BINARY_DIR}/ProcessingLab${CMAKE_EXECUTABLE_SUFFIX};MOSFLM_IPMOSFLM=${_MOSFLM_PERF_CCP4}/bin/ipmosflm;CCP4=${_MOSFLM_PERF_CCP4}"
         TIMEOUT 600
     )
 
@@ -780,6 +938,16 @@ if(BUILD_TESTING)
         target_link_libraries(test_bravais_classifier PRIVATE mosflm_indexing)
         add_test(NAME bravais_classifier COMMAND test_bravais_classifier)
 
+        add_executable(test_bravais_select
+            tests/unit/test_bravais_select.cpp
+        )
+        target_link_libraries(test_bravais_select PRIVATE mosflm_indexing)
+        add_test(
+            NAME bravais_select
+            COMMAND test_bravais_select
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
         add_executable(test_spot_list
             tests/unit/test_spot_list.cpp
         )
@@ -787,6 +955,16 @@ if(BUILD_TESTING)
         add_test(
             NAME spot_list
             COMMAND test_spot_list
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_spot_finder
+            tests/unit/test_spot_finder.cpp
+        )
+        target_link_libraries(test_spot_finder PRIVATE mosflm_indexing)
+        add_test(
+            NAME spot_finder
+            COMMAND test_spot_finder
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()
@@ -809,6 +987,16 @@ if(BUILD_TESTING)
         add_test(
             NAME control_autoindex
             COMMAND test_control_autoindex
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_76c1b_autoindex
+            tests/differential/test_76c1b_autoindex.cpp
+        )
+        target_link_libraries(test_76c1b_autoindex PRIVATE mosflm_indexing)
+        add_test(
+            NAME 76c1b_autoindex
+            COMMAND test_76c1b_autoindex
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()

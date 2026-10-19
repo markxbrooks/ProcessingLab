@@ -36,13 +36,16 @@ void to_pixel(
     if (settings.mosflm_detector_axes) {
         double xdet = 0.0;
         double ydet = 0.0;
-        const double py =
-            (std::fabs(detector.yscale) > 1e-15)
-                ? (detector.pixel_size_y_mm / detector.yscale)
-                : detector.pixel_size_y_mm;
-        mosflm::cpp_mm_to_mosflm_xdet(
-            x_mm, y_mm, settings.image_beam_x_mm, settings.image_beam_y_mm,
-            detector.pixel_size_x_mm, py, xdet, ydet
+        mosflm::cpp_mm_to_mosflm_xdet_yscale(
+            x_mm,
+            y_mm,
+            settings.image_beam_x_mm,
+            settings.image_beam_y_mm,
+            detector.pixel_size_x_mm,
+            detector.pixel_size_y_mm,
+            detector.yscale,
+            xdet,
+            ydet
         );
         col = static_cast<int>(std::lround(xdet));
         row = static_cast<int>(std::lround(ydet));
@@ -199,6 +202,13 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             predictions[static_cast<std::size_t>(i)].y_mm,
             col[static_cast<std::size_t>(i)], row[static_cast<std::size_t>(i)]
         );
+        if (settings.box.refine_centroid) {
+            refine_centroid_com(
+                image, col[static_cast<std::size_t>(i)],
+                row[static_cast<std::size_t>(i)], settings.box.centroid_half_px,
+                settings.box.centroid_max_shift_px
+            );
+        }
         region[static_cast<std::size_t>(i)] = region_index(
             col[static_cast<std::size_t>(i)],
             row[static_cast<std::size_t>(i)],
@@ -256,9 +266,12 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             nc.push_back(col[static_cast<std::size_t>(j)]);
             nr.push_back(row[static_cast<std::size_t>(j)]);
         }
+        const auto* tmask =
+            settings.box.trusted_mask.empty() ? nullptr
+                                              : &settings.box.trusted_mask;
         const BackgroundPlane bg = fit_background_plane(
             image, c0, r0, peak_half, outer, nc, nr,
-            settings.box.bg_reject_nsigma
+            settings.box.bg_reject_nsigma, tmask, settings.box.trusted_width
         );
         if (!bg.ok) {
             continue;
@@ -343,9 +356,12 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             nc.push_back(col[static_cast<std::size_t>(j)]);
             nr.push_back(row[static_cast<std::size_t>(j)]);
         }
+        const auto* tmask2 =
+            settings.box.trusted_mask.empty() ? nullptr
+                                              : &settings.box.trusted_mask;
         const BackgroundPlane bg = fit_background_plane(
             image, c0, r0, peak_half, outer, nc, nr,
-            settings.box.bg_reject_nsigma
+            settings.box.bg_reject_nsigma, tmask2, settings.box.trusted_width
         );
         obs.bg_a = bg.a;
         obs.bg_b = bg.b;
@@ -387,21 +403,23 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             std::max(std::fabs(iprf), 1.0);
         obs.profile_ok = true;
 
-        if (settings.prefer_profile) {
+        if (settings.prefer_profile &&
+            obs.pkratio <= settings.max_pkratio_for_profile) {
             obs.intensity = obs.profile_intensity;
             obs.sigma = obs.profile_sigma;
         }
         if (iset.apply_lp) {
+            const double rho = iset.polarization_fraction;
             apply_lp_inplace(
-                detector, obs.x_mm, obs.y_mm, obs.intensity, obs.sigma
+                detector, obs.x_mm, obs.y_mm, obs.intensity, obs.sigma, rho
             );
             apply_lp_inplace(
                 detector, obs.x_mm, obs.y_mm, obs.profile_intensity,
-                obs.profile_sigma
+                obs.profile_sigma, rho
             );
             apply_lp_inplace(
                 detector, obs.x_mm, obs.y_mm, obs.summation_intensity,
-                obs.summation_sigma
+                obs.summation_sigma, rho
             );
         }
         out.push_back(obs);

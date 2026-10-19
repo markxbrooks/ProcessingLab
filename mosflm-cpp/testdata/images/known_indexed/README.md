@@ -4,7 +4,7 @@ Real CCP4 example frame `insulin_1_001.img` (see `geometry.txt`). Scripts:
 
 | File | Role |
 | ---- | ---- |
-| `cpp_process.in` | C++ `IntegrationLab` / `ControlSession` PROCESS (inline MATRIX) |
+| `cpp_process.in` | C++ `ProcessingLab` / `ControlSession` PROCESS (inline MATRIX) |
 | `ipmosflm_process.in` | F77 `ipmosflm` PROCESS-only peer (no AUTOINDEX) |
 | `insulin_1.mat` | NEWMAT-format orientation for F77 `MATRIX` keyword |
 | `ipmosflm.in` | Full F77 oracle capture (spot search + autoindex + PROCESS) |

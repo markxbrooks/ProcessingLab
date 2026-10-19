@@ -397,6 +397,7 @@ int main() {
         true,
         false,
         {},
+        0.0,
         image
     };
     const auto cpp = ProcessPipeline{}.run(req);

@@ -39,6 +39,14 @@ struct ProcessRequest {
     /// for the calling workflow; see CTest ``insulin_postref``.
     bool enable_postrefinement{false};
     refinement::PostRefinementSettings postrefinement{};
+    /// Minimum ``FRACTIONCALC`` to write an MTZ row (DIALS export keeps
+    /// partiality ≳ 0.5). Set ≤ 0 to disable the gate.
+    double min_fractioncalc{0.5};
+    /// Scale ``I``/``σ`` by ``1/FRACTIONCALC`` for partials (full-equivalent).
+    bool scale_by_partiality{true};
+    /// AIR absorption coefficient (mm⁻¹); 0 disables. Path ≈ detector distance
+    /// × sec(θ) through air beyond the crystal–detector baseline.
+    double air_absorption_mm_inv{0.0};
     const image::DiffractionImage& image;
 };
 
@@ -48,9 +56,13 @@ struct ProcessResult {
     std::vector<IntegratedReflection> integrated;
     std::vector<MeasObservation> meas_observations;
     std::vector<ProfileObservation> profile_observations;
+    /// Simple H/K/L/I/SIGI view (always filled from ``mosflm_reflections``).
     std::vector<crystal::SimpleReflection> mtz_reflections;
+    /// Full MOSFLM PROCESS rows (FLAG / XDET / FRACTIONCALC / …).
+    std::vector<crystal::MosflmReflection> mosflm_reflections;
     std::size_t n_overlapped{0};
     std::size_t n_profile_ok{0};
+    std::size_t n_omitted{0};  ///< IGFLAG 0 / −64 / −128 style skips
     refinement::PostRefinementResult postrefinement{};
 };
 
@@ -59,11 +71,15 @@ class ProcessPipeline {
 public:
     [[nodiscard]] ProcessResult run(const ProcessRequest& request) const;
 
-    /// Write ``result.mtz_reflections`` via :class:`MtzAdapter`.
+    /// Write ``result.mosflm_reflections`` (18-col MOSFLM) via :class:`MtzAdapter`.
+    ///
+    /// ``wavelength_A`` is stored in MTZ dataset/batch headers (POINTLESS needs
+    /// batch records for unmerged input).
     static void write_mtz(
         const std::filesystem::path& path,
         const crystal::CrystalMetadata& crystal,
-        const ProcessResult& result
+        const ProcessResult& result,
+        double wavelength_A = 0.0
     );
 
     /// Geometry / orientation from

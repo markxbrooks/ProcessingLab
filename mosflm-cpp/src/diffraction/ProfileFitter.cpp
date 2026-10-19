@@ -166,7 +166,10 @@ std::vector<ProfileFittedReflection> ProfileFitter::fit(
             std::max(1.0, std::fabs(best.intensity) + std::fabs(best.B) * best.npix)
         );
         if (settings.apply_lp) {
-            apply_lp_inplace(detector, r.x_mm, r.y_mm, r.intensity, r.sigma);
+            apply_lp_inplace(
+                detector, r.x_mm, r.y_mm, r.intensity, r.sigma,
+                settings.polarization_fraction
+            );
         }
         r.ok = true;
         out.push_back(r);

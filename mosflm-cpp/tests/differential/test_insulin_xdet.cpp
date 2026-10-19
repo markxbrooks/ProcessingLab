@@ -166,10 +166,10 @@ int main() {
               << " inlier<100frac=" << inlier_frac
               << " inlier_rms_px=" << inlier_rms << '\n';
 
-    // ROTMAT2 + refined TILT/TWIST (was ~40 px flat).
-    CHECK_MSG(median < 30.0, "median XDET residual above 30 px");
-    CHECK_MSG(inlier_frac > 0.70, "inlier fraction below 0.70");
-    CHECK_MSG(inlier_rms < 35.0, "inlier RMS above 35 px");
+    // ROTMAT2 + refined TILT/TWIST (E8: tighten vs prior 30 px soft floor).
+    CHECK_MSG(median < 28.0, "median XDET residual above 28 px");
+    CHECK_MSG(inlier_frac > 0.72, "inlier fraction below 0.72");
+    CHECK_MSG(inlier_rms < 32.0, "inlier RMS above 32 px");
 
     return mosflm_test::finish("insulin_xdet");
 }

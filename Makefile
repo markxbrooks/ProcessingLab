@@ -1,6 +1,6 @@
 # ProcessingLab top-level Makefile (Phase D / E).
 #
-# Default: C++ core + IntegrationLab (no Fortran amalgamation).
+# Default: C++ core + ProcessingLab (no Fortran amalgamation).
 #   make / make cpp
 # Oracle amalgamation (F77 ipmosflm; not selected by env alone at this level):
 #   make dps-lib fortran-oracle
@@ -23,8 +23,8 @@ ifeq ($(OS),Windows_NT)
 else
   EXEEXT =
 endif
-INTEGRATIONLAB = IntegrationLab$(EXEEXT)
-bin_PROGRAMS = $(INTEGRATIONLAB)
+PROCESSINGLAB = ProcessingLab$(EXEEXT)
+bin_PROGRAMS = $(PROCESSINGLAB)
 
 .PHONY: all cpp cbf-lib dps-lib fortran-oracle libs force install uninstall \
 	clean distclean realclean test
@@ -44,15 +44,15 @@ dps-lib:
 	cd src/dps/util && ${MAKE}
 	cd src/dps/index && ${MAKE}
 
-# Default release artifact: mosflm-cpp CLI + IntegrationLab (C++ CONTROL).
+# Default release artifact: mosflm-cpp CLI + ProcessingLab (C++ CONTROL).
 cpp: cbf-lib dps-lib
 	cmake -S mosflm-cpp -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
 		-DMOSFLM_FORTRAN_ORACLE=OFF
-	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli IntegrationLab
+	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli ProcessingLab
 	mkdir -p bin
-	cp -f $(CPP_BUILD)/$(INTEGRATIONLAB) bin/$(INTEGRATIONLAB)
+	cp -f $(CPP_BUILD)/$(PROCESSINGLAB) bin/$(PROCESSINGLAB)
 	cp -f $(CPP_BUILD)/mosflm_cpp_cli$(EXEEXT) bin/mosflm_cpp_cli$(EXEEXT)
-	@echo "Installed thin binaries under bin/ (IntegrationLab; no amalgamation)."
+	@echo "Installed thin binaries under bin/ (ProcessingLab; no amalgamation)."
 
 test: cpp
 	ctest --test-dir $(CPP_BUILD) --output-on-failure
@@ -63,19 +63,19 @@ libs: cbf-lib
 	if [ -f $(RANLIB) ]; then $(RANLIB) lib/DPSLIB.a; fi
 
 # Needs DPS archives (libdps_index.a); ``libs`` alone is insufficient.
-# Installs F77 oracle as bin/ipmosflm (does not overwrite IntegrationLab).
+# Installs F77 oracle as bin/ipmosflm (does not overwrite ProcessingLab).
 fortran-oracle: libs dps-lib
 	cd mosflm ; ${MAKE} MOSFLM_FORTRAN_ORACLE=1 ipmosflm
 
 force:
-	rm -f bin/$(INTEGRATIONLAB)
+	rm -f bin/$(PROCESSINGLAB)
 	${MAKE} cpp
 
-# Back-compat alias: ``make ipmosflm`` → C++ IntegrationLab.
+# Back-compat alias: ``make ipmosflm`` → C++ ProcessingLab.
 ipmosflm: cpp
-IntegrationLab: cpp
+ProcessingLab: cpp
 
-bin/$(INTEGRATIONLAB): cpp
+bin/$(PROCESSINGLAB): cpp
 
 distclean-generic:
 	-rm -f ${MAKE}file Makefile
@@ -91,7 +91,7 @@ clean: clean-generic
 	cd cbf ; ${MAKE} clean || true
 	cd mosflm ; ${MAKE} clean || true
 	rm -rf $(CPP_BUILD)
-	rm -f bin/$(INTEGRATIONLAB) bin/mosflm_cpp_cli$(EXEEXT) bin/ipmosflm
+	rm -f bin/$(PROCESSINGLAB) bin/mosflm_cpp_cli$(EXEEXT) bin/ipmosflm
 
 distclean: distclean-generic clean
 	-rm -f config.status config.h
@@ -103,9 +103,9 @@ realclean: clean
 
 install: cpp
 	mkdir -p "$(DESTDIR)$(bindir)"
-	$(INSTALL_PROGRAM) bin/$(INTEGRATIONLAB) "$(DESTDIR)$(bindir)"
+	$(INSTALL_PROGRAM) bin/$(PROCESSINGLAB) "$(DESTDIR)$(bindir)"
 	$(INSTALL_PROGRAM) bin/mosflm_cpp_cli$(EXEEXT) "$(DESTDIR)$(bindir)"
 
 uninstall:
-	rm -f "$(DESTDIR)$(bindir)/$(INTEGRATIONLAB)" \
+	rm -f "$(DESTDIR)$(bindir)/$(PROCESSINGLAB)" \
 		"$(DESTDIR)$(bindir)/mosflm_cpp_cli$(EXEEXT)"

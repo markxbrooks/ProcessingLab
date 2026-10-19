@@ -209,12 +209,12 @@ int main() {
               << " frac_|z|<50=" << frac_soft_z << " spearman=" << sp
               << " frac_pkratio<2=" << frac_pkratio << '\n';
 
-    CHECK_MSG(med_ratio > 0.05 && med_ratio < 20.0, "median profile I ratio");
-    CHECK_MSG(frac_ratio_ok > 0.40, "profile ratio band");
-    CHECK_MSG(frac_soft_z > 0.70, "profile |z| outliers");
+    CHECK_MSG(med_ratio > 0.3 && med_ratio < 5.0, "median profile I ratio");
+    CHECK_MSG(frac_ratio_ok > 0.55, "profile ratio band");
+    CHECK_MSG(frac_soft_z > 0.75, "profile |z| outliers");
     CHECK_MSG(frac_pkratio > 0.50, "summation vs profile disagree too often");
     // Soft rank correlation floor until multi-region profiles / better XDET.
-    CHECK_MSG(sp > -0.25, "profile I anti-correlated with oracle");
+    CHECK_MSG(sp > -0.20, "profile I anti-correlated with oracle");
 
     return mosflm_test::finish("insulin_profile");
 }

@@ -343,7 +343,9 @@ int cmd_process_insulin(
     const auto req =
         mosflm::diffraction::ProcessPipeline::known_indexed_insulin(image);
     const auto result = mosflm::diffraction::ProcessPipeline{}.run(req);
-    mosflm::diffraction::ProcessPipeline::write_mtz(mtz_path, req.crystal, result);
+    mosflm::diffraction::ProcessPipeline::write_mtz(
+        mtz_path, req.crystal, result, req.detector.wavelength_A
+    );
     std::cout << "process-insulin: " << img_path
               << " preds=" << result.predictions.size()
               << " integrated=" << result.mtz_reflections.size() << " → "
@@ -365,7 +367,7 @@ int cmd_run_script(
         }
         ++n_proc;
         mosflm::diffraction::ProcessPipeline::write_mtz(
-            mtz_path, r.crystal, r.process
+            mtz_path, r.crystal, r.process, session.state().wavelength_A
         );
         std::cout << "run: " << script << " image=" << r.image_used
                   << " preds=" << r.process.predictions.size()

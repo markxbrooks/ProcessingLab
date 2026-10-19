@@ -35,6 +35,12 @@ struct SpotList {
 
     /// Read a MOSFLM spot file (header, beam, spots until ``-999``).
     [[nodiscard]] static SpotList read_spt(const std::filesystem::path& path);
+
+    /// Write a MOSFLM spot file (DiffractionLab / WSPOT layout).
+    ///
+    /// Spot columns 3–4 are oscillation range and mid-φ (degrees), matching
+    /// iMosflm ``Spot::write`` / DiffractionLab ``write_merged_spotfile``.
+    void write_spt(const std::filesystem::path& path) const;
 };
 
 }  // namespace mosflm::indexing
