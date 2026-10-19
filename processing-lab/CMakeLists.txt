@@ -259,7 +259,8 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
     )
     # findlen.f is required by ind_gen_direct but not in libdps_index.a.
     set(MOSFLM_FINDLEN_F "${MOSFLM_IPMOSFLM_ROOT}/src/dps/index/findlen.f")
-    # Order matters for single-pass ld; RESCAN is applied on consumers below.
+    # Order matters for single-pass ld; consumers use RESCAN (Linux) or
+    # repeated archives (Apple) to resolve circular DPS symbols.
     set(MOSFLM_DPS_LINK_LIBS
         ${MOSFLM_DPS_INDEX_LIB}
         ${MOSFLM_DPS_UTIL_LIB}
@@ -284,7 +285,7 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
         endif()
     endif()
     # Propagate DPS archives to executables (PUBLIC) so they appear on the
-    # final link line; consumers wrap them in LINK_GROUP:RESCAN.
+    # final link line; ProcessingLab wraps them for circular resolution.
     target_link_libraries(mosflm_indexing PUBLIC ${MOSFLM_DPS_LINK_LIBS})
 endif()
 
@@ -307,11 +308,21 @@ target_link_libraries(ProcessingLab
         mosflm_geometry
 )
 if(TARGET mosflm_indexing AND MOSFLM_HAS_DPS_INDEXER)
-    # RESCAN: libdps_index needs dps_malloc/num_ok_hkl from libdps (later on
-    # the line) and findlen_ from mosflm_indexing.a (earlier on the line).
-    target_link_libraries(ProcessingLab PRIVATE
-        "$<LINK_GROUP:RESCAN,mosflm_indexing,${MOSFLM_DPS_LINK_LIBS}>"
-    )
+    # Circular static deps: libdps_index ↔ libdps ↔ findlen_ in mosflm_indexing.
+    # LINK_GROUP:RESCAN needs GNU ld (--start-group); Apple ld does not support
+    # that feature for CXX, so repeat the archive list instead.
+    if(APPLE)
+        target_link_libraries(ProcessingLab PRIVATE
+            mosflm_indexing
+            ${MOSFLM_DPS_LINK_LIBS}
+            mosflm_indexing
+            ${MOSFLM_DPS_LINK_LIBS}
+        )
+    else()
+        target_link_libraries(ProcessingLab PRIVATE
+            "$<LINK_GROUP:RESCAN,mosflm_indexing,${MOSFLM_DPS_LINK_LIBS}>"
+        )
+    endif()
     target_compile_definitions(ProcessingLab PRIVATE MOSFLM_HAS_INDEXING=1)
 endif()
 set_target_properties(ProcessingLab PROPERTIES
