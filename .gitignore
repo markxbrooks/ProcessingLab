@@ -18,3 +18,4 @@
 build/
 _build/GXPARM.XDS
 XPARM.XDS
+test*cbf

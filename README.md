@@ -68,9 +68,9 @@ EOF
 ```
 
 ```commandline
-./bin/ProcessingLab --image testdata/test_0001.cbf hklout test.mtz <<'EOF'
-DIRECTORY testdata
-TEMPLATE testdata_####.cbf
+./bin/ProcessingLab --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf hklout test.mtz <<'EOF'
+DIRECTORY test_xray_data_cbf
+TEMPLATE 76c1b_0002212_1_####.cbf
 FINDSPOTS THRESHOLD 5.0 MAXSPOTS 300 FIND 1 PHI 0.0 0.15 FILE /tmp/testdata.spt
 GO
 AUTOINDEX DPS THRESHOLD 20

@@ -1,7 +1,9 @@
 #include "mosflm/io/XparmIO.hpp"
 
 #include "mosflm/control/ControlSession.hpp"
+#include "mosflm/geometry/LabFrame.hpp"
 
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -22,6 +24,185 @@ std::vector<std::string> split_ws(const std::string& line) {
     return out;
 }
 
+bool nearly_orthonormal_identity(const Eigen::Matrix3d& A) {
+    const double nrm = A.norm();
+    if (nrm < 1.2 || nrm > 2.2) {
+        return false;
+    }
+    const Eigen::Matrix3d I = Eigen::Matrix3d::Identity();
+    return (A - I).norm() < 0.15 || (A + I).norm() < 0.15 ||
+           (A.transpose() * A - I).norm() < 0.2;
+}
+
+/// Build Mosflm AMAT from XDS real-space unit-cell axes (lab Å).
+Eigen::Matrix3d mosflm_amat_from_xds_real_axes(
+    const Eigen::Vector3d& ax,
+    const Eigen::Vector3d& bx,
+    const Eigen::Vector3d& cx,
+    double wavelength_A
+) {
+    Eigen::Matrix3d real;
+    real.col(0) = ax;
+    real.col(1) = bx;
+    real.col(2) = cx;
+    const double det = real.determinant();
+    if (!(std::fabs(det) > 1.0)) {
+        return Eigen::Matrix3d::Zero();
+    }
+    // Reciprocal basis (Å⁻¹) in the same lab frame as the real axes.
+    const Eigen::Matrix3d recip = real.inverse().transpose();
+    // Treat XDS/Xia2 lab as the C++ lab; convert to MOSFLM AMAT.
+    return cpp_ub_to_mosflm_amat(recip, wavelength_A);
+}
+
+bool try_parse_xds_classic(
+    const std::vector<std::vector<std::string>>& rows,
+    XparmGeometry& g
+) {
+    // Locate space-group + cell row (7 tokens).
+    std::size_t icell = rows.size();
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i].size() < 7) {
+            continue;
+        }
+        try {
+            const int sg = std::stoi(rows[i][0]);
+            const double a = std::stod(rows[i][1]);
+            const double b = std::stod(rows[i][2]);
+            const double c = std::stod(rows[i][3]);
+            const double al = std::stod(rows[i][4]);
+            const double be = std::stod(rows[i][5]);
+            const double ga = std::stod(rows[i][6]);
+            if (a > 1.0 && b > 1.0 && c > 1.0 && al > 10.0 && be > 10.0 &&
+                ga > 10.0 && al < 180.0 && sg >= 1 && sg <= 230) {
+                g.spacegroup_number = sg;
+                g.cell = UnitCell{a, b, c, al, be, ga};
+                icell = i;
+                break;
+            }
+        } catch (...) {
+        }
+    }
+    if (icell >= rows.size()) {
+        return false;
+    }
+
+    // Wavelength + beam (4 tokens, wave in [0.3,3]).
+    for (const auto& r : rows) {
+        if (r.size() < 4) {
+            continue;
+        }
+        try {
+            const double wave = std::stod(r[0]);
+            if (wave > 0.3 && wave < 3.0) {
+                g.wavelength_A = wave;
+                g.beam_dir[0] = std::stod(r[1]);
+                g.beam_dir[1] = std::stod(r[2]);
+                g.beam_dir[2] = std::stod(r[3]);
+                break;
+            }
+        } catch (...) {
+        }
+    }
+
+    // Starting frame / osc / rotation axis (6 tokens).
+    for (const auto& r : rows) {
+        if (r.size() < 6) {
+            continue;
+        }
+        try {
+            const double sf = std::stod(r[0]);
+            const double sa = std::stod(r[1]);
+            const double osc = std::stod(r[2]);
+            if (sf >= 1.0 && sf < 100000.0 && osc > 0.001 && osc < 5.0) {
+                g.starting_frame = sf;
+                g.starting_angle_deg = sa;
+                g.oscillation_range_deg = osc;
+                g.rot_axis[0] = std::stod(r[3]);
+                g.rot_axis[1] = std::stod(r[4]);
+                g.rot_axis[2] = std::stod(r[5]);
+                break;
+            }
+        } catch (...) {
+        }
+    }
+
+    // Three real-space cell-axis rows immediately after the cell line.
+    if (icell + 3 >= rows.size()) {
+        return false;
+    }
+    Eigen::Vector3d ax, bx, cx;
+    bool axes_ok = true;
+    try {
+        for (int k = 0; k < 3; ++k) {
+            const auto& r = rows[icell + 1 + static_cast<std::size_t>(k)];
+            if (r.size() != 3) {
+                axes_ok = false;
+                break;
+            }
+            Eigen::Vector3d v(
+                std::stod(r[0]), std::stod(r[1]), std::stod(r[2])
+            );
+            const double len = v.norm();
+            // Real-space edges are tens–hundreds of Å (not unit detector axes).
+            if (!(len > 5.0 && len < 2000.0)) {
+                axes_ok = false;
+                break;
+            }
+            if (k == 0) {
+                ax = v;
+            } else if (k == 1) {
+                bx = v;
+            } else {
+                cx = v;
+            }
+        }
+    } catch (...) {
+        axes_ok = false;
+    }
+    if (axes_ok) {
+        const Eigen::Matrix3d A = mosflm_amat_from_xds_real_axes(
+            ax, bx, cx, g.wavelength_A > 0.1 ? g.wavelength_A : 1.0
+        );
+        if (A.norm() > 1e-6) {
+            g.amat = A;
+            g.has_amat = true;
+        }
+    }
+
+    // Detector: "segment NX NY QX QY" then "ORGX ORGY DISTANCE".
+    for (std::size_t i = 0; i + 1 < rows.size(); ++i) {
+        const auto& a = rows[i];
+        const auto& b = rows[i + 1];
+        if (a.size() == 5 && b.size() >= 3) {
+            try {
+                const int nx = std::stoi(a[1]);
+                const int ny = std::stoi(a[2]);
+                const double qx = std::stod(a[3]);
+                const double qy = std::stod(a[4]);
+                const double ox = std::stod(b[0]);
+                const double oy = std::stod(b[1]);
+                const double dist = std::stod(b[2]);
+                if (nx > 10 && ny > 10 && qx > 0.01 && qx < 1.0 &&
+                    qy > 0.01 && qy < 1.0 && dist > 10.0 && ox > 10.0 &&
+                    oy > 10.0) {
+                    g.nfast = nx;
+                    g.nslow = ny;
+                    g.qx_mm = qx;
+                    g.qy_mm = qy;
+                    g.orgx_px = ox;
+                    g.orgy_px = oy;
+                    g.distance_mm = dist;
+                    break;
+                }
+            } catch (...) {
+            }
+        }
+    }
+
+    return g.cell.a > 1.0 && g.has_amat;
+}
+
 }  // namespace
 
 XparmGeometry read_xparm(const std::filesystem::path& path) {
@@ -36,13 +217,23 @@ XparmGeometry read_xparm(const std::filesystem::path& path) {
         if (line.empty() || line[0] == '!' || line[0] == '#') {
             continue;
         }
+        // Skip the "XPARM.XDS VERSION ..." banner.
+        if (line.find("XPARM") != std::string::npos &&
+            line.find("VERSION") != std::string::npos) {
+            continue;
+        }
         auto toks = split_ws(line);
         if (!toks.empty()) {
             rows.push_back(std::move(toks));
         }
     }
 
-    // Prefer a row: spacegroup + 6 cell parameters.
+    // Prefer a full Xia2/XDS classic layout (cell axes → Mosflm AMAT).
+    if (try_parse_xds_classic(rows, g)) {
+        return g;
+    }
+
+    // Fallback: ProcessingLab bridge GXPARM / loose keyword scan.
     for (const auto& r : rows) {
         if (r.size() < 7) {
             continue;
@@ -65,7 +256,6 @@ XparmGeometry read_xparm(const std::filesystem::path& path) {
         }
     }
 
-    // Detector line often: NX NY ORGX ORGY DISTANCE QX QY
     for (const auto& r : rows) {
         if (r.size() < 7) {
             continue;
@@ -92,7 +282,6 @@ XparmGeometry read_xparm(const std::filesystem::path& path) {
         }
     }
 
-    // Fallback: org/dist/pixel without NX NY.
     if (g.distance_mm <= 10.0) {
         for (const auto& r : rows) {
             if (r.size() < 5) {
@@ -117,7 +306,7 @@ XparmGeometry read_xparm(const std::filesystem::path& path) {
         }
     }
 
-    // Optional 3×3 orientation block (three consecutive 3-token rows).
+    // Mosflm-scale AMAT only (reject detector-axis identity blocks).
     for (std::size_t i = 0; i + 2 < rows.size(); ++i) {
         if (rows[i].size() != 3 || rows[i + 1].size() != 3 ||
             rows[i + 2].size() != 3) {
@@ -132,7 +321,7 @@ XparmGeometry read_xparm(const std::filesystem::path& path) {
                 }
             }
             const double nrm = A.norm();
-            if (nrm > 1e-6 && nrm < 10.0) {
+            if (nrm > 1e-6 && nrm < 10.0 && !nearly_orthonormal_identity(A)) {
                 g.amat = A;
                 g.has_amat = true;
                 break;
@@ -141,7 +330,6 @@ XparmGeometry read_xparm(const std::filesystem::path& path) {
         }
     }
 
-    // Wavelength often on a short row with beam direction.
     for (const auto& r : rows) {
         if (r.size() < 4) {
             continue;
@@ -185,7 +373,7 @@ void write_xparm(
                 << '\n';
         }
     } else {
-        out << "1 0 0\n0 1 0\n0 0 1\n";
+        out << "0.01 0 0\n0 0.01 0\n0 0 0.01\n";
     }
     out << g.nfast << ' ' << g.nslow << ' ' << g.orgx_px << ' ' << g.orgy_px
         << ' ' << g.distance_mm << ' ' << g.qx_mm << ' ' << g.qy_mm << '\n';
