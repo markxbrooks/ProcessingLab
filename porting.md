@@ -3,7 +3,7 @@
 **Repository:** ProcessingLab (formerly `ipmosflm`). Default `bin/ProcessingLab`
 (`ProcessingLab.exe` on Windows) is the C++ CONTROL driver (Phase D / E); the
 Autotools amalgamation is an optional F77 oracle (`make fortran-oracle` →
-`bin/ipmosflm`). The C++ port lives in `mosflm-cpp/`.
+`bin/ipmosflm`). The C++ port lives in `diffraction-lab`.
 
 I would approach this as a progressive reimplementation of MOSFLM's computational core, with a C++ interface and a compatibility layer around the existing crystallographic algorithms—not as a line-by-line translation of the entire repository.
 
@@ -13,19 +13,19 @@ Your first milestone should be a C++ executable that reproduces a small, indepen
 
 ## Current status (Oct 2026)
 
-Active work lives under [`mosflm-cpp/`](mosflm-cpp/). Build and run CTest there (optional `MOSFLM_WITH_CCTBX`).
+Active work lives under [`diffraction-lab`](diffraction-lab/). Build and run CTest there (optional `MOSFLM_WITH_CCTBX`).
 
 | Topic | Status |
 | ----- | ------ |
 | C++ vertical slice | Geometry, miniCBF I/O, stills + oscillation `PREDICT`, box summation, 2D Gaussian profile fit, MTZ write — covered by CTest and `mosflm_cpp_cli` |
-| PREDICT oracles | Analytical dumps + real insulin capture under `mosflm-cpp/testdata/oracle/known_indexed/`. CTest `insulin_hkl_overlap`: ASU-aware recall **100%** (`mosflm_lab_to_cpp`); `insulin_xdet`: median ~**23 px** (`ROTMAT2` + refined TILT/TWIST/YSCALE); `insulin_process_mtz`: exact-HKL recall ≥ 0.85 |
+| PREDICT oracles | Analytical dumps + real insulin capture under `diffraction-lab`. CTest `insulin_hkl_overlap`: ASU-aware recall **100%** (`mosflm_lab_to_cpp`); `insulin_xdet`: median ~**23 px** (`ROTMAT2` + refined TILT/TWIST/YSCALE); `insulin_process_mtz`: exact-HKL recall ≥ 0.85 |
 | Default `bin/ProcessingLab` | **C++** CONTROL → PROCESS (D6/E); no amalgamation link (`.exe` on Windows). F77 oracle: `make fortran-oracle` → `bin/ipmosflm`; optional `MOSFLM_CPP_PREDICT=1` splice ~89% exact-HKL (`known_indexed_cpp_predict/`) |
 | Phase C | **Done** — lab-frame map, HKL/XDET differentials, mosaicity + absences in predictor, YSCALE/TILT/TWIST fields, PROCESS splice + MTZ CTest |
 | Phase D / D1 | **Done** — pure C++ `ProcessPipeline` (SMV → predict → sum → MTZ); CTest `insulin_cpp_process` ASU recall ≥ 0.85 (no amalgamation hook) |
 | Phase D / D2 | **Done** — `MeasIntegrator` (SEPARATION boxes, overlap, bg sigma-clip); CTest `insulin_isi` soft I/SIGI vs oracle; no Fortran MEAS |
 | Phase D / D3 | **Done** — `StandardProfileFitter` (learned Rossmann profile); CTest `insulin_profile`; INTEG3 row = parity (global; not NMASKS) |
 
-Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-languages). Package layout and CLI: [`mosflm-cpp/README.md`](mosflm-cpp/README.md).
+Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-languages). Package layout and CLI: [`diffraction-lab`](diffraction-lab/README.md).
 
 ## Repo findings (verified locally)
 
@@ -37,7 +37,7 @@ Phase table: see [§3](#3-choose-a-migration-strategy-that-allows-mixed-language
 | Indexing | DPS under `src/dps/` + `index/`; **REFIX stubbed** (`torefix*.f`) — public tree has no `refix_all.for` |
 | GUI | External iMosflm (Tcl/Tk) over sockets; **no Tcl in this tree** |
 | License | BSD-style `COPYING` (A.G.W. Leslie / MRC LMB) |
-| C++ port home | `mosflm-cpp/` (this roadmap); top-level CMake project name `ProcessingLab` |
+| C++ port home | `diffraction-lab` (this roadmap); top-level CMake project name `ProcessingLab` |
 
 ### High-value routine map (no-X amalgamation preferred)
 
@@ -92,14 +92,14 @@ Smoke-tested: version banner prints and `EXIT` terminates cleanly. Keyword smoke
 ### Building mosflm-cpp (ProcessingLab)
 
 ```bash
-# From the ProcessingLab repo root (or mosflm-cpp/):
-cmake -S mosflm-cpp -B mosflm-cpp/build -DCMAKE_BUILD_TYPE=Release
+# From the ProcessingLab repo root (or diffraction-lab/):
+cmake -S diffraction-lab -B diffraction-lab/build -DCMAKE_BUILD_TYPE=Release
 # Optional: -DMOSFLM_WITH_CCTBX=ON  (Phenix cctbx.python POC)
-cmake --build mosflm-cpp/build
-ctest --test-dir mosflm-cpp/build --output-on-failure
+cmake --build diffraction-lab/build
+ctest --test-dir diffraction-lab/build --output-on-failure
 ```
 
-After a directory rename, delete `mosflm-cpp/build` once so CMake does not keep
+After a directory rename, delete `diffraction-lab` once so CMake does not keep
 stale absolute paths from the old tree.
 
 ## 1. Start with a source-code inventory
@@ -133,7 +133,7 @@ MOSFLM's documented workflow has three major stages:
 
 For a C++ port, use **integration of a known, already indexed dataset** as the first substantial end-to-end target. Autoindexing adds ambiguity that obscures early discrepancies.
 
-Regression corpus lives under [`mosflm-cpp/testdata/`](mosflm-cpp/testdata/README.md). Analytical oracles are in place; a known-indexed image set is still required for Fortran differentials (`tools/capture_ipmosflm_oracle.sh`).
+Regression corpus lives under [`diffraction-lab`](diffraction-lab/testdata/README.md). Analytical oracles are in place; a known-indexed image set is still required for Fortran differentials (`tools/capture_ipmosflm_oracle.sh`).
 
 ## 3. Choose a migration strategy that allows mixed languages
 
@@ -150,7 +150,7 @@ Keep COMMON blocks, column-major layout, and mangling inside `include/mosflm/leg
 
 ## 4. Design the C++ domain model before porting algorithms
 
-Layout under `mosflm-cpp/` (populated): `geometry`, `diffraction`, `crystal`, `image`, `indexing`, `refinement`, `control`, `legacy`; CMake + CTest; Eigen + Gemmi via FetchContent. Optional CCTBX remains a standalone evaluator (`docs/CCTBX_EVAL.md`), not a hard dependency.
+Layout under `diffraction-lab` (populated): `geometry`, `diffraction`, `crystal`, `image`, `indexing`, `refinement`, `control`, `legacy`; CMake + CTest; Eigen + Gemmi via FetchContent. Optional CCTBX remains a standalone evaluator (`docs/CCTBX_EVAL.md`), not a hard dependency.
 
 ## 5. Build a vertical slice, not a collection of translated functions
 
@@ -158,13 +158,13 @@ Layout under `mosflm-cpp/` (populated): `geometry`, `diffraction`, `crystal`, `i
 | ---- | ------ | ------ |
 | 1 | Read diffraction image + metadata | **Done** — `CbfImageReader` (CBFlib + miniCBF `#` comments) |
 | 2 | Experimental geometry | **Done** — `UnitCell` / `OrientationMatrix` / `DetectorGeometry` (+ Dstar, Rotmat, Clcalc, Matset) |
-| 3 | Predict reflections (`PREDICT`) | **Done** — stills + oscillation; analytical oracles; see [`FIRST_ROUTINE.md`](mosflm-cpp/docs/FIRST_ROUTINE.md) |
+| 3 | Predict reflections (`PREDICT`) | **Done** — stills + oscillation; analytical oracles; see [`FIRST_ROUTINE.md`](diffraction-lab/docs/FIRST_ROUTINE.md) |
 | 4 | Summation integrate | **Done** — `SummationIntegrator` + `MeasIntegrator`. Profile: **Done** — `StandardProfileFitter` (INTEG3 Rossmann global profile) |
 | 5 | Write MTZ; compare with numeric tolerances | **Done** — synthetic / CBF smoke + CTest `insulin_process_mtz` (cpp_predict vs Fortran oracle, exact-HKL recall ≥ 0.85) |
 
 ## First Fortran routine to replace: `PREDICT`
 
-See [mosflm-cpp/docs/FIRST_ROUTINE.md](mosflm-cpp/docs/FIRST_ROUTINE.md) for callers, I/O contract, and regression criteria. C++ stills/oscillation path, dump format, and Phase C Fortran splice (`MOSFLM_CPP_PREDICT`) are implemented.
+See [mosflm-cpp/docs/FIRST_ROUTINE.md](diffraction-lab/docs/FIRST_ROUTINE.md) for callers, I/O contract, and regression criteria. C++ stills/oscillation path, dump format, and Phase C Fortran splice (`MOSFLM_CPP_PREDICT`) are implemented.
 
 ## Milestones
 

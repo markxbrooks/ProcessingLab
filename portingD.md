@@ -14,7 +14,7 @@ A C++-owned path runs known-indexed insulin (geometry, predict, measure, integra
 
 
 
-Differentials vs [mosflm-cpp/testdata/oracle/known_indexed/](mosflm-cpp/testdata/oracle/known_indexed/) meet documented HKL / XDET / intensity gates.
+Differentials vs [mosflm-cpp/testdata/oracle/known_indexed/](diffraction-lab/testdata/oracle/known_indexed/) meet documented HKL / XDET / intensity gates.
 
 
 
@@ -40,15 +40,15 @@ Baseline already landed
 
 
 
-Vertical slice under [mosflm-cpp/](mosflm-cpp/): geometry, miniCBF, predict, summation, Gaussian profile, MTZ.
+Vertical slice under [mosflm-cpp/](diffraction-lab/): geometry, miniCBF, predict, summation, Gaussian profile, MTZ.
 
 
 
-Lab frame / XDET: [LabFrame.hpp](mosflm-cpp/include/mosflm/geometry/LabFrame.hpp); CTests insulin_hkl_overlap, insulin_xdet.
+Lab frame / XDET: [LabFrame.hpp](diffraction-lab/include/mosflm/geometry/LabFrame.hpp); CTests insulin_hkl_overlap, insulin_xdet.
 
 
 
-Phase C splice: MOSFLM_CPP_PREDICT=1 on GENERATE/REFLFIND; insulin PROCESS ~89% exact-HKL recall ([known_indexed_cpp_predict/](mosflm-cpp/testdata/oracle/known_indexed_cpp_predict/), [PHASE_C_SPLICE.md](mosflm-cpp/docs/PHASE_C_SPLICE.md)).
+Phase C splice: MOSFLM_CPP_PREDICT=1 on GENERATE/REFLFIND; insulin PROCESS ~89% exact-HKL recall ([known_indexed_cpp_predict/](diffraction-lab/testdata/oracle/known_indexed_cpp_predict/), [PHASE_C_SPLICE.md](diffraction-lab/docs/PHASE_C_SPLICE.md)).
 
 
 
@@ -256,7 +256,7 @@ Own the known-indexed pipeline without Fortran GENERATE/REEK/PROCESS orchestrati
 
 
 
-ProcessRequest / ProcessResult in [DOMAIN_API.md](mosflm-cpp/docs/DOMAIN_API.md).
+ProcessRequest / ProcessResult in [DOMAIN_API.md](diffraction-lab/docs/DOMAIN_API.md).
 
 
 
@@ -268,7 +268,7 @@ In-memory spot table (genfile optional later); predict -> summation integrate ->
 
 
 
-CLI: geometry from [geometry.txt](mosflm-cpp/testdata/images/known_indexed/geometry.txt).
+CLI: geometry from [geometry.txt](diffraction-lab/testdata/images/known_indexed/geometry.txt).
 
 
 
@@ -305,13 +305,13 @@ Exit: porting.md INTEG3 row = parity, not stand-in.
 
 D4 — Post-refinement Stage 2 (1–2 months) — **Done**
 
-`mosflm-cpp/src/refinement/PostRefinement.cpp`: Ewald φ (spindle +X), coordinate-descent missetting + isotropic cell scale, mosaic from MAD of φ residuals, optional XDET/YDET positional cost (`refine_against_detector`). Opt-in via `ProcessRequest::enable_postrefinement` (default false). CTests `post_refinement`, `insulin_postref`. Multi-image NADD / IDXREF-style joint refine still deferred.
+`diffraction-lab`: Ewald φ (spindle +X), coordinate-descent missetting + isotropic cell scale, mosaic from MAD of φ residuals, optional XDET/YDET positional cost (`refine_against_detector`). Opt-in via `ProcessRequest::enable_postrefinement` (default false). CTests `post_refinement`, `insulin_postref`. Multi-image NADD / IDXREF-style joint refine still deferred.
 
 Exit: Stage 2 checklist Done in porting.md.
 
 D5 — CONTROL keyword subset — **Done**
 
-`ControlSession` (`mosflm-cpp/src/control/`): CELL, SYMMETRY, BEAM, DISTANCE, WAVELENGTH, PIXEL, MATRIX/AMAT, MOSAIC, SEPARATION, DIRECTORY, TEMPLATE, IMAGE, PROCESS, GO, EXIT. Unknown lines (AUTOINDEX, GENFILE, …) ignored. Script [`cpp_process.in`](mosflm-cpp/testdata/images/known_indexed/cpp_process.in) drives PROCESS with geometry.txt MATRIX; CLI `mosflm_cpp_cli run`. CTests `control_session`, `insulin_control` (ASU recall ≥ 0.85).
+`ControlSession` (`diffraction-lab`): CELL, SYMMETRY, BEAM, DISTANCE, WAVELENGTH, PIXEL, MATRIX/AMAT, MOSAIC, SEPARATION, DIRECTORY, TEMPLATE, IMAGE, PROCESS, GO, EXIT. Unknown lines (AUTOINDEX, GENFILE, …) ignored. Script [`cpp_process.in`](diffraction-lab/testdata/images/known_indexed/cpp_process.in) drives PROCESS with geometry.txt MATRIX; CLI `mosflm_cpp_cli run`. CTests `control_session`, `insulin_control` (ASU recall ≥ 0.85).
 
 Exit: Keyword-driven C++ PROCESS without Fortran CONTROL for this corpus.
 

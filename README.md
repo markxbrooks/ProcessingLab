@@ -12,7 +12,7 @@ PROCESS driver that does **not** link the Fortran amalgamation. Autotools
 
 | Path | Role |
 | ---- | ---- |
-| [`mosflm-cpp/`](mosflm-cpp/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
+| [`diffraction-lab`](diffraction-lab/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
 | [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle** → `bin/ipmosflm`) |
 | [`porting.md`](porting.md) | Migration roadmap and current status |
 | `bin/ProcessingLab` | C++ CONTROL binary (default; `.exe` on Windows) |
@@ -22,19 +22,19 @@ PROCESS driver that does **not** link the Fortran amalgamation. Autotools
 ## Quick start (default)
 
 ```bash
-make cpp          # builds cbf/lib/libcbf.a then mosflm-cpp
-make test         # ctest in mosflm-cpp/build
+make cpp          # builds cbf/lib/libcbf.a then diffraction-lab
+make test         # ctest in diffraction-lab/build
 ./bin/ProcessingLab version
 ./bin/mosflm_cpp_cli process-insulin
 ./bin/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
-  mosflm-cpp/testdata/images/known_indexed/cpp_process.in
+  diffraction-lab/testdata/images/known_indexed/cpp_process.in
 # C++ vs F77 PROCESS wall-time (CCP4 ipmosflm by default):
-./mosflm-cpp/tools/bench_ipmosflm_perf.sh
+./diffraction-lab/tools/bench_ipmosflm_perf.sh
 ```
 
-If configuring `mosflm-cpp` directly, build CBFlib first: `make -C cbf`.
+If configuring `diffraction-lab` directly, build CBFlib first: `make -C cbf`.
 
-Top-level CMake (`-S .`) adds `mosflm-cpp` when `PROCESSINGLAB_BUILD_CPP=ON`
+Top-level CMake (`-S .`) adds `diffraction-lab` when `PROCESSINGLAB_BUILD_CPP=ON`
 (default).
 
 ## Optional Fortran oracle
@@ -47,8 +47,8 @@ make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite ProcessingLab)
 #   ./configure --with-ccp4-prefix=/Applications/ccp4-9
 #   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm
 # Experimental C++ PREDICT splice into the oracle:
-#   cmake -S mosflm-cpp -B mosflm-cpp/build -DMOSFLM_FORTRAN_ORACLE=ON
-#   cmake --build mosflm-cpp/build --target mosflm_predict_hook
+#   cmake -S diffraction-lab -B diffraction-lab/build -DMOSFLM_FORTRAN_ORACLE=ON
+#   cmake --build diffraction-lab/build --target mosflm_predict_hook
 #   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm
 ```
 
