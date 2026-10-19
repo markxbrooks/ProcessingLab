@@ -3,7 +3,7 @@
  *
  * Include this header (or a local bravais.h that pulls it in) so that
  * util/, index/, and src/dps/bravais/ cannot drift to incompatible
- * prototypes. See critique.md / mosflm-cpp port notes.
+ * prototypes. See critique.md / processing-lab port notes.
  *======================================================================*/
 
 #ifndef DPS_BRAVAIS_API_H

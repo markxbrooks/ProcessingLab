@@ -48,12 +48,12 @@ LOCALLIBS   = ${DPSLIB}/libdps_index.a ${DPSLIB}/DPSLIB.a ${DPSLIB}/libfftpack.a
 # Phase D / D6: Fortran amalgamation is opt-in.
 #   make MOSFLM_FORTRAN_ORACLE=1 ipmosflm
 # Optional Phase C C++ PREDICT splice (also requires oracle flag):
-#   cmake -S ../mosflm-cpp -B ../mosflm-cpp/build -DMOSFLM_FORTRAN_ORACLE=ON
-#   cmake --build ../mosflm-cpp/build --target mosflm_predict_hook
+#   cmake -S ../processing-lab -B ../processing-lab/build -DMOSFLM_FORTRAN_ORACLE=ON
+#   cmake --build ../processing-lab/build --target mosflm_predict_hook
 #   make MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm
 # Default ProcessingLab binary (no amalgamation):
-#   cmake --build ../mosflm-cpp/build --target ProcessingLab
-MOSFLM_CPP_DIR = ../mosflm-cpp
+#   cmake --build ../processing-lab/build --target ProcessingLab
+MOSFLM_CPP_DIR = ../processing-lab
 MOSFLM_CPP_BUILD = $(MOSFLM_CPP_DIR)/build
 # Link flags (must not pass gfortran-only FFLAGS to g++).
 LINKFLAGS =

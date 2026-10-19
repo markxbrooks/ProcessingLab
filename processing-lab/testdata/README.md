@@ -1,4 +1,4 @@
-# Regression corpus for mosflm-cpp
+# Regression corpus for processing-lab
 
 ## Layout
 

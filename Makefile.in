@@ -11,7 +11,7 @@ RANLIB  = @RANLIB@
 INSTALL = @INSTALL@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
 
-CPP_BUILD = mosflm-cpp/build
+CPP_BUILD = processing-lab/build
 ifeq ($(OS),Windows_NT)
   EXEEXT = .exe
 else
@@ -37,7 +37,7 @@ dps-lib:
 	cd src/dps/index && ${MAKE}
 
 cpp: cbf-lib dps-lib
-	cmake -S mosflm-cpp -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
+	cmake -S processing-lab -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
 		-DMOSFLM_FORTRAN_ORACLE=OFF
 	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli ProcessingLab
 	mkdir -p bin

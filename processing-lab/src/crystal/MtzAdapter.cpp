@@ -17,7 +17,7 @@ void MtzAdapter::write_simple(
     const std::vector<SimpleReflection>& reflections
 ) {
     gemmi::Mtz mtz;
-    mtz.title = "mosflm-cpp simple";
+    mtz.title = "processing-lab simple";
     mtz.cell = crystal.cell;
     if (crystal.spacegroup != nullptr) {
         mtz.spacegroup = crystal.spacegroup;
@@ -57,7 +57,7 @@ void MtzAdapter::write_mosflm(
     double wavelength_A
 ) {
     gemmi::Mtz mtz;
-    mtz.title = "mosflm-cpp PROCESS";
+    mtz.title = "processing-lab PROCESS";
     mtz.cell = crystal.cell;
     if (crystal.spacegroup != nullptr) {
         mtz.spacegroup = crystal.spacegroup;

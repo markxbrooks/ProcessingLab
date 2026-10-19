@@ -16,7 +16,7 @@ RANLIB  = ranlib
 INSTALL = /opt/homebrew/bin/ginstall -c
 INSTALL_PROGRAM = ${INSTALL}
 
-CPP_BUILD = mosflm-cpp/build
+CPP_BUILD = processing-lab/build
 # C++ release binary; F77 oracle remains ``ipmosflm``.
 ifeq ($(OS),Windows_NT)
   EXEEXT = .exe
@@ -31,7 +31,7 @@ bin_PROGRAMS = $(PROCESSINGLAB)
 
 all: cpp
 
-# Vendored CBFlib (required by mosflm-cpp CMake).
+# Vendored CBFlib (required by processing-lab CMake).
 cbf-lib:
 	cd cbf && ${MAKE}
 	if [ -f "$(RANLIB)" ] || command -v ranlib >/dev/null 2>&1; then \
@@ -44,9 +44,9 @@ dps-lib:
 	cd src/dps/util && ${MAKE}
 	cd src/dps/index && ${MAKE}
 
-# Default release artifact: mosflm-cpp CLI + ProcessingLab (C++ CONTROL).
+# Default release artifact: processing-lab CLI + ProcessingLab (C++ CONTROL).
 cpp: cbf-lib dps-lib
-	cmake -S mosflm-cpp -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
+	cmake -S processing-lab -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
 		-DMOSFLM_FORTRAN_ORACLE=OFF
 	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli ProcessingLab
 	mkdir -p bin

@@ -1361,7 +1361,7 @@ int  gen_direct_lattice_vectors(int max_tvectors, int numvectref,
        have to recalculate the directions and do the FFT. */
     get_projections_unsorted(xyz, *number_xyz, work_vector, proj);
     /* MOSFLM uses peakmode=1 (findlen_) here; that path is rejecting all
-       vectors (d_exp==0) when called from mosflm-cpp AutoIndexer on the
+       vectors (d_exp==0) when called from processing-lab AutoIndexer on the
        insulin oracle .spt even though peakmode=0 already found ~78Å cells.
        Keep peakmode=0 for the final FFT peak pick until findlen parity is fixed. */
     peakmode=0;

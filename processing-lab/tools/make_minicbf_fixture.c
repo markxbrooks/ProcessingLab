@@ -1,10 +1,10 @@
-/* Generate a small synthetic miniCBF fixture for mosflm-cpp tests.
+/* Generate a small synthetic miniCBF fixture for processing-lab tests.
  *
  * Build (from repo root):
- *   cc -O2 -std=gnu17 -Icbf/include -o mosflm-cpp/tools/make_minicbf_fixture \
- *      mosflm-cpp/tools/make_minicbf_fixture.c cbf/lib/libcbf.a -lm
+ *   cc -O2 -std=gnu17 -Icbf/include -o processing-lab/tools/make_minicbf_fixture \
+ *      processing-lab/tools/make_minicbf_fixture.c cbf/lib/libcbf.a -lm
  * Run:
- *   ./mosflm-cpp/tools/make_minicbf_fixture mosflm-cpp/testdata/cbf/synthetic_minicbf.cbf
+ *   ./processing-lab/tools/make_minicbf_fixture processing-lab/testdata/cbf/synthetic_minicbf.cbf
  */
 #include <stdio.h>
 #include <stdlib.h>

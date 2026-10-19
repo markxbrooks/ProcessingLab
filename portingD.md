@@ -14,7 +14,7 @@ A C++-owned path runs known-indexed insulin (geometry, predict, measure, integra
 
 
 
-Differentials vs [mosflm-cpp/testdata/oracle/known_indexed/](processing-lab/testdata/oracle/known_indexed/) meet documented HKL / XDET / intensity gates.
+Differentials vs [processing-lab/testdata/oracle/known_indexed/](processing-lab/testdata/oracle/known_indexed/) meet documented HKL / XDET / intensity gates.
 
 
 
@@ -40,7 +40,7 @@ Baseline already landed
 
 
 
-Vertical slice under [mosflm-cpp/](processing-lab/): geometry, miniCBF, predict, summation, Gaussian profile, MTZ.
+Vertical slice under [processing-lab/](processing-lab/): geometry, miniCBF, predict, summation, Gaussian profile, MTZ.
 
 
 
@@ -260,7 +260,7 @@ ProcessRequest / ProcessResult in [DOMAIN_API.md](processing-lab/docs/DOMAIN_API
 
 
 
-SMV image reader (insulin ADSC) under mosflm-cpp/src/image/.
+SMV image reader (insulin ADSC) under processing-lab/src/image/.
 
 
 

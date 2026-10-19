@@ -1,6 +1,6 @@
 # XDS as an optional external bridge
 
-ipmosflm and mosflm-cpp **do not** require [XDS](https://wiki.uni-konstanz.de/xds/index.php/Installation) to build or run. XDS is useful when you need to **convert** an unsupported detector format into miniCBF (or process HDF5 with vendor plugins), then feed the result into MOSFLM’s existing CBFlib path ([CBF_STATUS.md](CBF_STATUS.md)).
+ipmosflm and processing-lab **do not** require [XDS](https://wiki.uni-konstanz.de/xds/index.php/Installation) to build or run. XDS is useful when you need to **convert** an unsupported detector format into miniCBF (or process HDF5 with vendor plugins), then feed the result into MOSFLM’s existing CBFlib path ([CBF_STATUS.md](CBF_STATUS.md)).
 
 ## When to use it
 

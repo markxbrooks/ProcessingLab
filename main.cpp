@@ -2,9 +2,9 @@
  * Placeholder entry for IDE run configs.
  *
  * Default ProcessingLab binaries (Phase D / E):
- *   cmake -S mosflm-cpp -B mosflm-cpp/build && cmake --build mosflm-cpp/build
- *   ./mosflm-cpp/build/ProcessingLab    # C++ CONTROL (ProcessingLab.exe on Windows)
- *   ./mosflm-cpp/build/mosflm_cpp_cli    # full CLI
+ *   cmake -S processing-lab -B processing-lab/build && cmake --build processing-lab/build
+ *   ./processing-lab/build/ProcessingLab    # C++ CONTROL (ProcessingLab.exe on Windows)
+ *   ./processing-lab/build/mosflm_cpp_cli    # full CLI
  *
  * Fortran amalgamation (optional oracle → bin/ipmosflm):
  *   make fortran-oracle

@@ -46,8 +46,8 @@ LOCALLIBS   = ${DPSLIB}/libdps_index.a ${DPSLIB}/DPSLIB.a ${DPSLIB}/libfftpack.a
 	${F77} ${FFLAGS} -o $@ $<
 
 # Phase D / D6: amalgamation opt-in via MOSFLM_FORTRAN_ORACLE=1.
-# Default ProcessingLab binary is C++ ProcessingLab (mosflm-cpp/).
-MOSFLM_CPP_DIR = ../mosflm-cpp
+# Default ProcessingLab binary is C++ ProcessingLab (processing-lab/).
+MOSFLM_CPP_DIR = ../processing-lab
 MOSFLM_CPP_BUILD = $(MOSFLM_CPP_DIR)/build
 
 ipmosflm:

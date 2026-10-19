@@ -1,4 +1,4 @@
-# mosflm-cpp (ProcessingLab)
+# processing-lab (ProcessingLab)
 
 C++ computational core for **ProcessingLab** (MOSFLM port). See
 [`../porting.md`](../porting.md) for strategy and legacy build notes.

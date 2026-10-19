@@ -85,7 +85,7 @@ if(NOT ZLIB_FOUND)
     message(FATAL_ERROR "ZLIB required for Gemmi MTZ I/O")
 endif()
 
-# Vendored CBFlib (Option A) — sibling of mosflm-cpp under the ipmosflm tree.
+# Vendored CBFlib (Option A) — sibling of processing-lab under the ipmosflm tree.
 set(MOSFLM_IPMOSFLM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH
     "ProcessingLab repository root (CBF + DPS libs)")
 set(MOSFLM_CBF_INCLUDE_DIR "${MOSFLM_IPMOSFLM_ROOT}/cbf/include")

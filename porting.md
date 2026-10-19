@@ -89,7 +89,7 @@ EOF
 
 Smoke-tested: version banner prints and `EXIT` terminates cleanly. Keyword smoke (`CELL` / `MATRIX` / Pilatus template errors) matches CCP4-9’s `ipmosflm`.
 
-### Building mosflm-cpp (ProcessingLab)
+### Building processing-lab (ProcessingLab)
 
 ```bash
 # From the ProcessingLab repo root (or processing-lab/):
@@ -164,7 +164,7 @@ Layout under `processing-lab` (populated): `geometry`, `diffraction`, `crystal`,
 
 ## First Fortran routine to replace: `PREDICT`
 
-See [mosflm-cpp/docs/FIRST_ROUTINE.md](processing-lab/docs/FIRST_ROUTINE.md) for callers, I/O contract, and regression criteria. C++ stills/oscillation path, dump format, and Phase C Fortran splice (`MOSFLM_CPP_PREDICT`) are implemented.
+See [processing-lab/docs/FIRST_ROUTINE.md](processing-lab/docs/FIRST_ROUTINE.md) for callers, I/O contract, and regression criteria. C++ stills/oscillation path, dump format, and Phase C Fortran splice (`MOSFLM_CPP_PREDICT`) are implemented.
 
 ## Milestones
 

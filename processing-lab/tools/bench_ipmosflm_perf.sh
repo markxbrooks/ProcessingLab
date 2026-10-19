@@ -51,7 +51,7 @@ export MOSFLM_PERF_REPEATS="${MOSFLM_PERF_REPEATS:-3}"
 BIN=""
 for cand in \
   "${ROOT}/build/test_ipmosflm_perf" \
-  "${ROOT}/../cmake-build-debug/mosflm-cpp/test_ipmosflm_perf"
+  "${ROOT}/../cmake-build-debug/processing-lab/test_ipmosflm_perf"
 do
   if [[ -x "${cand}" ]]; then
     BIN="${cand}"

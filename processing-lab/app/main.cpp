@@ -37,7 +37,7 @@ void print_usage(const char* argv0) {
 }
 
 int cmd_version() {
-    std::cout << "mosflm-cpp 0.1.0\n";
+    std::cout << "processing-lab 0.1.0\n";
     std::cout << mosflm::legacy::LegacyMosflmAdapter::oracle_hint() << '\n';
     mosflm::UnitCell cell{58.0, 58.0, 150.0, 90.0, 90.0, 90.0};
     std::cout << "demo cell: " << cell.describe() << '\n';
