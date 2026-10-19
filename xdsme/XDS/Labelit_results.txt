@@ -1,0 +1,59 @@
+/home/legrand/lib/diffractionImages/ref-trypsin_1_001.img
+Beam center is not immediately clear; rigorously retesting 3 solutions
+Beam x 93.4 y 93.8, initial score 207; refined rmsd: 0.2126
+Beam x 91.7 y 94.7, initial score 206; refined rmsd: 0.3232
+Beam x 95.1 y 93.0, initial score 204; refined rmsd: 0.1172
+
+LABELIT Indexing results:
+Beam center x   94.96mm, y   93.00mm, distance  109.71mm ; 80% mosaicity=0.20 deg.
+
+Solution  Metric fit  rmsd  #spots  crystal_system   unit_cell                                  volume
+:)   5     0.4069 dg 0.140    294  orthorhombic oP   53.13  56.65  65.21  90.00  90.00  90.00   196302
+:)   4     0.4069 dg 0.140    295    monoclinic mP   53.16  56.63  65.20  90.00  89.99  90.00   196305
+:)   3     0.3933 dg 0.144    295    monoclinic mP   53.14  65.21  56.64  90.00  89.90  90.00   196281
+:)   2     0.1082 dg 0.126    286    monoclinic mP   56.65  53.13  65.22  90.00  89.61  90.00   196305
+:)   1     0.0000 dg 0.120    286     triclinic aP   53.13  56.65  65.22  89.61  89.98  89.89   196302
+
+MOSFLM Integration results:
+Solution  SpaceGroup Beam x   y  distance  Resolution Mosaicity RMS
+:)   5         P222  95.06  93.09  109.66       1.30    0.200000    0.042
+     1           P1  95.04  93.07  109.64       1.30    0.200000    0.049
+
+/home/legrand/lib/diffractionImages/ref-trypsin_1_091.img
+Beam center is not immediately clear; rigorously retesting 4 solutions
+Beam x 96.7 y 92.6, initial score 142; refined rmsd: 0.1369
+Beam x 95.1 y 93.0, initial score 128; refined rmsd: 0.0963
+Beam x 98.3 y 92.2, initial score 125; refined rmsd: 0.2559
+Beam x 93.5 y 93.4, initial score 94; refined rmsd: 0.1739
+
+LABELIT Indexing results:
+Beam center x   94.98mm, y   92.98mm, distance  109.80mm ; 80% mosaicity=0.025 deg.
+
+Solution  Metric fit  rmsd  #spots  crystal_system   unit_cell                                  volume
+:)   5     0.1333 dg 0.102    294  orthorhombic oP   53.15  56.67  65.35  90.00  90.00  90.00   196813
+:)   4     0.1333 dg 0.105    295    monoclinic mP   53.15  56.67  65.35  90.00  90.03  90.00   196816
+:)   3     0.1220 dg 0.097    294    monoclinic mP   53.15  65.35  56.66  90.00  90.06  90.00   196802
+:)   2     0.0630 dg 0.095    294    monoclinic mP   56.66  53.15  65.35  90.00  90.12  90.00   196821
+:)   1     0.0000 dg 0.101    295     triclinic aP   53.15  56.66  65.35  90.12  90.02  90.06   196801
+
+MOSFLM Integration results:
+Solution  SpaceGroup Beam x   y  distance  Resolution Mosaicity RMS
+:)   5         P222  95.04  93.05  109.71       1.30    0.025000    0.037
+     1           P1  95.04  92.95  109.67       1.30    0.025000    0.040
+/home/legrand/lib/diffractionImages/ref-trypsin_1_001.img
+/home/legrand/lib/diffractionImages/ref-trypsin_1_091.img
+
+LABELIT Indexing results:
+Beam center x   95.04mm, y   92.96mm, distance  109.91mm ; 80% mosaicity=0.10 deg.
+
+Solution  Metric fit  rmsd  #spots  crystal_system   unit_cell                                  volume
+:)   5     0.1478 dg 0.146    587  orthorhombic oP   53.26  56.62  65.43  90.00  90.00  90.00   197321
+:)   4     0.1427 dg 0.144    585    monoclinic mP   56.62  53.26  65.43  90.00  89.95  90.00   197305
+:)   3     0.1478 dg 0.145    586    monoclinic mP   53.26  65.43  56.62  90.00  89.97  90.00   197314
+:)   2     0.0589 dg 0.142    586    monoclinic mP   53.26  56.62  65.43  90.00  89.86  90.00   197303
+:)   1     0.0000 dg 0.140    586     triclinic aP   53.26  56.62  65.42  89.95  89.86  89.97   197302
+
+MOSFLM Integration results:
+Solution  SpaceGroup Beam x   y  distance  Resolution Mosaicity RMS
+:)   5         P222  95.04  92.98  109.83       1.31    0.100000    0.043
+     1           P1  95.06  92.97  109.79       1.30    0.100000    0.045

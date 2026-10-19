@@ -1,0 +1,126 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<HTML>
+<HEAD>
+	<META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html; charset=utf-8">
+	<TITLE></TITLE>
+	<META NAME="GENERATOR" CONTENT="OpenOffice.org 1.1.1  (Linux)">
+	<META NAME="CREATED" CONTENT="20050210;17434300">
+	<META NAME="CHANGED" CONTENT="20050211;9082400">
+</HEAD>
+<BODY LANG="en-US" DIR="LTR">
+<H1>XDSAUTO Short Documentation</H1>
+<P>February 2005 version. <A HREF="mailto:pierre.legrand@synchrotron-soleil.fr">pierre.legrand@synchrotron-soleil.fr</A>
+  Please send e-mails for more help! 
+</P>
+<P STYLE="margin-top: 0.17in; page-break-after: avoid"><FONT FACE="Albany, sans-serif"><FONT SIZE=4>Dependencies</FONT></FONT></P>
+<UL>
+	<LI><P>Python version &gt; 2.1 (I guess)</P>
+	<LI><P>XDS package.</P>
+</UL>
+<P STYLE="margin-top: 0.17in; page-break-after: avoid"><FONT FACE="Albany, sans-serif"><FONT SIZE=4>Comnand
+Line Options</FONT></FONT></P>
+<P STYLE="margin-left: 0.79in">xdsauto.py [-O2] [-T1] [-1]</P>
+<TABLE WIDTH=816 BORDER=0 CELLPADDING=4 CELLSPACING=0 STYLE="page-break-inside: avoid">
+	<COL WIDTH=134>
+	<COL WIDTH=666>
+	<THEAD>
+		<TR VALIGN=TOP>
+			<TD WIDTH=134>
+				<P STYLE="margin-left: 0.79in; margin-right: 0.02in">-O[1-4] 
+				</P>
+			</TD>
+			<TH WIDTH=666>
+				<P ALIGN=LEFT STYLE="margin-left: 0.52in; margin-right: 0.02in; font-weight: medium">
+				Number of profile fitting optimization steps. Default = 2. 
+				</P>
+			</TH>
+		</TR>
+	</THEAD>
+	<TBODY>
+		<TR VALIGN=TOP>
+			<TD WIDTH=134>
+				<P STYLE="margin-left: 0.79in; margin-right: 0.02in">-T[1-x]</P>
+			</TD>
+			<TD WIDTH=666>
+				<P ALIGN=LEFT STYLE="margin-left: 0.52in; margin-right: 0.02in">Number
+				of parallel threads (for ESRF openmosix clusters). Defaul
+				automaticaly determined.</P>
+			</TD>
+		</TR>
+		<TR VALIGN=TOP>
+			<TD WIDTH=134>
+				<P STYLE="margin-left: 0.79in; margin-right: 0.02in">-x</P>
+			</TD>
+			<TD WIDTH=666>
+				<P ALIGN=LEFT STYLE="margin-left: 0.52in; margin-right: 0.02in">Go
+				directly to step x, from 1 to 5.</P>
+			</TD>
+		</TR>
+	</TBODY>
+</TABLE>
+<P STYLE="margin-left: 0.79in"><BR><BR>
+</P>
+<P STYLE="margin-top: 0.17in; page-break-after: avoid"><FONT FACE="Albany, sans-serif"><FONT SIZE=4>XDSAUTO
+Steps</FONT></FONT></P>
+<OL>
+	<LI><P>Peak Search</P>
+	<LI><P>Auto-indexing</P>
+	<LI><P>Integrate and Optimize Profiles</P>
+	<LI><P>Testing Laue Symmetries</P>
+	<LI><P>Integration and Scaling</P>
+</OL>
+<P STYLE="margin-top: 0.17in; page-break-after: avoid"><FONT FACE="Albany, sans-serif"><FONT SIZE=4>Input
+file format: auto.par</FONT></FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">Example
+of input file (auto.par)</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">frame_first
+= 1</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">frame_last
+= 120</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">phi_init
+= -90.000</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">delta_phi
+= 0.700</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">prefix
+= e01_img_</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">suffix
+= mccd</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">beam_x
+= 79.101</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">beam_y
+= 81.239</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">wavelength
+= 0.9792</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">distance
+= 210.000</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">anomalous
+= yes (optional, default: no)</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">beamline
+= ESRF_ID13 (optional, default: ESRF_BM30A)</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">spg
+= i213 (optional, default: unknown = 0)</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">cell
+= a b c alpha beta gamma (optional, default = 0)</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">img_dir
+= ../img (optional, default: img_dir = ../img)</FONT></P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">resolution_range
+= 50 2. (optional, default: 30 0 = max resolution</FONT>)</P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-left: 0.79in; margin-bottom: 0in"><FONT FACE="Courier, monospace">angle_det
+= 0.000 not working yet</FONT></P>
+<P STYLE="margin-top: 0.17in; page-break-after: avoid"><FONT FACE="Albany, sans-serif"><FONT SIZE=4>Other
+jiffy programs</FONT></FONT></P>
+<P STYLE="margin-left: 0.79in"><B>xscale.py, xdsconv.py</B>... use <B>-h</B>
+on the command line to have the options.</P>
+<P STYLE="margin-left: 0.79in"><B>runxds.py</B> can be used to rerun
+xds and saving the logfiles incrementaly. If used with the <B>-a</B>
+option, it will run only the DEFPIX, INTEGRATE and CORRECT steps with
+updated profiles parameters from the last run and updated XPARM.XDS
+from GXPARM.XDS.</P>
+</BODY>
+</HTML>
