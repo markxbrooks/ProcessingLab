@@ -1,0 +1,13 @@
+# Analytical unit-cell fixture (Å, degrees)
+# Matches MOSFLM CELL(6) order: a b c alpha beta gamma
+a 58.0
+b 58.0
+c 150.0
+alpha 90.0
+beta 90.0
+gamma 90.0
+# Expected INVCEL reciprocal lengths (1/Å)
+astar 0.017241379310344827
+bstar 0.017241379310344827
+cstar 0.006666666666666667
+volume 504600.0

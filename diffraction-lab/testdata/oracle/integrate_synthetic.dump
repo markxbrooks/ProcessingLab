@@ -1,0 +1,7 @@
+# Synthetic summation-integrate oracle (flat boxes, bg=0)
+# box_half_px=2 → npix=25
+# spot1: hkl=1 0 0  peak=50 → I=1250
+# spot2: hkl=0 1 0  peak=80 → I=2000
+INTEGRATE_DUMP n=2
+1 0 0 1250.0 0.0
+0 1 0 2000.0 0.0

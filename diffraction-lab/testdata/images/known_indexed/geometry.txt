@@ -1,0 +1,56 @@
+# Known-indexed capture geometry (CCP4 example data: insulin_1_001.img)
+#
+# This is a REAL ipmosflm capture target, not a synthetic fixture.
+#
+# Detector (from the SMV header):
+#   type:       ADSC Quantum (SMV), 2-byte unsigned short, little endian
+#   size:       2304 x 2304, pixel 0.0816 mm (square)
+#   distance:   160.0 mm
+#   beam:       (94.0, 94.7) mm
+#   wavelength: 0.9790 A
+#   scan:       phi 0.0 -> 1.0 deg (OSC_RANGE 1.0, PHI 0.0)
+#
+# Indexing (ipmosflm DPS autoindex, solution 12):
+#   space group: I23 (number 197, cI)
+#   regularized cell: 78.190 78.190 78.190 90.0 90.0 90.0
+#
+# Orientation (as printed by ipmosflm "Crystal Parameters"; see ipmosflm.log):
+#   Rotation matrix U defining standard setting:
+#       -0.97734 -0.02860 -0.20972
+#        0.17495  0.44851 -0.87649
+#        0.11912 -0.89332 -0.43335
+#   Orientation Matrix [A] (components of A*,B*,C* along X,Y,Z):
+#       -0.012237 -0.000358 -0.002626
+#        0.002191  0.005616 -0.010974
+#        0.001492 -0.011185 -0.005426
+#
+# Oracle outputs (testdata/oracle/known_indexed/):
+#   insulin_1.spt          spot list (612 spots) from phase-1 spot search
+#   insulin_1_001.mtz      integrated frame; columns include H K L
+#                          M/ISYM BATCH I SIGI IPR SIGIPR FRACTIONCALC
+#                          XDET YDET ROT WIDTH LP MPART FLAG BGPKRATIOS
+#                          (XDET/YDET are the predicted detector pixel
+#                          coordinates ipmosflm used for each reflection)
+#   ipmosflm.log           full ipmosflm run log
+#
+# Lab frame (mosflm::mosflm_lab_to_cpp): MOSFLM photons travel +X (S0=(-1,0,0)
+# is antiparallel), spindle +Z; C++ photons +Z, spindle +X. Map
+# R=[[0,0,1],[0,-1,0],[1,0,0]] so UB_cpp = R * A. CTest insulin_hkl_overlap:
+# ASU-aware recall 100% vs insulin_1_001.mtz (exact HKL may differ by SG/Friedel).
+#
+# Detector pixels (mosflm::cpp_mm_to_mosflm_xdet): GENDATA XG∥lab Y, YG∥lab Z;
+# after R, insulin match is XDET = BEAM_x/px + y_mm/px, YDET = BEAM_y/px + x_mm/px
+# (BEAM 94.0, 94.7 mm). CTest insulin_xdet: exact-HKL median ~40 px with YSCALE
+# pixel aspect; TILT/TWIST fields wired (ROTMAT2 still Phase D).
+# PROCESS splice verified: make -C mosflm MOSFLM_CPP_PREDICT=1 ipmosflm
+# → testdata/oracle/known_indexed_cpp_predict/ (~89% exact-HKL vs Fortran MTZ);
+# CTest insulin_process_mtz. See mosflm-cpp/docs/PHASE_C_SPLICE.md. Phase C Done.
+#
+# D1 pure C++ PROCESS: SmvImageReader + ProcessPipeline::known_indexed_insulin
+# (this geometry) → CTest insulin_cpp_process (ASU recall ≥ 0.85, no Fortran hook).
+# D2 MEAS: SEPARATION 0.57 mm → MeasIntegrator boxes/overlap/bg-clip;
+# CTest insulin_isi (soft I/SIGI vs oracle).
+# D3 INTEG3: StandardProfileFitter (learned Rossmann global profile);
+# CTest insulin_profile. Multi-region NMASKS still future work.
+# D5 CONTROL: cpp_process.in (MATRIX from this file) → ControlSession /
+# mosflm_cpp_cli run; CTest insulin_control (no Fortran CONTROL).

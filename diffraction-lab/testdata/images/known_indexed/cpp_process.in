@@ -1,0 +1,25 @@
+! C++ CONTROL subset (Phase D / D5) — known-indexed insulin PROCESS without
+! Fortran CONTROL / AUTOINDEX. MATRIX is the ipmosflm Orientation Matrix [A]
+! from geometry.txt (solution 12). Supply the SMV via CLI --image / CTest
+! override (TEMPLATE alone is insufficient when the capture lives under CCP4).
+DISTANCE 160.0
+WAVELENGTH 0.9790
+PIXEL 0.0816 0.0816
+BEAM 94.0 94.7
+SEPARATION 0.57 0.57
+! Insulin oracle detector frame (geometry.txt / known_indexed).
+YSCALE 0.9921
+TILT -83.0
+TWIST -140.0
+ROTMAT2 ON
+WIDEN_EWALD ON
+CELL 78.190 78.190 78.190 90.0 90.0 90.0
+SYMMETRY 197
+MOSAIC 0.30
+MATRIX
+-0.012237 -0.000358 -0.002626
+0.002191 0.005616 -0.010974
+0.001492 -0.011185 -0.005426
+PROCESS 1 to 1 start 0.0 angle 1.0
+GO
+EXIT
