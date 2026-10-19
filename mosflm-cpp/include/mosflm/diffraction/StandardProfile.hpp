@@ -33,8 +33,11 @@ struct StandardProfileSettings {
     int min_learners{8};
     /// Seed Gaussian σ (px) when the learned profile is too weak.
     double fallback_sigma_px{1.5};
-    /// If true, write profile intensity as the primary ``intensity`` field.
+    /// If true, write profile intensity as the primary ``intensity`` field
+    /// when ``pkratio`` is below ``max_pkratio_for_profile``.
     bool prefer_profile{true};
+    /// Prefer summation when ``|I_sum−I_prf|/|I_prf|`` exceeds this.
+    double max_pkratio_for_profile{1.5};
     /// Rectangular detector tiling (MOSFLM ``NMASKS`` / XLINES×YLINES).
     /// Defaults ``1×1`` (single global profile). PROCESS uses ``5×5`` (25).
     int n_bins_x{1};
