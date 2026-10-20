@@ -43,10 +43,10 @@ int main() {
     std::vector<float> x;
     std::vector<float> y;
     std::vector<float> z;
-    x.reserve(500);
-    y.reserve(500);
-    z.reserve(500);
-    for (int n = 0; n < 500; ++n) {
+    x.reserve(300);
+    y.reserve(300);
+    z.reserve(300);
+    for (int n = 0; n < 300; ++n) {
         Eigen::Vector3d h(
             static_cast<double>(hkl(rng)),
             static_cast<double>(hkl(rng)),
@@ -68,6 +68,8 @@ int main() {
     DiffVectorSettings settings;
     settings.sepmin = 6.0f;
     settings.cluster_radius = 2.0f;
+    settings.max_spots = 300;
+    settings.max_diff_vectors = 100000;
     const auto result =
         find_diff_vector_basis(x, y, z, wave, settings);
 

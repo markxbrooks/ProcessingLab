@@ -130,10 +130,14 @@ DiffVectorResult find_diff_vector_basis(
         );
     }
 
+    // Pair enumeration is O(n²); stop once we have enough diffs for clustering.
+    const std::size_t diff_cap = std::max<std::size_t>(
+        1000, settings.max_diff_vectors
+    );
     std::vector<Eigen::Vector3d> diffs;
-    diffs.reserve(n * 8);
-    for (std::size_t i = 0; i < n; ++i) {
-        for (std::size_t j = i + 1; j < n; ++j) {
+    diffs.reserve(std::min(diff_cap, n * 8));
+    for (std::size_t i = 0; i < n && diffs.size() < diff_cap; ++i) {
+        for (std::size_t j = i + 1; j < n && diffs.size() < diff_cap; ++j) {
             Eigen::Vector3d d = rlv[i] - rlv[j];
             const double len = d.norm();
             if (len < sepmin || len > sepmax) {
@@ -147,9 +151,11 @@ DiffVectorResult find_diff_vector_basis(
         return result;
     }
 
-    // Greedy clusters within CLUSTER_RADIUS (stable on synthetic + real data).
+    // Greedy clusters within CLUSTER_RADIUS, but cap live cluster count so
+    // cost stays ~O(diffs × max_live) instead of unbounded O(diffs×clusters).
+    constexpr std::size_t kMaxLiveClusters = 1024;
     std::vector<DiffVectorCluster> clusters;
-    clusters.reserve(512);
+    clusters.reserve(kMaxLiveClusters);
     for (const auto& d : diffs) {
         int best = -1;
         double best_d2 = crad * crad;
@@ -160,17 +166,18 @@ DiffVectorResult find_diff_vector_basis(
                 best = static_cast<int>(c);
             }
         }
-        if (best < 0) {
-            DiffVectorCluster cl;
-            cl.center = d;
-            cl.count = 1;
-            clusters.push_back(cl);
-        } else {
+        if (best >= 0) {
             auto& cl = clusters[static_cast<std::size_t>(best)];
             const double w = static_cast<double>(cl.count);
             cl.center = (cl.center * w + d) / (w + 1.0);
             ++cl.count;
+        } else if (clusters.size() < kMaxLiveClusters) {
+            DiffVectorCluster cl;
+            cl.center = d;
+            cl.count = 1;
+            clusters.push_back(cl);
         }
+        // At capacity and outside crad: drop (do not pollute centers).
     }
 
     // Prefer dense then short clusters (short reciprocal ⇒ long direct edges).

@@ -16,8 +16,10 @@ namespace mosflm::indexing {
 struct DiffVectorSettings {
     float sepmin{6.0f};
     float cluster_radius{2.0f};
-    /// Cap input RLVs (pair enumeration is O(n²); 800 is enough for basis).
-    std::size_t max_spots{800};
+    /// Cap input RLVs (pair enumeration is O(n²)).
+    std::size_t max_spots{500};
+    /// Hard cap on accepted difference vectors (keeps clustering O(n)).
+    std::size_t max_diff_vectors{40000};
     /// Keep the densest clusters for basis search.
     std::size_t max_clusters{60};
     /// Try triplets among the top-N densest clusters.

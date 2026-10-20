@@ -28,11 +28,23 @@ SpotList find_spots_multiframe(
     const MultiFrameSpotSettings& settings
 ) {
     SpotFinder finder;
-    std::vector<Spot> raw;
     SpotListHeader header;
+    const int n_frames = std::max(1, last_frame - first_frame + 1);
+    // Cap per-frame peak search — 50×MAXSPOTS full-detector NMS crawls.
+    // Over-sample ×3 so intensity ranking across frames still fills the budget.
+    const int per_frame_cap = std::max(
+        40, (settings.max_spots * 3 + n_frames - 1) / n_frames
+    );
+
+    // Collect per-frame lists so we can stratify by frame (not fragile φ).
+    std::vector<std::vector<Spot>> by_frame(
+        static_cast<std::size_t>(n_frames)
+    );
+    std::size_t n_raw = 0;
     for (int f = first_frame; f <= last_frame; ++f) {
         const auto image = load(f);
         SpotFindSettings fs = settings.per_frame;
+        fs.max_spots = std::min(fs.max_spots, per_frame_cap);
         if (fs.phi_end_deg <= fs.phi_start_deg &&
             image.metadata.oscillation_range_deg > 0.0) {
             fs.phi_start_deg = image.metadata.oscillation_start_deg;
@@ -43,82 +55,94 @@ SpotList find_spots_multiframe(
         if (f == first_frame) {
             header = list.header;
         }
-        for (auto& s : list.spots) {
-            raw.push_back(std::move(s));
-        }
+        const std::size_t idx =
+            static_cast<std::size_t>(f - first_frame);
+        n_raw += list.spots.size();
+        by_frame[idx] = std::move(list.spots);
     }
-
-    std::sort(
-        raw.begin(), raw.end(),
-        [](const Spot& a, const Spot& b) { return a.intensity > b.intensity; }
-    );
 
     SpotList out;
     out.header = header;
 
     // No merge: keep 3D (xy,φ) observations — needed for large-cell DPS.
-    // Stratify by φ so MAXSPOTS does not collapse onto the brightest frames.
     if (settings.merge_xy_mm <= 0.0) {
-        if (static_cast<int>(raw.size()) > settings.max_spots &&
-            settings.max_spots > 0) {
-            double phi_lo = 1e100;
-            double phi_hi = -1e100;
-            for (const auto& s : raw) {
-                const double p = mid_phi(s);
-                phi_lo = std::min(phi_lo, p);
-                phi_hi = std::max(phi_hi, p);
-            }
-            const int n_bins = std::max(
-                1, std::min(last_frame - first_frame + 1, settings.max_spots)
-            );
-            const double span = std::max(1e-6, phi_hi - phi_lo);
-            std::vector<std::vector<Spot>> bins(
-                static_cast<std::size_t>(n_bins)
-            );
-            for (auto& s : raw) {
-                const double p = mid_phi(s);
-                int b = static_cast<int>(
-                    std::floor((p - phi_lo) / span * n_bins)
-                );
-                if (b < 0) {
-                    b = 0;
-                }
-                if (b >= n_bins) {
-                    b = n_bins - 1;
-                }
-                bins[static_cast<std::size_t>(b)].push_back(std::move(s));
-            }
-            const int per_bin = std::max(1, settings.max_spots / n_bins);
-            std::vector<Spot> stratified;
-            stratified.reserve(static_cast<std::size_t>(settings.max_spots));
-            for (auto& bin : bins) {
+        std::vector<Spot> selected;
+        selected.reserve(static_cast<std::size_t>(
+            settings.max_spots > 0 ? settings.max_spots : 1500
+        ));
+        if (settings.max_spots > 0 &&
+            static_cast<int>(n_raw) > settings.max_spots) {
+            // Equal quota per frame, then fill remainder from global leftovers.
+            const int per_frame =
+                std::max(1, settings.max_spots / n_frames);
+            std::vector<Spot> leftovers;
+            leftovers.reserve(n_raw);
+            for (auto& frame_spots : by_frame) {
                 std::sort(
-                    bin.begin(), bin.end(),
+                    frame_spots.begin(), frame_spots.end(),
                     [](const Spot& a, const Spot& b) {
                         return a.intensity > b.intensity;
                     }
                 );
                 const std::size_t take = std::min(
-                    bin.size(), static_cast<std::size_t>(per_bin)
+                    frame_spots.size(), static_cast<std::size_t>(per_frame)
                 );
                 for (std::size_t i = 0; i < take; ++i) {
-                    stratified.push_back(std::move(bin[i]));
+                    selected.push_back(std::move(frame_spots[i]));
+                }
+                for (std::size_t i = take; i < frame_spots.size(); ++i) {
+                    leftovers.push_back(std::move(frame_spots[i]));
+                }
+            }
+            if (static_cast<int>(selected.size()) < settings.max_spots &&
+                !leftovers.empty()) {
+                std::sort(
+                    leftovers.begin(), leftovers.end(),
+                    [](const Spot& a, const Spot& b) {
+                        return a.intensity > b.intensity;
+                    }
+                );
+                for (auto& s : leftovers) {
+                    if (static_cast<int>(selected.size()) >=
+                        settings.max_spots) {
+                        break;
+                    }
+                    selected.push_back(std::move(s));
+                }
+            }
+        } else {
+            for (auto& frame_spots : by_frame) {
+                for (auto& s : frame_spots) {
+                    selected.push_back(std::move(s));
                 }
             }
             std::sort(
-                stratified.begin(), stratified.end(),
+                selected.begin(), selected.end(),
                 [](const Spot& a, const Spot& b) {
                     return a.intensity > b.intensity;
                 }
             );
-            if (static_cast<int>(stratified.size()) > settings.max_spots) {
-                stratified.resize(static_cast<std::size_t>(settings.max_spots));
+            if (settings.max_spots > 0 &&
+                static_cast<int>(selected.size()) > settings.max_spots) {
+                selected.resize(static_cast<std::size_t>(settings.max_spots));
             }
-            raw = std::move(stratified);
         }
-        out.spots = std::move(raw);
+        out.spots = std::move(selected);
         return out;
     }
+
+    // Merge path: flatten then cluster in (xy,φ).
+    std::vector<Spot> raw;
+    raw.reserve(n_raw);
+    for (auto& frame_spots : by_frame) {
+        for (auto& s : frame_spots) {
+            raw.push_back(std::move(s));
+        }
+    }
+    std::sort(
+        raw.begin(), raw.end(),
+        [](const Spot& a, const Spot& b) { return a.intensity > b.intensity; }
+    );
 
     std::vector<Acc> clusters;
     std::vector<char> used(raw.size(), 0);
