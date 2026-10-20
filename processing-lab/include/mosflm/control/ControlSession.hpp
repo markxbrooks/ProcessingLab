@@ -117,6 +117,10 @@ struct ControlState {
     bool scale_by_partiality{true};
     /// Auto-estimate MOSAIC / DIVERGENCE from strong-spot widths.
     bool auto_sigma_msd{true};
+    /// Rocking-curve prediction + partials summation in PROCESS (``ROCKING``).
+    bool rocking_model{true};
+    /// True once CONTROL ``MOSAIC`` was given (AUTOSIGMA then keeps it).
+    bool mosaic_from_user{false};
     /// Auto-write GXPARM.XDS after PROCESS (default ON). Override path with
     /// ``XPARMOUT``; disable with ``XPARMOUT OFF``.
     bool auto_gxparm{true};
@@ -162,8 +166,12 @@ struct ControlState {
     int nmasks_y{5};
     /// Opt-in Stage 2 post-refinement on PROCESS.
     bool enable_postrefinement{false};
-    /// Multi-image NADD window (1 = single image; >1 reserved for joint refine).
+    /// Shoebox depth in φ (odd). ``PROFILE 3D`` uses this as nφ; default 5
+    /// when PROFILE 3D is set and NADD was left at 1. 2D PROCESS ignores it.
     int nadd{1};
+    /// If true, PROCESS extracts (x,y,φ) shoeboxes and fits a 3D Rossmann
+    /// profile (CONTROL ``PROFILE 3D``). Default remains 2D + ROCKING.
+    bool profile_3d{false};
 
     bool findspots_pending{false};
     FindSpotsControlSettings findspots{};
@@ -180,6 +188,12 @@ struct ControlState {
     double autoindex_indexed_frac{0.0};
     /// RMS fractional HKL residual for indexed spots.
     double autoindex_rmsd_hkl{0.0};
+    /// INVERTX flag of the ``.spt`` AUTOINDEX indexed (header field 6).
+    /// Selects the detector CCOM PROCESS must use so predictions land in the
+    /// frame the AMAT was derived in (``ccom_from_spt_omega``). Default true
+    /// = MOSFLM/ADSC convention, which is also what a user-supplied MATRIX
+    /// assumes.
+    bool spt_invertx{true};
 
     /// Multi-lattice: additional orientation matrices (first is ``amat``).
     std::vector<Eigen::Matrix3d> extra_lattices;
@@ -270,10 +284,17 @@ public:
         return !state_.done_run && !state_.strategy_done;
     }
 
+    /// Read CONTROL lines from ``in`` until EOF or EXIT, running each GO/RUN.
+    ///
+    /// \param in             Command source (stdin, script file, …).
+    /// \param image_override Image used instead of IMAGE/TEMPLATE if set.
+    /// \param prompt         If non-empty, written to stdout and flushed
+    ///     before each line is read (interactive terminals only).
     [[nodiscard]] std::vector<ControlGoResult> run_stream(
         std::istream& in,
         const std::optional<std::filesystem::path>& image_override =
-            std::nullopt
+            std::nullopt,
+        std::string_view prompt = {}
     );
 
     [[nodiscard]] std::vector<ControlGoResult> run_script(

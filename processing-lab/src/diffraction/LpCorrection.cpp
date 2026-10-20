@@ -60,4 +60,33 @@ void apply_lp_inplace(
     sigma *= lp;
 }
 
+double rotation_lp_correction(
+    const Eigen::Vector3d& s0,
+    const Eigen::Vector3d& s1,
+    const Eigen::Vector3d& axis,
+    const Eigen::Vector3d& polarization_normal,
+    double polarization_fraction,
+    double min_inverse_lorentz
+) {
+    const double n0 = s0.norm();
+    const double n1 = s1.norm();
+    const double na = axis.norm();
+    const double nn = polarization_normal.norm();
+    if (!(n0 > 0.0) || !(n1 > 0.0) || !(na > 0.0) || !(nn > 0.0)) {
+        return 1.0;
+    }
+    const Eigen::Vector3d u0 = s0 / n0;
+    const Eigen::Vector3d u1 = s1 / n1;
+    const double inv_lorentz = std::max(
+        std::fabs((axis / na).dot(u1.cross(u0))), min_inverse_lorentz
+    );
+    const double p = std::clamp(polarization_fraction, 0.5, 1.0);
+    const double cos2t = u0.dot(u1);
+    const double ndot = (polarization_normal / nn).dot(u1);
+    const double P = std::max(
+        (1.0 - 2.0 * p) * (1.0 - ndot * ndot) + p * (1.0 + cos2t * cos2t), 1e-6
+    );
+    return inv_lorentz / P;
+}
+
 }  // namespace mosflm::diffraction

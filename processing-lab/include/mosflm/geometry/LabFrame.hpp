@@ -41,6 +41,47 @@ namespace mosflm {
 );
 
 /**
+ * DPSCHOOSE / ``spots_to_rlp_xyz`` frame → C++ predictor frame.
+ *
+ * ``spots_to_rlp_xyz`` builds RLPs in the MOSFLM REFIX frame (beam +z,
+ * spindle +y, detector rotated by the ``.spt`` OMEGA, fast axis mirrored when
+ * INVERTX). The predictor rotates about +x with the detector mapped through
+ * ``DetectorGeometry::lab_to_detector_mm`` (CCOM). Exact identity, for every
+ * ω and φ, between the inverse of the RLP build and the predictor:
+ *
+ * ``r_cpp = Q · r_xyz`` with ``CCOM = ccom_from_spt_omega(ω, invertx)``,
+ * ``Q = [[0,1,0],[-1,0,0],[0,0,1]]`` for INVERTX (MOSFLM/ADSC ``.spt``) and
+ * ``Q = [[0,-1,0],[-1,0,0],[0,0,1]]`` for non-inverted files (ProcessingLab
+ * FINDSPOTS). Verified numerically on thaumatin (ω = 270, INVERTX 0).
+ */
+[[nodiscard]] Eigen::Matrix3d dps_xyz_to_cpp_lab(bool invertx);
+
+/**
+ * MOSFLM ``CCOM`` (``DetectorGeometry::ccom_deg``) for a ``.spt`` / NeXus
+ * detector omega so PROCESS predicts in the frame AUTOINDEX indexed in:
+ * ``−ω`` when INVERTX, ``ω + 180`` otherwise; normalised to [0, 360).
+ */
+[[nodiscard]] double ccom_from_spt_omega(double omega_deg, bool invertx = true);
+
+/**
+ * Convert a reciprocal basis in the ``spots_to_rlp_xyz`` frame
+ * (``om_t_xyz`` columns = a*, b*, c* in Å⁻¹, i.e. ``h = om_t_xyz⁻¹ · r_xyz``)
+ * to a MOSFLM-convention A-matrix for CONTROL / PROCESS / XPARM.
+ */
+[[nodiscard]] Eigen::Matrix3d xyz_reciprocal_to_mosflm_amat(
+    const Eigen::Matrix3d& om_t_xyz,
+    double wavelength_A,
+    bool invertx
+);
+
+/// Inverse of :func:`xyz_reciprocal_to_mosflm_amat`.
+[[nodiscard]] Eigen::Matrix3d mosflm_amat_to_xyz_reciprocal(
+    const Eigen::Matrix3d& A_mosflm,
+    double wavelength_A,
+    bool invertx
+);
+
+/**
  * Map C++ predictor detector millimetres (beam-relative, from
  * :meth:`DetectorGeometry::lab_to_detector_mm`) to MOSFLM ``XDET``/``YDET``
  * pixel coordinates (origin = image lower-left).

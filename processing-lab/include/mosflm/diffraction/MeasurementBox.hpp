@@ -3,6 +3,7 @@
 #include "mosflm/diffraction/SummationIntegrator.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
 
+#include <limits>
 #include <cstdint>
 #include <vector>
 
@@ -78,7 +79,15 @@ struct MeasurementBoxSettings {
 
 /// Extra fields filled by :class:`MeasIntegrator`.
 struct MeasObservation : IntegratedReflection {
+    /// Background-subtracted peak centroid in image pixels (column, row);
+    /// NaN unless the spot has summation I/σ ≥ 3. With
+    /// ``mosflm_detector_axes`` these equal MOSFLM ``XDET``/``YDET``.
+    double xobs_px{std::numeric_limits<double>::quiet_NaN()};
+    double yobs_px{std::numeric_limits<double>::quiet_NaN()};
     bool overlapped{false};
+    /// Peak pixels that were masked (−1) or overloaded (−2); masked ⇒ !ok.
+    int n_masked{0};
+    int n_overload{0};
     int n_bg_rejected{0};
     int box_half_px{0};
     double bg_a{0.0};

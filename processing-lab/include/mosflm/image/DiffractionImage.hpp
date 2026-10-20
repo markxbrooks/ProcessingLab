@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mosflm/geometry/DetectorGeometry.hpp"
+#include "mosflm/geometry/LabFrame.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -45,6 +46,10 @@ struct ImageMetadata {
         g.beam_x_mm = beam_x_mm;
         g.beam_y_mm = beam_y_mm;
         g.wavelength_A = wavelength_angstrom;
+        // Detector omega → MOSFLM CCOM (INVERTX convention, i.e. a MOSFLM
+        // A-matrix). CONTROL overrides this when AUTOINDEX used a
+        // non-inverted ProcessingLab ``.spt`` (see ControlState::spt_invertx).
+        g.ccom_deg = ccom_from_spt_omega(rotation_axis_omega_deg, true);
         return g;
     }
 };

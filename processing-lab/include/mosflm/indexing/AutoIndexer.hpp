@@ -96,6 +96,12 @@ struct AutoIndexResult {
     IndexFitStats fit{};
     /// ``"dps"``, ``"delta"``, or ``"fft3d"`` — INDEXFIT winner.
     std::string index_method{"dps"};
+    /// IDXREF geometry LS was applied: ``amat``/``cell`` are only consistent
+    /// with these beam / distance values (``.spt`` mm, same frame as input).
+    bool idxref_applied{false};
+    double idxref_beam_x_mm{0.0};
+    double idxref_beam_y_mm{0.0};
+    double idxref_distance_mm{0.0};
 };
 
 /// Stage 1 AUTOINDEX façade: MOSFLM ``.spt`` → DPS ``index_fortran_`` → AMAT.

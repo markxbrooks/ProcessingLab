@@ -171,6 +171,17 @@ int main() {
         "table missing Suggested Solution"
     );
     CHECK_MSG(text.find("tP") != std::string::npos, "table missing tP");
+    CHECK_MSG(
+        text.find("METDEV%") != std::string::npos,
+        "table missing METDEV% column"
+    );
+    CHECK_MSG(
+        text.find("constrained:  58.010  58.010  148.160  90.00  90.00  90.00")
+            != std::string::npos,
+        "table missing tetragonal constrained cell"
+    );
+    const auto proj = mosflm::indexing::project_candidate_metric("tP", cell);
+    CHECK(proj.has_value() && proj->free_parameters == 2);
 
     // Real-cell table still prints Suggested Solution.
     std::ostringstream table2;

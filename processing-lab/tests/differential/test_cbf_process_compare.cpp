@@ -398,6 +398,8 @@ int main() {
         false,
         {},
         0.0,
+        true,  // scale_by_partiality (default)
+        0.0,   // air_absorption_mm_inv (default: off)
         image
     };
     const auto cpp = ProcessPipeline{}.run(req);

@@ -64,6 +64,13 @@ struct ProcessResult {
     std::size_t n_profile_ok{0};
     std::size_t n_omitted{0};  ///< IGFLAG 0 / −64 / −128 style skips
     refinement::PostRefinementResult postrefinement{};
+    /// Geometry this call integrated with (positional refinement input).
+    ScanRange scan{};
+    DetectorGeometry detector{};
+    double image_beam_x_mm{0.0};
+    double image_beam_y_mm{0.0};
+    /// Per-image φ range for MTZ batch headers (filled by the frame loop).
+    std::vector<crystal::BatchScan> batch_scans;
 };
 
 /// Own the known-indexed pipeline without Fortran GENERATE / REEK / PROCESS.

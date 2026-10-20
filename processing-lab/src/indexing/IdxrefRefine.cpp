@@ -52,12 +52,13 @@ ResidualStats evaluate(
     const OrientationMatrix& orient,
     const Eigen::Matrix3d& amat_mosflm,
     const Params& p,
-    double wavelength_A,
-    double pixel_mm,
-    double yscale,
+    const IdxrefGeometry& geometry,
     const std::vector<IdxrefObservation>& obs,
     const IdxrefSettings& settings
 ) {
+    const double wavelength_A = geometry.wavelength_A;
+    const double pixel_mm = geometry.pixel_mm;
+    const double yscale = geometry.yscale;
     ResidualStats st;
     double wsum_phi = 0.0;
     double wres2_phi = 0.0;
@@ -72,8 +73,16 @@ ResidualStats evaluate(
     det.pixel_size_x_mm = pixel_mm;
     det.pixel_size_y_mm = pixel_mm;
     det.yscale = yscale;
+    // Same detector omega the .spt observations were built with (SpotToRlp).
+    det.ccom_deg = ccom_from_spt_omega(geometry.omega_deg, geometry.invertx);
     det.beam_x_mm = 0.0;
     det.beam_y_mm = 0.0;
+
+    // (rx,ry,rz) live in the spots_to_rlp_xyz frame; compare against the
+    // A-matrix expressed there, not the MOSFLM lab frame.
+    const Eigen::Matrix3d amat_xyz = mosflm_amat_to_xyz_reciprocal(
+        amat_mosflm, wavelength_A, geometry.invertx
+    );
 
     for (const auto& o : obs) {
         const double w = (o.weight > 0.0) ? o.weight : 1.0;
@@ -82,7 +91,7 @@ ResidualStats evaluate(
         if (std::isfinite(o.rx) && std::isfinite(o.ry) && std::isfinite(o.rz)) {
             const Eigen::Vector3d r(o.rx, o.ry, o.rz);
             const Eigen::Vector3d pred =
-                amat_mosflm * Eigen::Vector3d(o.h, o.k, o.l);
+                amat_xyz * Eigen::Vector3d(o.h, o.k, o.l);
             const double dhkl = (r - pred).norm();
             wsum_hkl += w;
             wres2_hkl += w * dhkl * dhkl;
@@ -162,18 +171,14 @@ double phi_span_deg(const std::vector<IdxrefObservation>& obs) {
 ResidualStats eval_params(
     const Eigen::Matrix3d& R0,
     const Params& p,
-    double wavelength_A,
-    double pixel_mm,
-    double yscale,
+    const IdxrefGeometry& geometry,
     const std::vector<IdxrefObservation>& observations,
     const IdxrefSettings& settings
 ) {
     const OrientationMatrix o = orient_of(R0, p);
     const Eigen::Matrix3d am =
-        cpp_ub_to_mosflm_amat(o.ub(), wavelength_A);
-    return evaluate(
-        o, am, p, wavelength_A, pixel_mm, yscale, observations, settings
-    );
+        cpp_ub_to_mosflm_amat(o.ub(), geometry.wavelength_A);
+    return evaluate(o, am, p, geometry, observations, settings);
 }
 
 }  // namespace
@@ -233,13 +238,16 @@ Eigen::Vector3i select_index_origin(
     const UnitCell& cell0,
     const Eigen::Matrix3d& amat0_mosflm,
     std::vector<IdxrefObservation>& observations,
-    const IdxrefGeometry& /*geometry*/,
+    const IdxrefGeometry& geometry,
     const IdxrefSettings& settings
 ) {
     Eigen::Vector3i best(0, 0, 0);
     if (observations.size() < 12 || !cell0.is_valid()) {
         return best;
     }
+    const Eigen::Matrix3d amat_xyz = mosflm_amat_to_xyz_reciprocal(
+        amat0_mosflm, geometry.wavelength_A, geometry.invertx
+    );
 
     // Kabsch §2.7: choose constant offset so observed RLPs and A·hkl
     // centroids are closest (HKL residual). Detector XY is unreliable here
@@ -271,7 +279,7 @@ Eigen::Vector3i select_index_origin(
             }
             const Eigen::Vector3d r(o.rx, o.ry, o.rz);
             const Eigen::Vector3d pred =
-                amat0_mosflm * Eigen::Vector3d(
+                amat_xyz * Eigen::Vector3d(
                     base[i].x() + dh, base[i].y() + dk, base[i].z() + dl
                 );
             const double w = (o.weight > 0.0) ? o.weight : 1.0;
@@ -352,10 +360,7 @@ IdxrefResult refine_idxref(
         phi_span_deg(observations) >=
         settings.refine_distance_min_phi_span_deg;
 
-    ResidualStats st0 = eval_params(
-        R0, p, geometry.wavelength_A, geometry.pixel_mm, geometry.yscale,
-        observations, settings
-    );
+    ResidualStats st0 = eval_params(R0, p, geometry, observations, settings);
     result.rms_phi_initial = st0.rms_phi;
     result.rms_pos_initial = st0.rms_pos;
     if (st0.n < 8) {
@@ -383,10 +388,8 @@ IdxrefResult refine_idxref(
             if (!cell_ok(p.cell)) {
                 continue;
             }
-            const ResidualStats st = eval_params(
-                R0, p, geometry.wavelength_A, geometry.pixel_mm,
-                geometry.yscale, observations, settings
-            );
+            const ResidualStats st =
+                eval_params(R0, p, geometry, observations, settings);
             if (st.n >= 8 && st.cost < best_cost - 1e-9) {
                 best_cost = st.cost;
                 best_v = *value;

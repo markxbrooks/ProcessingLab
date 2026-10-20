@@ -193,6 +193,10 @@ std::vector<BgSample> collect_bg_samples(
             if (in_neighbour_peak(c, r, peak_half, neigh_cols, neigh_rows)) {
                 continue;
             }
+            // Masked (−1) / overloaded (−2) pixels are not background.
+            if (pixel_at(image, c, r) < 0) {
+                continue;
+            }
             samples.push_back(
                 {static_cast<double>(dc), static_cast<double>(dr),
                  static_cast<double>(pixel_at(image, c, r))}
@@ -483,6 +487,10 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
         double peak_sum = 0.0;
         double bg_under_peak = 0.0;
         int n_peak = 0;
+        // Positive background-subtracted signal for the observed centroid.
+        double cw = 0.0;
+        double cx = 0.0;
+        double cy = 0.0;
         for (int dr = -peak_half; dr <= peak_half; ++dr) {
             for (int dc = -peak_half; dc <= peak_half; ++dc) {
                 const int c = c0 + dc;
@@ -491,17 +499,29 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
                     rr >= image.metadata.height) {
                     continue;
                 }
-                peak_sum += static_cast<double>(pixel_at(image, c, rr));
-                if (bg.ok) {
-                    bg_under_peak += bg.at(
-                        static_cast<double>(dc), static_cast<double>(dr)
-                    );
+                const std::int32_t raw = pixel_at(image, c, rr);
+                if (raw < 0) {
+                    // −1 masked (gap / bad pixel), −2 overloaded.
+                    ++(raw == -2 ? r.n_overload : r.n_masked);
+                    continue;
                 }
+                const double od = static_cast<double>(raw);
+                peak_sum += od;
+                const double b = bg.ok ? bg.at(
+                    static_cast<double>(dc), static_cast<double>(dr)
+                ) : 0.0;
+                bg_under_peak += b;
+                const double s = std::max(0.0, od - b);
+                cw += s;
+                cx += s * static_cast<double>(dc);
+                cy += s * static_cast<double>(dr);
                 ++n_peak;
             }
         }
         r.npix_peak = n_peak;
-        if (n_peak == 0) {
+        // A masked pixel under the peak (module gap, beamstop, bad pixel)
+        // makes the measurement incomplete: reject, as MOSFLM does.
+        if (n_peak == 0 || r.n_masked > 0) {
             r.ok = false;
             out.push_back(r);
             continue;
@@ -520,6 +540,54 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
                        std::fabs(bg_under_peak / std::max(n_peak, 1))
                  : 0.0);
         r.sigma = std::sqrt(std::max(var, 1.0));
+        if (cw > 0.0 && r.intensity >= 3.0 * r.sigma) {
+            // Re-centre the peak window on the centroid (≤3 passes, within
+            // the background rim) so it is not pulled toward the prediction.
+            double ox = cx / cw;
+            double oy = cy / cw;
+            for (int pass = 0; pass < 3; ++pass) {
+                const int sx = static_cast<int>(std::lround(ox));
+                const int sy = static_cast<int>(std::lround(oy));
+                if (std::abs(sx) + peak_half > outer || std::abs(sy) + peak_half > outer) {
+                    break;
+                }
+                double w2 = 0.0, x2 = 0.0, y2 = 0.0;
+                for (int dr = sy - peak_half; dr <= sy + peak_half; ++dr) {
+                    for (int dc = sx - peak_half; dc <= sx + peak_half; ++dc) {
+                        const int c = c0 + dc;
+                        const int rr = r0 + dr;
+                        if (c < 0 || rr < 0 || c >= image.metadata.width ||
+                            rr >= image.metadata.height) {
+                            continue;
+                        }
+                        const double b = bg.ok ? bg.at(static_cast<double>(dc),
+                                                       static_cast<double>(dr))
+                                               : 0.0;
+                        const std::int32_t raw = pixel_at(image, c, rr);
+                        if (raw < 0) {
+                            continue;
+                        }
+                        const double s = std::max(0.0, static_cast<double>(raw) - b);
+                        w2 += s;
+                        x2 += s * static_cast<double>(dc);
+                        y2 += s * static_cast<double>(dr);
+                    }
+                }
+                if (!(w2 > 0.0)) {
+                    break;
+                }
+                const double nx = x2 / w2;
+                const double ny = y2 / w2;
+                const bool settled = std::hypot(nx - ox, ny - oy) < 0.05;
+                ox = nx;
+                oy = ny;
+                if (settled) {
+                    break;
+                }
+            }
+            r.xobs_px = static_cast<double>(c0) + ox;
+            r.yobs_px = static_cast<double>(r0) + oy;
+        }
         if (settings.apply_lp) {
             apply_lp_inplace(
                 detector, r.x_mm, r.y_mm, r.intensity, r.sigma,

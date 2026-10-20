@@ -4,6 +4,7 @@
 #include <gemmi/symmetry.hpp>
 
 #include <cmath>
+#include <algorithm>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -54,7 +55,8 @@ void MtzAdapter::write_mosflm(
     const std::filesystem::path& path,
     const CrystalMetadata& crystal,
     const std::vector<MosflmReflection>& reflections,
-    double wavelength_A
+    double wavelength_A,
+    const std::vector<BatchScan>& scans
 ) {
     gemmi::Mtz mtz;
     mtz.title = "processing-lab PROCESS";
@@ -104,6 +106,15 @@ void MtzAdapter::write_mosflm(
         batch.set_cell(crystal.cell);
         if (wavelength_A > 0.0) {
             batch.set_wavelength(static_cast<float>(wavelength_A));
+        }
+        // MTZ orientation block: PHISTT (36), PHIEND (37), PHIRANGE (47).
+        const auto scan = std::find_if(scans.begin(), scans.end(), [&](const BatchScan& s) {
+            return s.batch == bn;
+        });
+        if (scan != scans.end()) {
+            batch.floats[36] = static_cast<float>(scan->phi_start_deg);
+            batch.floats[37] = static_cast<float>(scan->phi_end_deg);
+            batch.floats[47] = static_cast<float>(scan->phi_end_deg - scan->phi_start_deg);
         }
         mtz.batches.push_back(batch);
     }

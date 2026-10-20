@@ -1,10 +1,12 @@
 #pragma once
 
+#include "mosflm/geometry/MetricTensorProjector.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
 #include "mosflm/indexing/BravaisClassifier.hpp"
 
 #include <cstddef>
 #include <iosfwd>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,6 +40,19 @@ namespace mosflm::indexing {
 /// only; printed PENALTY remains the raw DPS goof.
 [[nodiscard]] int find_lastgood_rank(
     const std::vector<BravaisCandidate>& candidates
+);
+
+/// Project an observed cell onto the metric allowed by a lattice's default
+/// space group (:func:`symmetry_number_for_lattice`), derived from its
+/// symmetry rotations. Reports the departure separately from the penalty.
+///
+/// \param system_id Bravais code such as ``"tP"``.
+/// \param observed  Cell in that lattice's conventional setting.
+/// \return Projection, or ``nullopt`` if the lattice is unknown or the
+///     projected metric is not positive definite.
+[[nodiscard]] std::optional<MetricProjection> project_candidate_metric(
+    std::string_view system_id,
+    const UnitCell& observed
 );
 
 /// Select a Bravais candidate (Mosflm SUGGLATT / DPSCHOOSE penalty-jump).

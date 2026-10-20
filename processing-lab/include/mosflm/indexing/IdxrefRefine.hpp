@@ -21,6 +21,14 @@ struct IdxrefGeometry {
     double beam_y_mm{94.7};
     double pixel_mm{0.0816};
     double yscale{1.0};
+    /// Detector omega from the ``.spt`` header (degrees). Predictions use
+    /// ``ccom_from_spt_omega(omega_deg, invertx)`` so they land in the same
+    /// image frame ``spots_to_rlp_xyz`` read the observations from.
+    double omega_deg{0.0};
+    /// INVERTX flag of the ``.spt`` (header field 6); together with
+    /// ``omega_deg`` fixes the ``r_xyz`` ↔ MOSFLM A-matrix relation
+    /// (:func:`mosflm_amat_to_xyz_reciprocal`).
+    bool invertx{true};
 };
 
 struct IdxrefSettings {
@@ -32,7 +40,12 @@ struct IdxrefSettings {
     double fd_distance_mm{0.05};
     double outlier_phi_deg{5.0};
     double outlier_pos_px{250.0};
-    double position_px_per_deg{40.0};
+    /// Cost scale: ``rms_pos / position_px_per_deg`` is added to ``rms_phi``
+    /// (degrees). Per-frame spot φ (frame centre, σ ≈ 0.1–0.2° for 0.15°
+    /// frames) is far noisier than XY (σ ≈ 1 px), so ≈10 px/deg balances
+    /// the two; the former 40 let φ drive the misset and degraded XY
+    /// (thaumatin: rms_xy 1.3 → 2.2 px, PROCESS predictions off by ~2.5 px).
+    double position_px_per_deg{10.0};
     double max_misset_step_deg{0.35};
     /// Soft HKL regularizer weight (XY + φ are primary Kabsch residuals).
     double hkl_cost_weight{1.0};

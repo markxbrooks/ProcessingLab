@@ -56,17 +56,24 @@ else()
         "skipping Fortran test targets (Phase C hook library still built)")
 endif()
 
-FetchContent_Declare(
-    eigen
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3.4.0
-    GIT_SHALLOW TRUE
-)
-set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTING_SAVED "${BUILD_TESTING}")
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(eigen)
-set(BUILD_TESTING "${BUILD_TESTING_SAVED}" CACHE BOOL "" FORCE)
+# Prefer a system / Homebrew Eigen (header-only). GitLab git clone is a
+# last resort and often fails under load; use a tarball URL instead of git.
+find_package(Eigen3 3.3 QUIET NO_MODULE)
+if(Eigen3_FOUND)
+    message(STATUS "Using system Eigen ${Eigen3_VERSION}")
+else()
+    FetchContent_Declare(
+        eigen
+        URL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+        URL_HASH SHA256=8586084f71f9bde545ee7fa6d97872b0c51dd0edc0005e9ba67b37c35a58089e
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING_SAVED "${BUILD_TESTING}")
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(eigen)
+    set(BUILD_TESTING "${BUILD_TESTING_SAVED}" CACHE BOOL "" FORCE)
+endif()
 
 # Gemmi: header-oriented crystallographic infrastructure (not MOSFLM algorithms).
 FetchContent_Declare(
@@ -170,6 +177,7 @@ endif()
 set(MOSFLM_GEOMETRY_SOURCES
     src/geometry/UnitCell.cpp
     src/geometry/CellFix.cpp
+    src/geometry/MetricTensorProjector.cpp
     src/geometry/ReciprocalLattice.cpp
     src/geometry/OrientationMatrix.cpp
     src/geometry/DetectorGeometry.cpp
@@ -193,14 +201,18 @@ set(MOSFLM_GEOMETRY_SOURCES
     src/diffraction/ReflectionPredictor.cpp
     src/diffraction/SummationIntegrator.cpp
     src/diffraction/ProcessPipeline.cpp
+    src/diffraction/PartialSummation.cpp
     src/diffraction/MeasurementBox.cpp
     src/diffraction/TrustedRegion.cpp
     src/diffraction/DetectorInit.cpp
     src/diffraction/StandardProfile.cpp
+    src/diffraction/Shoebox.cpp
+    src/diffraction/Profile3d.cpp
     src/diffraction/ProfileFitter.cpp
     src/diffraction/LpCorrection.cpp
     src/diffraction/DataQualityStats.cpp
     src/refinement/PostRefinement.cpp
+    src/refinement/PositionalRefinement.cpp
     src/control/ControlSession.cpp
     src/io/ImportedSweepGeometry.cpp
     src/io/XinfoImporter.cpp
@@ -429,6 +441,30 @@ if(BUILD_TESTING)
     target_link_libraries(test_cell_fix PRIVATE mosflm_geometry)
     add_test(NAME cell_fix COMMAND test_cell_fix)
 
+    add_executable(test_metric_tensor_projector
+        tests/unit/test_metric_tensor_projector.cpp
+    )
+    target_link_libraries(test_metric_tensor_projector PRIVATE mosflm_geometry)
+    add_test(NAME metric_tensor_projector COMMAND test_metric_tensor_projector)
+
+    add_executable(test_rotation_lp
+        tests/unit/test_rotation_lp.cpp
+    )
+    target_link_libraries(test_rotation_lp PRIVATE mosflm_geometry)
+    add_test(NAME rotation_lp COMMAND test_rotation_lp)
+
+    add_executable(test_positional_refinement
+        tests/unit/test_positional_refinement.cpp
+    )
+    target_link_libraries(test_positional_refinement PRIVATE mosflm_geometry)
+    add_test(NAME positional_refinement COMMAND test_positional_refinement)
+
+    add_executable(test_partial_summation
+        tests/unit/test_partial_summation.cpp
+    )
+    target_link_libraries(test_partial_summation PRIVATE mosflm_geometry)
+    add_test(NAME partial_summation COMMAND test_partial_summation)
+
     add_executable(test_xparm_io
         tests/unit/test_xparm_io.cpp
     )
@@ -512,6 +548,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_standard_profile PRIVATE mosflm_geometry)
     add_test(NAME standard_profile COMMAND test_standard_profile)
+
+    add_executable(test_profile3d
+        tests/unit/test_profile3d.cpp
+    )
+    target_link_libraries(test_profile3d PRIVATE mosflm_geometry)
+    add_test(NAME profile3d COMMAND test_profile3d)
 
     add_executable(test_post_refinement
         tests/unit/test_post_refinement.cpp
@@ -687,6 +729,17 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
     )
     set_tests_properties(thaumatin_dials_mtz_compare PROPERTIES TIMEOUT 120)
+
+    add_executable(test_thaumatin_profile3d
+        tests/differential/test_thaumatin_profile3d.cpp
+    )
+    target_link_libraries(test_thaumatin_profile3d PRIVATE mosflm_geometry)
+    add_test(
+        NAME thaumatin_profile3d
+        COMMAND test_thaumatin_profile3d
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(thaumatin_profile3d PROPERTIES TIMEOUT 600)
 
     # ProcessingLab vs DIALS on known-indexed insulin SMV (soft-skip if no DIALS).
     add_executable(test_smv_dials_compare

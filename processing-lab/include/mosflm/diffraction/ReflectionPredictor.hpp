@@ -4,6 +4,7 @@
 #include "mosflm/geometry/DetectorGeometry.hpp"
 #include "mosflm/geometry/OrientationMatrix.hpp"
 
+#include <limits>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -21,6 +22,12 @@ struct PredictedReflection {
     double phi_begin_deg{};
     double phi_end_deg{};
     bool full{true};  ///< false ⇒ partial
+    /// Rocking-curve mode only: exact Ewald-crossing φ (degrees) and the
+    /// fraction of the reflection's rocking curve recorded on this frame.
+    /// ``phi_begin_deg``/``phi_end_deg`` then span the whole rocking curve
+    /// (±3σ), not just this frame.
+    double phi_calc_deg{std::numeric_limits<double>::quiet_NaN()};
+    double fraction{1.0};
 };
 
 /// Acquisition rotation range (physical oscillation / still).
@@ -71,6 +78,13 @@ struct PredictionSettings {
     /// Scale applied to mosaic+divergence when widening the Ewald gate
     /// (1 = full; 0.5 ≈ REEK-like PROCESS for insulin).
     double mosaic_ewald_scale{1.0};
+    /// Rocking-curve prediction (oscillation scans only): solve the Ewald
+    /// crossing φc analytically and model each reflection's rocking curve as
+    /// a Gaussian in φ with σ = (mosaic + max(DIVH,DIVV)) / (2.355 ζ), where
+    /// ζ = |m·(ŝ1 × ŝ0)| is the inverse rotation Lorentz factor. A reflection
+    /// is predicted on every frame within ``±(4σ + 2·osc)`` of φc; slices
+    /// beyond the ±3σ core carry ``fraction`` < 0.001.
+    bool rocking_model{false};
 };
 
 /// Cohesive inputs for stills or oscillation PREDICT.

@@ -30,8 +30,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 Requires CMake ≥ 3.24, a C++20 compiler, ZLIB, vendored `../cbf/lib/libcbf.a`
-(`make -C ../cbf` or top-level `make cpp`), and network access on first
-configure (FetchContent: Eigen, Gemmi). DPS Bravais tests need
+(`make -C ../cbf` or top-level `make cpp`). Eigen is taken from the system
+(`find_package(Eigen3)`, e.g. Homebrew `eigen`) when present; otherwise a
+3.4.0 tarball is downloaded (no git clone). Gemmi still uses FetchContent.
+DPS Bravais tests need
 `../lib/dps_index.a` and `../lib/libdps.a`. Optional **HDF5** (Homebrew /
 CCP4) enables `Hdf5ImageReader` for Dectris Eiger NeXus masters
 (`*_master.h5` / `.nxs`) via vendored bitshuffle+LZ4 filters; keep

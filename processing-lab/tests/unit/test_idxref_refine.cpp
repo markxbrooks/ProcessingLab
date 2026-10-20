@@ -379,6 +379,132 @@ int main() {
               std::fabs(geo.distance_mm - kFTrue));
     }
 
+    // --- Detector omega 270 / INVERTX 0 (NeXus fast-axis spindle, e.g.
+    //     thaumatin): IDXREF must predict in the .spt frame ---
+    for (const int invflag : {0, 1}) {
+        const bool invertx = invflag != 0;
+        const double lam = 0.9795;
+        UnitCell truth;
+        truth.a = 58.0;
+        truth.b = 58.0;
+        truth.c = 150.0;
+        const OrientationMatrix orient_true =
+            OrientationMatrix::from_cell_and_rotation(truth);
+        const Eigen::Matrix3d amat_true =
+            cpp_ub_to_mosflm_amat(orient_true.ub(), lam);
+
+        IdxrefGeometry geo;
+        geo.distance_mm = 200.0;
+        geo.wavelength_A = lam;
+        geo.beam_x_mm = 166.0;
+        geo.beam_y_mm = 173.0;
+        geo.pixel_mm = 0.075;
+        geo.omega_deg = 270.0;
+        geo.invertx = invertx;
+
+        mosflm::DetectorGeometry det;
+        det.distance_mm = geo.distance_mm;
+        det.wavelength_A = lam;
+        det.pixel_size_x_mm = geo.pixel_mm;
+        det.pixel_size_y_mm = geo.pixel_mm;
+        det.ccom_deg = mosflm::ccom_from_spt_omega(geo.omega_deg, invertx);
+
+        // RLPs as spots_to_rlp_xyz would build them from this .spt.
+        const Eigen::Matrix3d amat_xyz =
+            mosflm::mosflm_amat_to_xyz_reciprocal(amat_true, lam, invertx);
+
+        std::vector<IdxrefObservation> obs;
+        std::mt19937 rng(19);
+        std::uniform_int_distribution<int> hkl(-6, 6);
+        std::normal_distribution<double> noise_px(0.0, 0.3);
+        std::uniform_real_distribution<double> phi_pick(0.0, 30.0);
+        for (int n = 0; n < 400; ++n) {
+            const int h = hkl(rng);
+            const int k = hkl(rng);
+            const int l = hkl(rng);
+            if (h == 0 && k == 0 && l == 0) {
+                continue;
+            }
+            const Eigen::Vector3d q0 = orient_true.miller_to_lab(h, k, l);
+            const auto sols =
+                mosflm::refinement::ewald_phi_solutions_deg(q0, lam);
+            if (sols.empty()) {
+                continue;
+            }
+            const double target = phi_pick(rng);
+            double phi = sols[0];
+            for (double s : sols) {
+                if (std::fabs(s - target) < std::fabs(phi - target)) {
+                    phi = s;
+                }
+            }
+            double xdet = 0.0;
+            double ydet = 0.0;
+            if (!mosflm::refinement::predict_xdet_ydet_px(
+                    orient_true, h, k, l, phi, lam, det, geo.beam_x_mm,
+                    geo.beam_y_mm, xdet, ydet
+                )) {
+                continue;
+            }
+            const Eigen::Vector3d rm = amat_xyz * Eigen::Vector3d(h, k, l);
+            IdxrefObservation o;
+            o.h = h;
+            o.k = k;
+            o.l = l;
+            o.phi_obs_deg = phi;
+            o.xdet_obs_px = xdet + noise_px(rng);
+            o.ydet_obs_px = ydet + noise_px(rng);
+            o.rx = rm.x();
+            o.ry = rm.y();
+            o.rz = rm.z();
+            o.weight = 1.0;
+            obs.push_back(o);
+        }
+        CHECK(obs.size() >= 40u);
+
+        // Exact start: evaluation alone must already sit on the spots
+        // (this is what a wrong CCOM/AMAT convention breaks, ~100+ px).
+        IdxrefSettings settings;
+        settings.max_iterations = 12;
+        settings.refine_distance_min_phi_span_deg = 1e9;
+        const auto exact = refine_idxref(truth, amat_true, obs, geo, settings);
+        CHECK(exact.ok);
+        std::cout << "idxref_omega270 invertx=" << invflag
+                  << " exact start rms_xy=" << exact.rms_pos_initial
+                  << " rms_phi=" << exact.rms_phi_initial << '\n';
+        CHECK_MSG(exact.rms_pos_initial < 2.0, "omega=270 exact rms_xy");
+        CHECK_MSG(exact.rms_phi_initial < 0.05, "omega=270 exact rms_phi");
+
+        // Perturbed cell: refine must come back below 2 px.
+        UnitCell start = truth;
+        start.a = 59.0;
+        start.c = 148.0;
+        const Eigen::Matrix3d amat_start = cpp_ub_to_mosflm_amat(
+            OrientationMatrix::from_cell_and_rotation(start).ub(), lam
+        );
+        const auto refined =
+            refine_idxref(start, amat_start, obs, geo, settings);
+        CHECK(refined.ok);
+        std::cout << "idxref_omega270 invertx=" << invflag
+                  << " refine rms_xy=" << refined.rms_pos_initial << "→"
+                  << refined.rms_pos << " cell=" << refined.cell.a << " "
+                  << refined.cell.c << '\n';
+        CHECK(refined.accepted);
+        CHECK_MSG(refined.rms_pos < 2.0, "omega=270 refined rms_xy < 2 px");
+        CHECK(std::fabs(refined.cell.a - 58.0) < std::fabs(start.a - 58.0));
+        CHECK(std::fabs(refined.cell.c - 150.0) < std::fabs(start.c - 150.0));
+
+        // Ignoring the .spt omega (the pre-fix behaviour, CCOM = 0) must
+        // not fit: guards against silently dropping the header again.
+        IdxrefGeometry wrong = geo;
+        wrong.omega_deg = 0.0;
+        wrong.invertx = true;
+        const auto bad = refine_idxref(truth, amat_true, obs, wrong, settings);
+        std::cout << "idxref_omega270 invertx=" << invflag
+                  << " omega-ignored rms_xy=" << bad.rms_pos_initial << '\n';
+        CHECK_MSG(bad.rms_pos_initial > 20.0, "ignored omega must misfit");
+    }
+
     // --- Bravais metric gate rejects skewed mC ---
     {
         UnitCell skewed;

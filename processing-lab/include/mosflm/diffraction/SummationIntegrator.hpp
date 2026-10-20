@@ -29,8 +29,12 @@ struct IntegrationSettings {
     int box_half_px{3};
     /// Background frame thickness outside the peak box (pixels).
     int bg_frame_px{2};
-    /// If true, scale intensity/sigma by ``lp_factor``.
+    /// If true, scale intensity/sigma by ``lp_factor`` (still-image form,
+    /// kept for the C API). PROCESS uses ``rotation_lp`` instead.
     bool apply_lp{false};
+    /// If true, :class:`ProcessPipeline` multiplies I/σ by
+    /// :func:`rotation_lp_correction` (divide by L·P, rotation Lorentz).
+    bool rotation_lp{false};
     /// XDS ``FRACTION_OF_POLARIZATION`` (0 = unpolarized; ~0.98 synchrotron).
     double polarization_fraction{0.0};
     /// If true, map beam-relative mm to ADSC/MOSFLM image pixels via

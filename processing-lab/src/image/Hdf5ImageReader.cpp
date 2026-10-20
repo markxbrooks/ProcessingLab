@@ -581,9 +581,13 @@ void read_frame_pixels(
     H5Dclose(data);
 
     pixels.resize(npix);
+    // Sentinels: −1 = masked (module gap / bad pixel, all bits set);
+    // −2 = overloaded (≥ saturation value). Integrators skip both.
     for (std::size_t i = 0; i < npix; ++i) {
-        if (buf[i] == error_val || buf[i] == static_cast<unsigned int>(-1)) {
+        if (buf[i] == static_cast<unsigned int>(-1)) {
             pixels[i] = -1;
+        } else if (buf[i] >= error_val) {
+            pixels[i] = -2;
         } else {
             pixels[i] = static_cast<std::int32_t>(buf[i]);
         }

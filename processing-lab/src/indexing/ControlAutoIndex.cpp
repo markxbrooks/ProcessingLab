@@ -7,6 +7,7 @@
 #include "mosflm/indexing/SpotList.hpp"
 
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 
@@ -111,6 +112,20 @@ void run_autoindex(
     state.autoindex_system = result.selected_system;
     state.autoindex_character = result.selected_character;
     state.autoindex_n_spots = result.n_spots_used;
+    // PROCESS must predict in the frame these spots were indexed in.
+    state.spt_invertx = spots.header.invflag != 0;
+    // IDXREF refined beam / distance jointly with AMAT; keep them together.
+    if (result.idxref_applied) {
+        state.beam_x_mm = result.idxref_beam_x_mm;
+        state.beam_y_mm = result.idxref_beam_y_mm;
+        state.has_beam = true;
+        state.distance_mm = result.idxref_distance_mm;
+        state.has_distance = true;
+        std::cout << std::fixed << std::setprecision(3)
+                  << "  IDXREF: BEAM " << state.beam_x_mm << " "
+                  << state.beam_y_mm << "  DISTANCE " << state.distance_mm
+                  << " (applied to CONTROL)\n";
+    }
     state.autoindex_indexed_frac = result.fit.indexed_frac;
     state.autoindex_rmsd_hkl = result.fit.rmsd_hkl;
     // SUGGLATT → default SYMMETRY when the user did not set SYMMETRY.

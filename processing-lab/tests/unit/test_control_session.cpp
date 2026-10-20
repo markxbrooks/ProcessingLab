@@ -140,6 +140,18 @@ int main() {
         CHECK(std::fabs(s.state().min_fractioncalc) < 1e-12);
         s.parse_line("NADD 3");
         CHECK_EQ(s.state().nadd, 3);
+        s.parse_line("PROFILE 3D");
+        CHECK(s.state().profile_3d);
+        CHECK_EQ(s.state().nadd, 3);
+        s.parse_line("PROFILE 2D");
+        CHECK(!s.state().profile_3d);
+        s.parse_line("NADD 1");
+        s.parse_line("PROFILE 3D");
+        CHECK(s.state().profile_3d);
+        CHECK_EQ(s.state().nadd, 5);
+        s.parse_line("PROFILE 3D NMASKS 4 4");
+        CHECK_EQ(s.state().nmasks_x, 4);
+        CHECK_EQ(s.state().nmasks_y, 4);
         s.parse_line("STRATEGY ANGLE 45");
         CHECK(s.state().strategy_pending);
         auto r = s.go();

@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -90,6 +91,123 @@ EvalPhi evaluate_phi(
     }
     out.ok = true;
     return out;
+}
+
+/// Standard normal CDF.
+double norm_cdf(double z) {
+    return 0.5 * std::erfc(-z / std::sqrt(2.0));
+}
+
+/// Rocking-curve prediction: analytic Ewald φc + Gaussian rocking curve.
+PredictionResult predict_rocking(
+    const PredictionRequest& request,
+    const UnitCell& cell,
+    const ReciprocalLattice& recip,
+    const Eigen::Vector3d& s0,
+    double inv_lambda
+) {
+    constexpr double kRad = 3.14159265358979323846 / 180.0;
+    const auto& st = request.settings;
+    const double f0 = request.scan.phi_start_deg;
+    const double f1 = request.scan.phi_end_deg;
+    const double fmid = 0.5 * (f0 + f1);
+    const double width_deg =
+        std::max(st.mosaic_spread_deg, 0.0) + std::max(st.divh_deg, st.divv_deg);
+    const double lambda = 1.0 / inv_lambda;
+    const Eigen::Matrix3d& UB = request.orientation.ub();
+    const Eigen::Vector3d axis(1.0, 0.0, 0.0);
+    const double margin_px =
+        st.apply_reek_detector_margin ? st.detector_margin_px : 0.0;
+
+    gemmi::GroupOps gops;
+    const bool filter_abs =
+        st.apply_systematic_absences && request.crystal.spacegroup != nullptr;
+    if (filter_abs) {
+        gops = request.crystal.spacegroup->operations();
+    }
+    const int max_h = static_cast<int>(std::ceil(cell.a / st.dmin_A)) + 1;
+    const int max_k = static_cast<int>(std::ceil(cell.b / st.dmin_A)) + 1;
+    const int max_l = static_cast<int>(std::ceil(cell.c / st.dmin_A)) + 1;
+
+    std::vector<PredictedReflection> spots;
+    for (int h = -max_h; h <= max_h; ++h) {
+        for (int k = -max_k; k <= max_k; ++k) {
+            for (int l = -max_l; l <= max_l; ++l) {
+                if ((h == 0 && k == 0 && l == 0) ||
+                    (filter_abs && gops.is_systematically_absent({h, k, l}))) {
+                    continue;
+                }
+                const double d_A = recip.d_spacing(h, k, l);
+                if (d_A < st.dmin_A || d_A > st.dmax_A ||
+                    (st.exclude_ice_rings && in_ice_ring_shell(d_A))) {
+                    continue;
+                }
+                const Eigen::Vector3d q0 = UB * Eigen::Vector3d(h, k, l);
+                const double qn = q0.norm();
+                if (st.exclude_cusp && qn > 1e-12 &&
+                    std::fabs(q0.x()) / qn < st.cusp_fraction) {
+                    continue;
+                }
+                // q_y sinφ + q_z cosφ = −(λ/2)|q|²  (rotation about +X).
+                const double amp = std::hypot(q0.y(), q0.z());
+                const double rhs = -0.5 * lambda * qn * qn;
+                if (amp < 1e-15 || std::fabs(rhs) > amp) {
+                    continue;
+                }
+                const double alpha = std::atan2(q0.y(), q0.z());
+                const double delta = std::acos(std::clamp(rhs / amp, -1.0, 1.0));
+                for (double sol : {alpha + delta, alpha - delta}) {
+                    // Unwrap φc to the period nearest this frame.
+                    double phic = sol / kRad;
+                    phic += 360.0 * std::round((fmid - phic) / 360.0);
+                    const Eigen::Vector3d s1 = s0 + rotation_x_deg(phic) * q0;
+                    const double zeta = std::fabs(
+                        axis.dot(s1.normalized().cross(s0.normalized()))
+                    );
+                    if (zeta < 1e-6) {
+                        continue;
+                    }
+                    const double sigma = std::max(width_deg, 1e-3) / (2.355 * zeta);
+                    if (st.max_phi_width_deg > 0.0 &&
+                        6.0 * sigma > st.max_phi_width_deg) {
+                        continue;
+                    }
+                    // Measure beyond the ±3σ core (4σ + two frames) so the
+                    // observed φ spread used to estimate the rocking width is
+                    // not truncated by the model it is estimating; the extra
+                    // slices are excluded from the summed intensity.
+                    const double osc = std::max(f1 - f0, 0.0);
+                    const double reach = 4.0 * sigma + 2.0 * osc;
+                    if (phic + reach < f0 || phic - reach > f1) {
+                        continue;
+                    }
+                    const double frac = norm_cdf((f1 - phic) / sigma) -
+                                        norm_cdf((f0 - phic) / sigma);
+                    PredictedReflection spot;
+                    if (!request.detector.lab_to_detector_mm(s1, spot.x_mm, spot.y_mm) ||
+                        !on_detector(request.detector, spot.x_mm, spot.y_mm, margin_px)) {
+                        continue;
+                    }
+                    spot.h = h;
+                    spot.k = k;
+                    spot.l = l;
+                    spot.phi_calc_deg = phic;
+                    spot.phi_begin_deg = phic - 3.0 * sigma;
+                    spot.phi_end_deg = phic + 3.0 * sigma;
+                    spot.fraction = frac;
+                    spot.full = frac > 0.99;
+                    spots.push_back(spot);
+                }
+            }
+        }
+    }
+    std::sort(spots.begin(), spots.end(), [](const auto& a, const auto& b) {
+        return std::tie(a.h, a.k, a.l, a.phi_calc_deg) <
+               std::tie(b.h, b.k, b.l, b.phi_calc_deg);
+    });
+    PredictionResult result;
+    result.reflections = std::move(spots);
+    return result;
 }
 
 PredictionRequest base_analytical_fixture() {
@@ -182,6 +300,10 @@ PredictionResult ReflectionPredictor::predict(
         static_cast<int>(std::ceil(cell.b / request.settings.dmin_A)) + 1;
     const int max_l =
         static_cast<int>(std::ceil(cell.c / request.settings.dmin_A)) + 1;
+
+    if (request.settings.rocking_model && !still) {
+        return predict_rocking(request, cell, recip, s0, inv_lambda);
+    }
 
     // Build φ samples (inclusive endpoints).
     std::vector<double> phis;

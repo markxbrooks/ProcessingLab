@@ -252,7 +252,8 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
 
     for (int i = 0; i < n; ++i) {
         const auto& m = meas[static_cast<std::size_t>(i)];
-        if (!m.ok || m.sigma <= 0.0) {
+        // Overloaded spots have clipped peaks: never learn shapes from them.
+        if (!m.ok || m.sigma <= 0.0 || m.n_overload > 0) {
             continue;
         }
         if (m.intensity / m.sigma < settings.learn_min_isigi) {
@@ -373,41 +374,61 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             continue;
         }
 
-        double sumprod = 0.0;
+        // Least-squares profile fit over valid pixels only: overloaded
+        // (−2) pixels are skipped, so saturated spots are recovered from
+        // their unsaturated wings (MOSFLM profile-fitted overloads).
+        double numer = 0.0;
+        double pr4_valid = 0.0;
+        double p_valid = 0.0;   // Σ P
+        double p2b_valid = 0.0; // Σ P² b
+        double p3_valid = 0.0;  // Σ P³
         double bg_under = 0.0;
         int n_peak = 0;
         for (int dr = -peak_half; dr <= peak_half; ++dr) {
             for (int dc = -peak_half; dc <= peak_half; ++dc) {
                 const int c = c0 + dc;
                 const int rr = r0 + dr;
-                const double od = static_cast<double>(pixel_at(image, c, rr));
+                const std::int32_t raw = pixel_at(image, c, rr);
+                const double b = bg.a * static_cast<double>(dc) +
+                                 bg.b * static_cast<double>(dr) + bg.c;
+                // Background plane under the peak (for Poisson σ model).
+                bg_under += b;
+                ++n_peak;
+                if (raw < 0) {
+                    continue;
+                }
                 const double P = profile[static_cast<std::size_t>(
                     (dr + peak_half) * side + (dc + peak_half)
                 )];
-                sumprod += P * od;
-                // Background plane under the peak (for Poisson σ model).
-                bg_under += bg.a * static_cast<double>(dc) +
-                            bg.b * static_cast<double>(dr) + bg.c;
-                ++n_peak;
+                numer += P * (static_cast<double>(raw) - b);
+                pr4_valid += P * P;
+                p_valid += P;
+                p2b_valid += P * P * std::max(b, 0.0);
+                p3_valid += P * P * P;
             }
         }
-
-        const double numer =
-            sumprod - pr.pr1 * bg.a - pr.pr2 * bg.b - pr.pr3 * bg.c;
-        const double iprf = numer * pr.pr3 / pr.pr4;
+        if (pr4_valid < 1e-18) {
+            obs.profile_ok = false;
+            out.push_back(obs);
+            continue;
+        }
+        const double iprf = numer * pr.pr3 / pr4_valid;
         obs.profile_intensity = iprf;
-        // Counting-stats stand-in (same shape as MeasurementBox summation):
-        // σ² ≈ |I| + (n_peak² / n_bg) · |⟨bg⟩|.  Do NOT use Σ od² — that
-        // dwarfs I for Pilatus ADUs and caps I/σ near ~1–2.
+        // Poisson variance of the weighted LS fit (model pixel b + k·P):
+        //   var(k) = Σ P² (b + k P) / (Σ P²)²,   I = k · ΣP_all
+        // plus the error of the background estimate (mean over n_bg rim
+        // pixels) propagated through the fit: δk = −δb · ΣP / ΣP².
         const double bg_mean =
             (n_peak > 0) ? (bg_under / static_cast<double>(n_peak)) : 0.0;
         const int n_bg = std::max(1, obs.npix_bg);
-        double var = std::fabs(iprf);
-        if (n_peak > 0) {
-            var += (static_cast<double>(n_peak * n_peak) /
-                    static_cast<double>(n_bg)) *
-                   std::fabs(bg_mean);
-        }
+        const double k_fit = numer / pr4_valid;
+        const double var_k_peak =
+            std::max(p2b_valid + std::max(k_fit, 0.0) * p3_valid, 0.0) /
+            (pr4_valid * pr4_valid);
+        const double dk_db = p_valid / pr4_valid;
+        const double var_k_bg =
+            dk_db * dk_db * std::fabs(bg_mean) / static_cast<double>(n_bg);
+        double var = pr.pr3 * pr.pr3 * (var_k_peak + var_k_bg);
         var = std::max(var, 1.0);
         obs.profile_sigma = std::sqrt(var);
         // Never report a worse σ than summation for the same box.

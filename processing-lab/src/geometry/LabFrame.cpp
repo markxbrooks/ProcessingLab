@@ -33,6 +33,46 @@ Eigen::Matrix3d cpp_ub_to_mosflm_amat(
     return Rinv * ub_cpp * wavelength_A;
 }
 
+Eigen::Matrix3d dps_xyz_to_cpp_lab(bool invertx) {
+    Eigen::Matrix3d Q;
+    if (invertx) {
+        Q << 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+    } else {
+        Q << 0.0, -1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+    }
+    return Q;
+}
+
+double ccom_from_spt_omega(double omega_deg, bool invertx) {
+    double c = invertx ? -omega_deg : (omega_deg + 180.0);
+    while (c < 0.0) {
+        c += 360.0;
+    }
+    while (c >= 360.0) {
+        c -= 360.0;
+    }
+    return (std::fabs(c) < 1e-12) ? 0.0 : c;  // no "-0" in logs
+}
+
+Eigen::Matrix3d xyz_reciprocal_to_mosflm_amat(
+    const Eigen::Matrix3d& om_t_xyz,
+    double wavelength_A,
+    bool invertx
+) {
+    return cpp_ub_to_mosflm_amat(
+        dps_xyz_to_cpp_lab(invertx) * om_t_xyz, wavelength_A
+    );
+}
+
+Eigen::Matrix3d mosflm_amat_to_xyz_reciprocal(
+    const Eigen::Matrix3d& A_mosflm,
+    double wavelength_A,
+    bool invertx
+) {
+    return dps_xyz_to_cpp_lab(invertx).inverse() *
+           mosflm_amat_to_cpp_ub(A_mosflm, wavelength_A);
+}
+
 void cpp_mm_to_mosflm_xdet(
     double x_mm,
     double y_mm,

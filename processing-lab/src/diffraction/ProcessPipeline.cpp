@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace mosflm::diffraction {
 namespace {
@@ -18,6 +19,20 @@ constexpr int kIbadOverlap = 16;
 constexpr int kIbadEdge = 32;
 constexpr int kIbadFewBg = 64;
 constexpr int kOmitOffDetector = 128;
+/// Overloaded (saturated) pixel under the peak.
+constexpr int kIbadOverload = 256;
+
+/// Rotation about the predictor spindle (+X), same sense as
+/// :class:`ReflectionPredictor`.
+Eigen::Matrix3d rotation_about_x_deg(double phi_deg) {
+    const double r = phi_deg * (3.14159265358979323846 / 180.0);
+    Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
+    R(1, 1) = std::cos(r);
+    R(1, 2) = -std::sin(r);
+    R(2, 1) = std::sin(r);
+    R(2, 2) = std::cos(r);
+    return R;
+}
 
 float encode_bgpkratios(double bgrat, double pkrat) {
     const int ia =
@@ -30,6 +45,10 @@ float encode_bgpkratios(double bgrat, double pkrat) {
 
 ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
     ProcessResult out;
+    out.scan = request.scan;
+    out.detector = request.detector;
+    out.image_beam_x_mm = request.integration.image_beam_x_mm;
+    out.image_beam_y_mm = request.integration.image_beam_y_mm;
 
     crystal::CrystalMetadata crystal = request.crystal;
     OrientationMatrix orientation = request.orientation;
@@ -123,12 +142,15 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         bool full{true};
         double x_mm{};
         double y_mm{};
+        double phi_calc{std::numeric_limits<double>::quiet_NaN()};
+        double fraction{1.0};
     };
     std::vector<PredMeta> pred_meta;
     pred_meta.reserve(out.predictions.size());
     for (const auto& p : out.predictions) {
         pred_meta.push_back(
-            {p.phi_begin_deg, p.phi_end_deg, p.full, p.x_mm, p.y_mm}
+            {p.phi_begin_deg, p.phi_end_deg, p.full, p.x_mm, p.y_mm,
+             p.phi_calc_deg, p.fraction}
         );
     }
 
@@ -175,18 +197,23 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             if (po->profile_ok && po->profile_intensity < 0.0) {
                 ibad |= kIbadNegProfile;
             }
-            if (po->n_bg_rejected > 8) {
+            // Non-flat background: many rim pixels rejected. Relative to the
+            // rim size (Eiger rims hold ~240 px, where 8 is only ~3%).
+            if (po->n_bg_rejected > std::max(8, po->npix_bg / 10)) {
                 ibad |= kIbadBgratio;
             }
             if (po->npix_bg < 4) {
                 ibad |= kIbadFewBg;
+            }
+            if (po->n_overload > 0) {
+                ibad |= kIbadOverload;
             }
         } else if (i < out.meas_observations.size()) {
             const auto& m = out.meas_observations[i];
             if (m.overlapped) {
                 ibad |= kIbadOverlap;
             }
-            if (m.n_bg_rejected > 8) {
+            if (m.n_bg_rejected > std::max(8, m.npix_bg / 10)) {
                 ibad |= kIbadBgratio;
             }
             if (m.npix_bg < 4) {
@@ -204,6 +231,9 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         row.h = r.h;
         row.k = r.k;
         row.l = r.l;
+        row.h0 = r.h;
+        row.k0 = r.k;
+        row.l0 = r.l;
         row.batch = 1;
         // Default I/SIGI from summation; prefer profile when fit succeeded
         // (DIALS-like: profile intensities correlate better for shared HKL).
@@ -231,80 +261,96 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             row.sigipr = row.sigma;
         }
 
-        const double phi0 = pm.phi_begin;
-        const double phi1 = pm.phi_end;
-        const double width = std::max(0.0, phi1 - phi0);
-        row.rot = static_cast<float>(0.5 * (phi0 + phi1));
-        row.width = static_cast<float>(width);
-
-        // FRACTIONCALC: fraction of the *intrinsic* rocking width on this
-        // image (mosaic+divergence). Mid-frame Bragg hits are treated as
-        // full even if Ewald sampling touched an osc endpoint.
-        //
-        // Important: when mosaic ≳ osc (default MOSAIC was 0.30° on 0.15°
-        // frames), margin = 0.5·rocking eats the whole frame and every
-        // whole-osc observation collapses to osc/mosaic = 0.5 — emptying
-        // "fully recorded" zone views (e.g. hk0). Cap the mid-frame margin
-        // to a fraction of the oscillation and treat whole-frame interior
-        // hits as full.
-        const double osc0 = request.scan.phi_start_deg;
-        const double osc1 = request.scan.phi_end_deg;
-        const double osc_w = std::max(1e-6, osc1 - osc0);
-        const double mosaic = std::max(0.0, request.prediction.mosaic_spread_deg);
-        const double div = std::max(
-            request.prediction.divh_deg, request.prediction.divv_deg
-        );
-        const double phi_step =
-            std::max(1e-6, request.prediction.phi_step_deg);
-        const double rocking = std::max(mosaic + div, phi_step);
-        const double mid = 0.5 * (phi0 + phi1);
-        const double margin = std::min(0.5 * rocking, 0.35 * osc_w);
-        bool treat_full = pm.full;
-        if (!treat_full && mid - osc0 > margin && osc1 - mid > margin) {
-            treat_full = true;
-        }
-        const double lo = std::max(phi0, osc0);
-        const double hi = std::min(phi1, osc1);
-        const double overlap = std::max(0.0, hi - lo);
-        // Reflection spans (almost) the whole frame with Bragg mid interior.
-        if (!treat_full && overlap >= 0.98 * osc_w &&
-            mid - osc0 > 0.05 * osc_w && osc1 - mid > 0.05 * osc_w) {
-            treat_full = true;
-        }
-        if (treat_full) {
-            row.fractioncalc = 1.0f;
-        } else {
-            row.fractioncalc = static_cast<float>(
-                std::min(1.0, overlap / rocking)
+        const bool rocking = request.prediction.rocking_model &&
+                             std::isfinite(pm.phi_calc);
+        // φ at which the reflection is in diffracting position.
+        const double mid =
+            rocking ? pm.phi_calc : 0.5 * (pm.phi_begin + pm.phi_end);
+        if (rocking) {
+            // One slice of a rocking curve: summed across frames later
+            // (sum_partial_slices), so no 1/FRACTIONCALC scaling here.
+            row.rot = static_cast<float>(pm.phi_calc);
+            row.width = static_cast<float>(pm.phi_end - pm.phi_begin);
+            row.fractioncalc = static_cast<float>(pm.fraction);
+            row.mpart = pm.fraction < 0.99 ? 1 : 0;
+            row.phi_obs = static_cast<float>(
+                0.5 * (request.scan.phi_start_deg + request.scan.phi_end_deg)
             );
-        }
-        row.mpart = treat_full ? 0 : 1;
+        } else {
+            const double phi0 = pm.phi_begin;
+            const double phi1 = pm.phi_end;
+            const double width = std::max(0.0, phi1 - phi0);
+            row.rot = static_cast<float>(0.5 * (phi0 + phi1));
+            row.width = static_cast<float>(width);
 
-        if (request.min_fractioncalc > 0.0 &&
-            static_cast<double>(row.fractioncalc) < request.min_fractioncalc) {
-            ++out.n_omitted;
-            continue;
-        }
+            // FRACTIONCALC: fraction of the *intrinsic* rocking width on this
+            // image (mosaic+divergence). Mid-frame Bragg hits are treated as
+            // full even if Ewald sampling touched an osc endpoint.
+            //
+            // Important: when mosaic ≳ osc (default MOSAIC was 0.30° on 0.15°
+            // frames), margin = 0.5·rocking eats the whole frame and every
+            // whole-osc observation collapses to osc/mosaic = 0.5 — emptying
+            // "fully recorded" zone views (e.g. hk0). Cap the mid-frame margin
+            // to a fraction of the oscillation and treat whole-frame interior
+            // hits as full.
+            const double osc0 = request.scan.phi_start_deg;
+            const double osc1 = request.scan.phi_end_deg;
+            const double osc_w = std::max(1e-6, osc1 - osc0);
+            const double mosaic = std::max(0.0, request.prediction.mosaic_spread_deg);
+            const double div = std::max(
+                request.prediction.divh_deg, request.prediction.divv_deg
+            );
+            const double phi_step =
+                std::max(1e-6, request.prediction.phi_step_deg);
+            const double rocking = std::max(mosaic + div, phi_step);
+            const double margin = std::min(0.5 * rocking, 0.35 * osc_w);
+            bool treat_full = pm.full;
+            if (!treat_full && mid - osc0 > margin && osc1 - mid > margin) {
+                treat_full = true;
+            }
+            const double lo = std::max(phi0, osc0);
+            const double hi = std::min(phi1, osc1);
+            const double overlap = std::max(0.0, hi - lo);
+            // Reflection spans (almost) the whole frame with Bragg mid interior.
+            if (!treat_full && overlap >= 0.98 * osc_w &&
+                mid - osc0 > 0.05 * osc_w && osc1 - mid > 0.05 * osc_w) {
+                treat_full = true;
+            }
+            if (treat_full) {
+                row.fractioncalc = 1.0f;
+            } else {
+                row.fractioncalc = static_cast<float>(
+                    std::min(1.0, overlap / rocking)
+                );
+            }
+            row.mpart = treat_full ? 0 : 1;
 
-        // Full-equivalent intensities: scale partials by 1/FRACTIONCALC so
-        // mean-I over HKL matches DIALS-style full-obs comparisons.
-        if (request.scale_by_partiality) {
-            const double frac =
-                std::max(0.05, static_cast<double>(row.fractioncalc));
-            if (frac < 0.999) {
-                const double inv = 1.0 / frac;
-                row.intensity = static_cast<float>(
-                    static_cast<double>(row.intensity) * inv
-                );
-                row.sigma = static_cast<float>(
-                    static_cast<double>(row.sigma) * inv
-                );
-                row.ipr = static_cast<float>(
-                    static_cast<double>(row.ipr) * inv
-                );
-                row.sigipr = static_cast<float>(
-                    static_cast<double>(row.sigipr) * inv
-                );
+            if (request.min_fractioncalc > 0.0 &&
+                static_cast<double>(row.fractioncalc) < request.min_fractioncalc) {
+                ++out.n_omitted;
+                continue;
+            }
+
+            // Full-equivalent intensities: scale partials by 1/FRACTIONCALC so
+            // mean-I over HKL matches DIALS-style full-obs comparisons.
+            if (request.scale_by_partiality) {
+                const double frac =
+                    std::max(0.05, static_cast<double>(row.fractioncalc));
+                if (frac < 0.999) {
+                    const double inv = 1.0 / frac;
+                    row.intensity = static_cast<float>(
+                        static_cast<double>(row.intensity) * inv
+                    );
+                    row.sigma = static_cast<float>(
+                        static_cast<double>(row.sigma) * inv
+                    );
+                    row.ipr = static_cast<float>(
+                        static_cast<double>(row.ipr) * inv
+                    );
+                    row.sigipr = static_cast<float>(
+                        static_cast<double>(row.sigipr) * inv
+                    );
+                }
             }
         }
 
@@ -351,11 +397,35 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         );
         row.xdet = static_cast<float>(xdet);
         row.ydet = static_cast<float>(ydet);
+        // Observed centroid: pixel (col,row) == XDET/YDET on MOSFLM axes.
+        if (request.integration.mosflm_detector_axes && po != nullptr &&
+            std::isfinite(po->xobs_px) && std::isfinite(po->yobs_px)) {
+            row.xdet_obs = static_cast<float>(po->xobs_px);
+            row.ydet_obs = static_cast<float>(po->yobs_px);
+        }
 
-        row.lp = static_cast<float>(lp_factor(
-            request.detector, pm.x_mm, pm.y_mm,
-            request.integration.polarization_fraction
-        ));
+        if (request.integration.rotation_lp) {
+            // Rotation-method LP: s1 from UB·h rotated to the reflecting φ.
+            const double lam = request.detector.wavelength_A;
+            const Eigen::Vector3d s0(0.0, 0.0, lam > 0.0 ? 1.0 / lam : 1.0);
+            const Eigen::Vector3d s1 =
+                s0 + rotation_about_x_deg(mid) * orientation.miller_to_lab(r.h, r.k, r.l);
+            const double corr = rotation_lp_correction(
+                s0, s1, Eigen::Vector3d::UnitX(), Eigen::Vector3d::UnitY(),
+                request.integration.polarization_fraction
+            );
+            row.intensity = static_cast<float>(row.intensity * corr);
+            row.sigma = static_cast<float>(row.sigma * corr);
+            row.ipr = static_cast<float>(row.ipr * corr);
+            row.sigipr = static_cast<float>(row.sigipr * corr);
+            // LP column = factor the raw intensity was divided by (L·P).
+            row.lp = static_cast<float>(1.0 / corr);
+        } else {
+            row.lp = static_cast<float>(lp_factor(
+                request.detector, pm.x_mm, pm.y_mm,
+                request.integration.polarization_fraction
+            ));
+        }
 
         // FLAG: 0 good; else IBAD bits (Aimless rejects non-zero by default).
         row.flag = ibad;
@@ -387,7 +457,8 @@ void ProcessPipeline::write_mtz(
 ) {
     if (!result.mosflm_reflections.empty()) {
         crystal::MtzAdapter::write_mosflm(
-            path, crystal, result.mosflm_reflections, wavelength_A
+            path, crystal, result.mosflm_reflections, wavelength_A,
+            result.batch_scans
         );
     } else {
         crystal::MtzAdapter::write_simple(

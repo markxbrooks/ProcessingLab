@@ -1,10 +1,16 @@
 #include "mosflm/indexing/BravaisSelect.hpp"
 
+#include "mosflm/geometry/MetricTensorProjector.hpp"
+
+#include <gemmi/symmetry.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <ostream>
 #include <vector>
 
@@ -190,6 +196,21 @@ std::size_t pick_min_criterion(
 }
 
 }  // namespace
+
+std::optional<MetricProjection> project_candidate_metric(
+    std::string_view system_id,
+    const UnitCell& observed
+) {
+    const auto* sg =
+        gemmi::find_spacegroup_by_number(symmetry_number_for_lattice(system_id));
+    try {
+        return MetricTensorProjector(sg).project(observed);
+    } catch (const std::invalid_argument&) {
+        return std::nullopt;
+    } catch (const std::domain_error&) {
+        return std::nullopt;
+    }
+}
 
 int crystal_class_rank(std::string_view system_id) {
     if (system_id.empty()) {
@@ -588,8 +609,10 @@ void write_bravais_penalty_table(
         os << " SUGGLATT selects among PENALTY ≤ " << max_penalty
            << " (highest symmetry; no penalty jump detected).\n";
     }
+    os << " METDEV% = metric departure from the lattice's symmetry-constrained"
+       << " cell\n           (separate from PENALTY; not used for selection).\n";
     os << " No  PENALTY LATT     a        b        c"
-       << "     alpha  beta gamma  Possible spacegroups\n\n";
+       << "     alpha  beta gamma  METDEV%  Possible spacegroups\n\n";
 
     // Mosflm: DO I = NLAUEG,1,-1 — worst first, best last.
     // Widen PENALTY vs F77 I4: raw DPS criteria can exceed 9999.
@@ -608,15 +631,21 @@ void write_bravais_penalty_table(
         os << std::fixed << std::setprecision(2) << std::setw(9) << cell.a
            << std::setw(9) << cell.b << std::setw(9) << cell.c;
         os << "  " << std::setprecision(1) << std::setw(6) << cell.alpha_deg
-           << std::setw(6) << cell.beta_deg << std::setw(6) << cell.gamma_deg
-           << "   " << possible;
+           << std::setw(6) << cell.beta_deg << std::setw(6) << cell.gamma_deg;
+        if (const auto proj = project_candidate_metric(c.system_id, cell)) {
+            os << std::setprecision(3) << std::setw(9)
+               << 100.0 * proj->rel_metric_dev;
+        } else {
+            os << std::setw(9) << "n/a";
+        }
+        os << "   " << possible;
         if (lastgood > 1 && no == lastgood) {
             os << "  <--- LASTGOOD";
         }
         os << '\n';
         if (c.system_id == "hP") {
-            // Mosflm FORMAT(65X,A) continuation for hexagonal P6 list.
-            os << std::string(65, ' ') << kHexagonalP6 << '\n';
+            // Mosflm FORMAT(65X,A) continuation, shifted for METDEV%.
+            os << std::string(74, ' ') << kHexagonalP6 << '\n';
         }
     }
     os.flags(saved);
@@ -635,7 +664,22 @@ void write_bravais_penalty_table(
        << selected_cell.a << "  " << selected_cell.b << "  " << selected_cell.c
        << "  " << std::setprecision(2) << selected_cell.alpha_deg << "  "
        << selected_cell.beta_deg << "  " << selected_cell.gamma_deg << "\n"
-       << "           Symmetry: " << selected_system << " (" << sg_label
+       ;
+    if (const auto proj =
+            project_candidate_metric(selected_system, selected_cell)) {
+        const UnitCell& k = proj->constrained;
+        os << "        constrained:  " << std::setprecision(3) << k.a << "  "
+           << k.b << "  " << k.c << "  " << std::setprecision(2)
+           << k.alpha_deg << "  " << k.beta_deg << "  " << k.gamma_deg << "\n"
+           << "   metric deviation:  max|d edge| " << std::setprecision(3)
+           << proj->max_edge_dev_A << " A, max|d angle| "
+           << std::setprecision(2) << proj->max_angle_dev_deg << " deg, "
+           << std::setprecision(3) << 100.0 * proj->rel_metric_dev
+           << "% of |G|\n"
+           << "                      (cell esds unavailable:"
+           << " significance not tested)\n";
+    }
+    os << "           Symmetry: " << selected_system << " (" << sg_label
        << " / #" << symmetry_number_for_lattice(selected_system)
        << ", character " << selected_character << ")\n";
     os << std::flush;

@@ -28,6 +28,8 @@
 #include <string_view>
 #include <vector>
 
+#include <unistd.h>
+
 namespace {
 
 std::filesystem::path default_insulin_img() {
@@ -272,7 +274,19 @@ int main(int argc, char** argv) {
         if (script) {
             runs = session.run_script(*script, img_override);
         } else {
-            runs = session.run_stream(std::cin, img_override);
+            // Interactive terminal: say we are waiting and prompt per line.
+            const bool interactive = ::isatty(STDIN_FILENO) != 0;
+            if (interactive) {
+                std::cout << "\n Reading CONTROL commands from the terminal."
+                          << "\n Enter keywords (e.g. FINDSPOTS ..., AUTOINDEX"
+                          << " ...), GO to run, EXIT or Ctrl-D to finish.\n\n";
+            }
+            runs = session.run_stream(
+                std::cin, img_override, interactive ? " ProcessingLab> " : ""
+            );
+            if (interactive && !session.exit_requested()) {
+                std::cout << '\n';  // Ctrl-D leaves the cursor after the prompt.
+            }
         }
 
         const auto out_mtz = hklout ? *hklout : session.state().hklout;

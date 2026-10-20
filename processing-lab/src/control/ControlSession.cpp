@@ -3,11 +3,16 @@
 #include "mosflm/crystal/SpaceGroupInfo.hpp"
 #include "mosflm/diffraction/DataQualityStats.hpp"
 #include "mosflm/diffraction/DetectorInit.hpp"
+#include "mosflm/diffraction/PartialSummation.hpp"
+#include "mosflm/diffraction/Profile3d.hpp"
+#include "mosflm/diffraction/ReflectionPredictor.hpp"
+#include "mosflm/diffraction/Shoebox.hpp"
 #include "mosflm/diffraction/TrustedRegion.hpp"
 #include "mosflm/geometry/CellFix.hpp"
 #include "mosflm/geometry/LabFrame.hpp"
 #include "mosflm/io/XparmIO.hpp"
 #include "mosflm/image/ImageIO.hpp"
+#include "mosflm/refinement/PositionalRefinement.hpp"
 #include "mosflm/refinement/PostRefinement.hpp"
 #include "mosflm/util/OpenMP.hpp"
 
@@ -15,12 +20,17 @@
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <iomanip>
+#include <exception>
 #include <iostream>
 #include <iterator>
+#include <map>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -450,6 +460,7 @@ void ControlSession::apply_keyword(
             throw std::invalid_argument("CONTROL MOSAIC needs 1 value");
         }
         state_.mosaic_deg = require_double(args[0], "MOSAIC");
+        state_.mosaic_from_user = true;
         state_.has_mosaic = true;
         return;
     }
@@ -591,6 +602,31 @@ void ControlSession::apply_keyword(
         state_.process_pending = true;
         return;
     }
+    if (key == "PROFILE") {
+        if (!args.empty()) {
+            const std::string u0 = upper(args[0]);
+            if (u0 == "3D") {
+                state_.profile_3d = true;
+                if (state_.nadd <= 1) {
+                    state_.nadd = 5;
+                }
+                if (args.size() >= 4 && upper(args[1]) == "NMASKS") {
+                    state_.nmasks_x = require_int(args[2], "NMASKS");
+                    state_.nmasks_y = require_int(args[3], "NMASKS");
+                    if (state_.nmasks_x < 1 || state_.nmasks_y < 1) {
+                        throw std::invalid_argument(
+                            "CONTROL NMASKS: nx,ny must be >= 1"
+                        );
+                    }
+                }
+                return;
+            }
+            if (u0 == "2D") {
+                state_.profile_3d = false;
+                return;
+            }
+        }
+    }
     if (key == "NMASKS" || key == "PROFILE") {
         // NMASKS nx ny  or  PROFILE NMASKS nx ny
         std::size_t i = 0;
@@ -631,6 +667,12 @@ void ControlSession::apply_keyword(
         } else {
             state_.scale_by_partiality = false;
         }
+        return;
+    }
+    if (key == "ROCKING") {
+        state_.rocking_model =
+            args.empty() || upper(args[0]) == "ON" || upper(args[0]) == "YES" ||
+            args[0] == "1";
         return;
     }
     if (key == "AUTOSIGMA" || key == "AUTOSIGMAS") {
@@ -973,98 +1015,157 @@ bool auto_estimate_sigma_msd(
     return true;
 }
 
-/// CORRECT/INTEGRATE-lite: refine misset from measured XDET/YDET/ROT and
-/// write the updated MOSFLM AMAT back into CONTROL state.
-bool postrefine_from_observations(
-    ControlState& state,
+/// Strong spots centred on this frame, with observed centroids, for
+/// :class:`refinement::PositionalRefiner`. Uses the profile observations
+/// (original Miller indices, 1:1 with ``predictions``).
+void collect_positional_observations(
     const diffraction::ProcessResult& one,
-    const DetectorGeometry& det
+    std::vector<refinement::PositionalObservation>& out
 ) {
-    using refinement::PostRefObservation;
-    using refinement::PostRefinementSettings;
-    using refinement::PostRefiner;
-
-    std::vector<PostRefObservation> obs;
-    obs.reserve(one.mosflm_reflections.size());
-    for (const auto& row : one.mosflm_reflections) {
-        if (row.flag != 0 || !(row.sigma > 0.0f)) {
+    const double f0 = one.scan.phi_start_deg;
+    const double f1 = one.scan.phi_end_deg;
+    const std::size_t n =
+        std::min(one.profile_observations.size(), one.predictions.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& o = one.profile_observations[i];
+        const auto& pr = one.predictions[i];
+        if (!o.ok || o.overlapped || !std::isfinite(o.xobs_px) ||
+            !std::isfinite(o.yobs_px) || !(o.summation_sigma > 0.0) ||
+            o.summation_intensity < 5.0 * o.summation_sigma) {
             continue;
         }
-        const double isigi =
-            static_cast<double>(row.intensity / row.sigma);
-        if (isigi < 1.5) {
+        const double mid = 0.5 * (pr.phi_begin_deg + pr.phi_end_deg);
+        if (f1 > f0 && (mid < f0 || mid >= f1)) {
             continue;
         }
-        PostRefObservation o;
-        o.h = row.h;
-        o.k = row.k;
-        o.l = row.l;
-        o.phi_obs_deg = static_cast<double>(row.rot);
-        o.weight = (row.fractioncalc < 0.95f) ? 1.5 : 0.5;
-        o.xdet_obs_px = static_cast<double>(row.xdet);
-        o.ydet_obs_px = static_cast<double>(row.ydet);
-        obs.push_back(o);
+        out.push_back({o.h, o.k, o.l, mid, o.xobs_px, o.yobs_px, 1.0});
     }
-    if (obs.size() < 12) {
-        return false;
-    }
+}
 
-    PostRefinementSettings settings;
-    settings.refine_against_detector = true;
-    settings.refine_cell_scale = false;  // avoid lattice walk on long wedges
-    settings.detector = det;
-    settings.beam_x_mm = state.has_beam ? state.beam_x_mm : det.beam_x_mm;
-    settings.beam_y_mm = state.has_beam ? state.beam_y_mm : det.beam_y_mm;
-    settings.max_iterations = 8;
-    // Fine-φ Eiger: predicted ROT ≈ observed; widen φ gate, rely on XDET.
-    settings.outlier_phi_deg = 5.0;
-
-    crystal::CrystalMetadata crystal;
-    crystal.cell = gemmi::UnitCell(
-        state.cell.a, state.cell.b, state.cell.c, state.cell.alpha_deg,
-        state.cell.beta_deg, state.cell.gamma_deg
-    );
-    if (state.has_symmetry) {
-        crystal.spacegroup =
-            crystal::SpaceGroupInfo::find_by_number(state.symmetry_number);
-    }
+/// MOSFLM-style positional refinement of misset, symmetry-constrained cell,
+/// distance and beam against observed centroids; applies the result to
+/// CONTROL state when the residual improves.
+///
+/// \return True if the geometry was updated.
+bool refine_geometry_positional(
+    ControlState& state,
+    const std::vector<refinement::PositionalObservation>& obs,
+    const DetectorGeometry& det,
+    double image_beam_x_mm,
+    double image_beam_y_mm,
+    std::string_view label
+) {
+    const gemmi::SpaceGroup* sg =
+        state.has_symmetry
+            ? crystal::SpaceGroupInfo::find_by_number(state.symmetry_number)
+            : nullptr;
+    const double lam = det.wavelength_A > 0.0 ? det.wavelength_A : state.wavelength_A;
+    // MOSFLM [A] is λ-scaled (A = λ·UB_mosflm); the predictor wants Å⁻¹.
     const auto orient =
-        OrientationMatrix::from_mosflm_orientation_matrix(state.amat);
-    const auto result = PostRefiner{}.refine(
-        crystal, orient, state.wavelength_A, state.mosaic_deg, obs, settings
+        OrientationMatrix::from_mosflm_orientation_matrix(state.amat, lam);
+    const auto res = refinement::PositionalRefiner{}.refine(
+        orient, sg, lam, det, image_beam_x_mm, image_beam_y_mm, obs
     );
-    if (!result.ok) {
+    std::cout << std::fixed << std::setprecision(3) << "  POSITIONAL REFINE ("
+              << label << "): n=" << res.n_used << "/" << res.n_input;
+    if (!res.ok) {
+        std::cout << " rms0=" << res.rms_initial_px << " px (not applied: "
+                  << res.reason << ")\n";
         return false;
     }
-    // Only accept if positional residual improves (or φ when no pos term).
-    const bool pos_ok =
-        result.rms_pos_initial_px <= 0.0 ||
-        result.rms_pos_px <= result.rms_pos_initial_px * 1.02;
-    const bool phi_ok =
-        result.rms_phi_deg <= result.rms_phi_initial_deg * 1.02;
-    const bool accept = pos_ok && phi_ok;
-    std::cout << std::fixed << std::setprecision(3);
-    std::cout << "  POSTREFINE: n=" << result.n_used
-              << " rms_phi=" << result.rms_phi_initial_deg << "→"
-              << result.rms_phi_deg << " rms_pos="
-              << result.rms_pos_initial_px << "→" << result.rms_pos_px
-              << " px" << (accept ? " (applied)" : " (rejected)") << '\n';
-    if (!accept) {
+    std::cout << " rms=" << res.rms_initial_px << "→" << res.rms_px << " px"
+              << " DISTANCE " << det.distance_mm << "→" << res.distance_mm
+              << " BEAM " << res.beam_x_mm << " " << res.beam_y_mm
+              << " TILT/TWIST " << std::setprecision(2) << res.tilt_mrad << "/"
+              << res.twist_mrad << std::setprecision(3) << " CELL "
+              << std::setprecision(3) << res.cell.a << " " << res.cell.b << " "
+              << res.cell.c << " " << std::setprecision(2) << res.cell.alpha_deg
+              << " " << res.cell.beta_deg << " " << res.cell.gamma_deg
+              << (res.improved ? " (applied)" : " (no improvement)") << '\n';
+    if (!res.improved) {
         return false;
     }
-    // Cap misset so a bad batch cannot walk the orientation off lattice.
-    const double cap = 0.35;  // degrees
-    const auto& p = result.parameters;
-    if (std::fabs(p.dphix_deg) > cap || std::fabs(p.dphiy_deg) > cap ||
-        std::fabs(p.dphiz_deg) > cap) {
-        std::cout << "  POSTREFINE: misset exceeds " << cap
-                  << " deg — not applied\n";
-        return false;
-    }
-    state.amat =
-        cpp_ub_to_mosflm_amat(result.orientation.ub(), state.wavelength_A);
+    state.amat = cpp_ub_to_mosflm_amat(res.orientation.ub(), lam);
     state.has_matrix = true;
-    // Do not overwrite CONTROL MOSAIC from postref (φ residuals ≠ σM).
+    state.cell = res.cell;
+    state.has_cell = true;
+    state.distance_mm = res.distance_mm;
+    state.has_distance = true;
+    state.beam_x_mm = res.beam_x_mm;
+    state.beam_y_mm = res.beam_y_mm;
+    state.has_beam = true;
+    state.tilt_mrad = res.tilt_mrad;
+    state.twist_mrad = res.twist_mrad;
+    state.use_rotmat2 = true;
+    return true;
+}
+
+/// Complete, strong summed reflections with observed centroid and φ.
+void collect_summed_observations(
+    const std::vector<crystal::MosflmReflection>& summed,
+    std::vector<refinement::PositionalObservation>& out
+) {
+    for (const auto& r : summed) {
+        if (r.mpart != 0 || r.flag != 0 || !(r.sigma > 0.0f) ||
+            r.intensity < 5.0f * r.sigma || !std::isfinite(r.xdet_obs) ||
+            !std::isfinite(r.ydet_obs) || !std::isfinite(r.phi_obs)) {
+            continue;
+        }
+        refinement::PositionalObservation o;
+        o.h = r.h0;
+        o.k = r.k0;
+        o.l = r.l0;
+        o.phi_deg = r.phi_obs;
+        o.xdet_obs_px = r.xdet_obs;
+        o.ydet_obs_px = r.ydet_obs;
+        o.phi_obs_deg = r.phi_obs;
+        out.push_back(o);
+    }
+}
+
+/// XDS-style rocking-width estimate from summed reflections: observed φ
+/// spread (frame width removed) times ζ, where ζ follows from the predicted
+/// width ``6σ = 6·W/(2.355 ζ)``. Updates MOSAIC (keeping DIV) unless MOSAIC
+/// came from CONTROL. \return True if MOSAIC changed.
+bool estimate_rocking_width(
+    ControlState& state,
+    const std::vector<crystal::MosflmReflection>& summed,
+    double osc_w_deg
+) {
+    if (!state.auto_sigma_msd || state.mosaic_from_user || !(osc_w_deg > 0.0)) {
+        return false;
+    }
+    const double div = state.has_divergence ? std::max(state.divh_deg, state.divv_deg) : 0.0;
+    const double width_now = std::max(state.mosaic_deg + div, 1e-3);
+    std::vector<double> est;
+    for (const auto& r : summed) {
+        if (r.mpart != 0 || r.flag != 0 || !(r.sigma > 0.0f) ||
+            r.intensity < 10.0f * r.sigma || !std::isfinite(r.phi_obs_sd) ||
+            !(r.width > 0.0f)) {
+            continue;
+        }
+        const double var = static_cast<double>(r.phi_obs_sd) * r.phi_obs_sd -
+                           osc_w_deg * osc_w_deg / 12.0;
+        if (var <= 0.0) {
+            continue;
+        }
+        const double zeta = 6.0 * width_now / (2.355 * static_cast<double>(r.width));
+        est.push_back(2.355 * std::sqrt(var) * zeta);
+    }
+    if (est.size() < 40) {
+        return false;
+    }
+    const auto mid = est.begin() + static_cast<std::ptrdiff_t>(est.size() / 2);
+    std::nth_element(est.begin(), mid, est.end());
+    const double mosaic = std::clamp(*mid - div, 0.02, 2.0);
+    std::cout << std::fixed << std::setprecision(3) << "  ROCKING WIDTH: "
+              << *mid << " deg from " << est.size() << " reflections → MOSAIC "
+              << state.mosaic_deg << "→" << mosaic << '\n';
+    if (std::fabs(mosaic - state.mosaic_deg) < 0.005) {
+        return false;
+    }
+    state.mosaic_deg = mosaic;
+    state.has_mosaic = true;
     return true;
 }
 
@@ -1076,6 +1177,9 @@ void append_process_result(
     for (auto& row : one.mosflm_reflections) {
         row.batch = batch;
     }
+    acc.batch_scans.push_back(
+        {batch, one.scan.phi_start_deg, one.scan.phi_end_deg}
+    );
     acc.n_overlapped += one.n_overlapped;
     acc.n_profile_ok += one.n_profile_ok;
     acc.n_omitted += one.n_omitted;
@@ -1277,6 +1381,15 @@ void print_process_integrate_header(
               << "  TWIST= " << std::setw(8) << state.twist_mrad
               << "  WIDEN_EWALD= " << (state.widen_ewald_with_mosaic ? "ON" : "OFF")
               << "\n";
+    // Detector omega from the image (NeXus axis vs fast/slow); CCOM is the
+    // MMTOPX rotation that inverts the FINDSPOTS/SpotToRlp frame.
+    std::cout << " OMEGA= " << std::setw(8) << img_meta.rotation_axis_omega_deg
+              << "  INVERTX= " << (state.spt_invertx ? "ON " : "OFF")
+              << "  CCOM= " << std::setw(8)
+              << ccom_from_spt_omega(
+                     img_meta.rotation_axis_omega_deg, state.spt_invertx
+                 )
+              << "\n";
     std::cout << std::flush;
 }
 
@@ -1395,6 +1508,193 @@ void print_process_run_summary(
     }
 }
 
+void run_process_profile_3d(
+    ControlSession& session,
+    diffraction::ProcessResult& acc,
+    crystal::CrystalMetadata& crystal,
+    std::size_t& n_frames,
+    const std::optional<std::filesystem::path>& image_override,
+    const image::DiffractionImage& image0,
+    const std::filesystem::path& path0,
+    int first,
+    int last,
+    double osc_log,
+    double sigmab,
+    double sigmar
+) {
+    const ControlState& state = session.state();
+    int nadd = diffraction::odd_nadd(state.nadd <= 1 ? 5 : state.nadd);
+    std::cout << "  PROFILE 3D: shoebox depth NADD=" << nadd << "\n";
+
+    diffraction::FrameCache cache(
+        static_cast<std::size_t>(last - first + nadd + 4)
+    );
+    cache.put(path0, first, image0);
+
+    struct Seed {
+        diffraction::ShoeboxRequest req;
+        double dist{1e99};
+    };
+    std::map<std::tuple<int, int, int>, Seed> seeds;
+    diffraction::ReflectionPredictor predictor;
+
+    print_process_batch_banner(first, last, true);
+    std::size_t batch_integrated = 0;
+    auto tmpl = session.make_process_request(image0, first);
+    crystal = tmpl.crystal;
+
+    for (int frame = first; frame <= last; ++frame) {
+        const auto img_path = session.resolve_image_path(image_override, frame);
+        std::shared_ptr<const image::DiffractionImage> held;
+        const image::DiffractionImage* image = nullptr;
+        if (frame == first) {
+            image = &image0;
+        } else {
+            held = cache.get(img_path, frame);
+            image = held.get();
+        }
+        if (image == nullptr) {
+            throw std::runtime_error(
+                "PROFILE 3D: failed to load frame " + std::to_string(frame)
+            );
+        }
+        auto req = session.make_process_request(*image, frame);
+        diffraction::PredictionRequest preq{
+            req.crystal,
+            req.orientation,
+            req.detector,
+            req.scan,
+            req.prediction
+        };
+        const auto pr = predictor.predict(preq);
+        const double mid =
+            0.5 * (req.scan.phi_start_deg + req.scan.phi_end_deg);
+        ProcessImageStats stats;
+        stats.sigmab = sigmab;
+        stats.sigmar = sigmar;
+        stats.newald = pr.reflections.size();
+        print_process_image_row(frame, stats);
+        batch_integrated += pr.reflections.size();
+
+        const int peak_half = req.measurement.peak_half_px >= 1
+                                  ? req.measurement.peak_half_px
+                                  : 5;
+        const int bg_rim = req.measurement.bg_rim_px;
+        for (const auto& p : pr.reflections) {
+            const double dist = std::isfinite(p.phi_calc_deg)
+                                    ? std::fabs(mid - p.phi_calc_deg)
+                                    : 0.0;
+            const auto key = std::make_tuple(p.h, p.k, p.l);
+            auto it = seeds.find(key);
+            if (it != seeds.end() && dist >= it->second.dist) {
+                continue;
+            }
+            Seed s;
+            s.req.h = p.h;
+            s.req.k = p.k;
+            s.req.l = p.l;
+            s.req.x_mm = p.x_mm;
+            s.req.y_mm = p.y_mm;
+            s.req.phi_calc_deg = p.phi_calc_deg;
+            s.req.peak_frame = frame;
+            s.req.nphi = nadd;
+            s.req.peak_half_px = peak_half;
+            s.req.bg_rim_px = std::max(bg_rim, 8);
+            s.req.centroid_max_shift_px = 12.0;
+            s.dist = dist;
+            seeds[key] = s;
+        }
+        ++n_frames;
+    }
+    print_process_batch_footer(batch_integrated, state);
+
+    auto path_of = [&](int fr) {
+        return session.resolve_image_path(image_override, fr);
+    };
+    const double osc = osc_log > 0.0 ? osc_log : 0.15;
+    const double max_ewald_dist =
+        0.5 * osc + 2.0 * std::max(0.05, state.mosaic_deg);
+    std::vector<diffraction::Shoebox> boxes;
+    boxes.reserve(seeds.size());
+    for (const auto& kv : seeds) {
+        if (kv.second.dist > max_ewald_dist) {
+            continue;
+        }
+        auto box = diffraction::extract_shoebox(
+            cache,
+            path_of,
+            kv.second.req,
+            tmpl.detector,
+            tmpl.integration,
+            first,
+            last
+        );
+        if (box.ok) {
+            boxes.push_back(std::move(box));
+        }
+    }
+
+    diffraction::Profile3dSettings s3;
+    s3.box = tmpl.measurement;
+    s3.nadd = nadd;
+    s3.n_bins_x = state.nmasks_x;
+    s3.n_bins_y = state.nmasks_y;
+    s3.mosaic_spread_deg = state.mosaic_deg;
+    s3.osc_deg = osc_log > 0.0 ? osc_log : 0.15;
+    s3.learn_min_isigi = 8.0;
+    s3.min_learners = 1000;
+    s3.fallback_sigma_xy_px = 1.4;
+    s3.fallback_sigma_phi_frames = 0.7;
+    s3.use_phi_bg = false;
+
+    const auto obs = diffraction::Profile3dFitter{}.fit(
+        boxes, tmpl.detector, tmpl.integration, s3
+    );
+    acc.predictions.reserve(obs.size());
+    acc.mosflm_reflections.reserve(obs.size());
+    acc.mtz_reflections.reserve(obs.size());
+    std::size_t n_ok = 0;
+    for (const auto& o : obs) {
+        diffraction::PredictedReflection pred;
+        pred.h = o.h;
+        pred.k = o.k;
+        pred.l = o.l;
+        pred.x_mm = o.x_mm;
+        pred.y_mm = o.y_mm;
+        pred.phi_calc_deg = o.phi_calc_deg;
+        pred.fraction = o.fractioncalc;
+        acc.predictions.push_back(pred);
+        if (!o.ok) {
+            ++acc.n_omitted;
+            continue;
+        }
+        if (state.min_fractioncalc > 0.0 &&
+            o.fractioncalc < state.min_fractioncalc) {
+            ++acc.n_omitted;
+            continue;
+        }
+        auto row = diffraction::profile3d_to_mosflm(
+            o,
+            tmpl.detector,
+            tmpl.orientation,
+            crystal,
+            tmpl.integration,
+            state.air_absorption_mm_inv,
+            s3.osc_deg
+        );
+        acc.mosflm_reflections.push_back(row);
+        acc.mtz_reflections.push_back(
+            {row.h, row.k, row.l, row.intensity, row.sigma}
+        );
+        if (o.profile_ok) {
+            ++acc.n_profile_ok;
+        }
+        ++n_ok;
+    }
+    std::cout << "  PROFILE 3D: fitted " << n_ok << " / " << obs.size()
+              << " unique HKL (shoeboxes=" << boxes.size() << ")\n";
+}
+
 }  // namespace
 
 std::filesystem::path ControlSession::resolve_image_path(
@@ -1485,6 +1785,11 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         det.pixel_size_x_mm = state_.pixel_x_mm;
         det.pixel_size_y_mm = state_.pixel_y_mm;
     }
+    // Detector omega → CCOM in the frame AUTOINDEX indexed (INVERTX of the
+    // .spt; default MOSFLM convention for a user MATRIX).
+    det.ccom_deg = ccom_from_spt_omega(
+        image.metadata.rotation_axis_omega_deg, state_.spt_invertx
+    );
     // Detector fiducials: neutral defaults unless CONTROL YSCALE/TILT/TWIST.
     det.yscale = state_.yscale;
     det.tilt_mrad = state_.tilt_mrad;
@@ -1533,6 +1838,7 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     prediction.apply_reek_detector_margin = true;
     prediction.detector_margin_px = 24.0;
     prediction.widen_ewald_with_mosaic = state_.widen_ewald_with_mosaic;
+    prediction.rocking_model = state_.rocking_model;
     prediction.mosaic_ewald_scale = state_.mosaic_ewald_scale;
     // Keep Ewald angular half-width well below the image osc so mid-frame
     // spots are classified ``full`` (FRACTIONCALC=1) instead of spanning the
@@ -1556,7 +1862,10 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     diffraction::IntegrationSettings integration;
     integration.box_half_px = 3;
     integration.bg_frame_px = 2;
-    integration.apply_lp = true;
+    // Rotation-method LP is applied once in ProcessPipeline (divide by L·P);
+    // the integrators' still-image multiply stays off.
+    integration.apply_lp = false;
+    integration.rotation_lp = true;
     integration.polarization_fraction = state_.polarization_fraction;
     integration.mosflm_detector_axes = true;
     integration.image_beam_x_mm =
@@ -1645,7 +1954,10 @@ diffraction::ProcessRequest ControlSession::make_process_request(
 
     return diffraction::ProcessRequest{
         crystal,
-        OrientationMatrix::from_mosflm_orientation_matrix(state_.amat),
+        // MOSFLM [A] is λ-scaled; the predictor's UB is in Å⁻¹.
+        OrientationMatrix::from_mosflm_orientation_matrix(
+            state_.amat, det.wavelength_A
+        ),
         det,
         scan,
         prediction,
@@ -1832,6 +2144,23 @@ ControlGoResult ControlSession::go(
         state_, first, last, path0, osc_log, start_log, image0.metadata
     );
 
+    if (state_.profile_3d) {
+        run_process_profile_3d(
+            *this,
+            acc,
+            crystal,
+            n_frames,
+            image_override,
+            image0,
+            path0,
+            first,
+            last,
+            osc_log,
+            sigmab,
+            sigmar
+        );
+    } else {
+
     int batch_first = first;
     std::size_t batch_integrated = 0;
     bool batch_header_printed = false;
@@ -1863,21 +2192,14 @@ ControlGoResult ControlSession::go(
         bool ok{false};
     };
 
-    for (int chunk0 = first; chunk0 <= last; chunk0 += chunk_size) {
-        const int chunk1 = std::min(chunk0 + chunk_size - 1, last);
+    // Integrate frames [chunk0, chunk1] in parallel with frozen geometry
+    // (state_ must not mutate inside the OpenMP region).
+    const auto integrate_frames = [&](int chunk0, int chunk1, double chunk_sigmab,
+                                      double chunk_sigmar) {
         const int n_chunk = chunk1 - chunk0 + 1;
         std::vector<FrameOutcome> outcomes(
             static_cast<std::size_t>(n_chunk)
         );
-
-        // Snapshot geometry for this chunk (state_ must not mutate in parallel).
-        const double chunk_sigmab = sigmab;
-        const double chunk_sigmar = sigmar;
-        if (multi && n_chunk > 1) {
-            std::cout << "  PROCESS: frames " << chunk0 << "-" << chunk1
-                      << " (nproc=" << nproc << ") …" << std::flush;
-        }
-
 #if defined(PROCESSINGLAB_HAS_OPENMP) && PROCESSINGLAB_HAS_OPENMP
 #pragma omp parallel for num_threads(nproc) schedule(dynamic, 1) \
     if (nproc > 1 && n_chunk > 1)
@@ -1909,6 +2231,65 @@ ControlGoResult ControlSession::go(
                 outc.stats.sigmar = chunk_sigmar;
             }
         }
+        return outcomes;
+    };
+
+    // Positional refinement inputs gathered over each POSTREFINE period.
+    std::vector<refinement::PositionalObservation> posref_obs;
+    // Rocking mode: recent slices (rows) for summation before refinement;
+    // the margin keeps reflections that straddle a period boundary.
+    std::vector<crystal::MosflmReflection> window_rows;
+    constexpr int k_window_margin = 40;
+
+    // MOSFLM-style pre-refinement: refine geometry on the first block (two
+    // cycles) before any frame is kept, so early batches are not integrated
+    // with the autoindex geometry.
+    if (multi && want_periodic_postref) {
+        const int pre1 = std::min(first + chunk_size - 1, last);
+        for (int cycle = 1; cycle <= 2; ++cycle) {
+            auto pre = integrate_frames(first, pre1, sigmab, sigmar);
+            std::vector<refinement::PositionalObservation> obs;
+            std::vector<crystal::MosflmReflection> slices;
+            const FrameOutcome* any = nullptr;
+            for (std::size_t k = 0; k < pre.size(); ++k) {
+                const auto& o = pre[k];
+                if (!o.ok) {
+                    continue;
+                }
+                any = &o;
+                if (state_.rocking_model) {
+                    for (auto row : o.result.mosflm_reflections) {
+                        row.batch = first + static_cast<int>(k);
+                        slices.push_back(row);
+                    }
+                } else {
+                    collect_positional_observations(o.result, obs);
+                }
+            }
+            if (state_.rocking_model) {
+                const auto summed = diffraction::sum_partial_slices(std::move(slices));
+                estimate_rocking_width(state_, summed, osc_log);
+                collect_summed_observations(summed, obs);
+            }
+            if (any == nullptr ||
+                !refine_geometry_positional(
+                    state_, obs, any->result.detector,
+                    any->result.image_beam_x_mm, any->result.image_beam_y_mm,
+                    "pre-refine cycle " + std::to_string(cycle)
+                )) {
+                break;
+            }
+        }
+    }
+
+    for (int chunk0 = first; chunk0 <= last; chunk0 += chunk_size) {
+        const int chunk1 = std::min(chunk0 + chunk_size - 1, last);
+        const int n_chunk = chunk1 - chunk0 + 1;
+        if (multi && n_chunk > 1) {
+            std::cout << "  PROCESS: frames " << chunk0 << "-" << chunk1
+                      << " (nproc=" << nproc << ") …" << std::flush;
+        }
+        auto outcomes = integrate_frames(chunk0, chunk1, sigmab, sigmar);
         if (multi && n_chunk > 1) {
             std::cout << " done\n";
         }
@@ -1919,7 +2300,8 @@ ControlGoResult ControlSession::go(
                 (frame - batch_first) >= k_log_batch) {
                 if (batch_header_printed) {
                     print_process_batch_footer(batch_integrated, state_);
-                    if (!autosigma_done && state_.auto_sigma_msd) {
+                    if (!autosigma_done && state_.auto_sigma_msd &&
+                        !state_.rocking_model) {
                         autosigma_done = auto_estimate_sigma_msd(
                             state_, acc, osc_log
                         );
@@ -1961,17 +2343,35 @@ ControlGoResult ControlSession::go(
                         ? ((frame - first) % period == 0)
                         : ((frame - first) % period == period - 1 ||
                            frame == last);
+                if (state_.rocking_model) {
+                    for (auto row : outc.result.mosflm_reflections) {
+                        row.batch = frame;
+                        window_rows.push_back(row);
+                    }
+                } else {
+                    collect_positional_observations(outc.result, posref_obs);
+                }
                 if (due) {
-                    const auto img_path =
-                        resolve_image_path(image_override, frame);
-                    const auto image =
-                        (frame == first)
-                            ? image0
-                            : image::read_diffraction_image(img_path, frame);
-                    auto req = make_process_request(image, frame);
-                    postrefine_from_observations(
-                        state_, outc.result, req.detector
+                    if (state_.rocking_model) {
+                        // Sum the slices seen so far; complete reflections
+                        // give observed φ + centroid (and the rocking width).
+                        const auto summed =
+                            diffraction::sum_partial_slices(window_rows);
+                        estimate_rocking_width(state_, summed, osc_log);
+                        collect_summed_observations(summed, posref_obs);
+                        const int keep_from = frame - period - k_window_margin;
+                        std::erase_if(window_rows, [&](const auto& r) {
+                            return r.batch <= keep_from;
+                        });
+                    }
+                    refine_geometry_positional(
+                        state_, posref_obs, outc.result.detector,
+                        outc.result.image_beam_x_mm,
+                        outc.result.image_beam_y_mm,
+                        "frames " + std::to_string(frame - period + 1) + "-" +
+                            std::to_string(frame)
                     );
+                    posref_obs.clear();
                 }
             }
             print_process_image_row(frame, outc.stats);
@@ -1983,10 +2383,32 @@ ControlGoResult ControlSession::go(
     if (batch_header_printed) {
         print_process_batch_footer(batch_integrated, state_);
     }
+    }  // !profile_3d
+    // Rocking mode: MOSFLM partials summation → one row per reflection.
+    if (state_.rocking_model && !state_.profile_3d &&
+        !acc.mosflm_reflections.empty()) {
+        const std::size_t n_slices = acc.mosflm_reflections.size();
+        acc.mosflm_reflections =
+            diffraction::sum_partial_slices(std::move(acc.mosflm_reflections));
+        acc.mtz_reflections.clear();
+        acc.mtz_reflections.reserve(acc.mosflm_reflections.size());
+        for (const auto& r : acc.mosflm_reflections) {
+            acc.mtz_reflections.push_back({r.h, r.k, r.l, r.intensity, r.sigma});
+        }
+        std::cout << "  PARTIALS: summed " << n_slices << " slices into "
+                  << acc.mosflm_reflections.size() << " reflections\n";
+    }
     print_process_run_summary(
         acc, first, last, n_frames, crystal, state_.dmax_A, state_.dmin_A
     );
 
+    // MTZ cell = final (positionally refined, symmetry-constrained) cell.
+    if (n_frames > 0) {
+        crystal.cell = gemmi::UnitCell(
+            state_.cell.a, state_.cell.b, state_.cell.c, state_.cell.alpha_deg,
+            state_.cell.beta_deg, state_.cell.gamma_deg
+        );
+    }
     out.crystal = crystal;
     out.process = std::move(acc);
 
@@ -1995,8 +2417,12 @@ ControlGoResult ControlSession::go(
                       std::to_string(n_frames) + " image(s))" +
                       "; integrated=" +
                       std::to_string(out.process.mtz_reflections.size());
-    if (state_.nadd > 1 && !state_.image_template.empty() &&
-        state_.enable_postrefinement) {
+    if (state_.profile_3d) {
+        msg += "; PROFILE 3D NADD=" + std::to_string(
+            diffraction::odd_nadd(state_.nadd <= 1 ? 5 : state_.nadd)
+        );
+    } else if (state_.nadd > 1 && !state_.image_template.empty() &&
+               state_.enable_postrefinement) {
         msg += "; NADD=" + std::to_string(state_.nadd) +
                " reserved for joint refine";
     }
@@ -2031,11 +2457,28 @@ ControlGoResult ControlSession::go(
 
 std::vector<ControlGoResult> ControlSession::run_stream(
     std::istream& in,
-    const std::optional<std::filesystem::path>& image_override
+    const std::optional<std::filesystem::path>& image_override,
+    std::string_view prompt
 ) {
     std::vector<ControlGoResult> results;
     std::string line;
+    const auto show_prompt = [&] {
+        if (!prompt.empty()) {
+            std::cout << prompt << std::flush;
+        }
+    };
+    show_prompt();
     while (std::getline(in, line)) {
+        // Prompt again after this line is handled (incl. skipped lines).
+        struct PromptOnExit {
+            const decltype(show_prompt)& fn;
+            const ControlState& state;
+            ~PromptOnExit() {
+                if (!state.exit_requested && std::uncaught_exceptions() == 0) {
+                    fn();
+                }
+            }
+        } const reprompt{show_prompt, state_};
         const std::string stripped = strip_comment(line);
         if (stripped.empty()) {
             continue;

@@ -1,5 +1,6 @@
 #include "mosflm/indexing/AutoIndexer.hpp"
 
+#include "mosflm/geometry/LabFrame.hpp"
 #include "mosflm/indexing/BravaisSelect.hpp"
 #include "mosflm/indexing/DiffVectorIndex.hpp"
 #include "mosflm/indexing/Fft3dIndex.hpp"
@@ -77,33 +78,6 @@ UnitCell cell_from_dps(const struct cell_struct& c) {
     return out;
 }
 
-Eigen::Matrix3d amat_from_dps_om(const struct matrix_3x3& om, double wave) {
-    // ind_fortran.c: MOSFLM A = λ · permutation of DPS OM rows.
-    Eigen::Matrix3d A;
-    A(0, 0) = wave * om.r[0].z;
-    A(0, 1) = wave * om.r[0].x;
-    A(0, 2) = wave * om.r[0].y;
-    A(1, 0) = wave * om.r[1].z;
-    A(1, 1) = wave * om.r[1].x;
-    A(1, 2) = wave * om.r[1].y;
-    A(2, 0) = wave * om.r[2].z;
-    A(2, 1) = wave * om.r[2].x;
-    A(2, 2) = wave * om.r[2].y;
-    return A;
-}
-
-/// Inverse of ``amat_from_dps_om``.
-struct matrix_3x3 dps_om_from_amat(const Eigen::Matrix3d& A, double wave) {
-    struct matrix_3x3 om{};
-    const double inv_w = 1.0 / wave;
-    for (int i = 0; i < 3; ++i) {
-        om.r[i].z = static_cast<float>(A(i, 0) * inv_w);
-        om.r[i].x = static_cast<float>(A(i, 1) * inv_w);
-        om.r[i].y = static_cast<float>(A(i, 2) * inv_w);
-    }
-    return om;
-}
-
 struct matrix_3x3 eigen_to_dps(const Eigen::Matrix3d& M) {
     struct matrix_3x3 om{};
     for (int i = 0; i < 3; ++i) {
@@ -122,6 +96,34 @@ Eigen::Matrix3d dps_to_eigen(const struct matrix_3x3& om) {
         M(i, 2) = om.r[i].z;
     }
     return M;
+}
+
+/**
+ * Internal AUTOINDEX A-matrix (``x = A · hkl`` on ``spots_to_rlp_xyz``
+ * RLPs, Å⁻¹) from a DPS OM whose rows are the reciprocal basis vectors in
+ * that same xyz frame: ``A = OMᵀ``. The ``a9`` array DPS emits is the
+ * MOSFLM-convention Fortran matrix (λ · (z,x,y) permutation, column-major);
+ * it must not be used directly as the xyz A-matrix.
+ */
+Eigen::Matrix3d amat_from_dps_om(const struct matrix_3x3& om) {
+    Eigen::Matrix3d A;
+    for (int i = 0; i < 3; ++i) {
+        A(0, i) = om.r[i].x;
+        A(1, i) = om.r[i].y;
+        A(2, i) = om.r[i].z;
+    }
+    return A;
+}
+
+/// Inverse of ``amat_from_dps_om``.
+struct matrix_3x3 dps_om_from_amat(const Eigen::Matrix3d& A) {
+    struct matrix_3x3 om{};
+    for (int i = 0; i < 3; ++i) {
+        om.r[i].x = static_cast<float>(A(0, i));
+        om.r[i].y = static_cast<float>(A(1, i));
+        om.r[i].z = static_cast<float>(A(2, i));
+    }
+    return om;
 }
 
 /// DPS Niggli-style reduction on a reciprocal orientation matrix (rows).
@@ -396,11 +398,9 @@ AutoIndexResult AutoIndexer::index(
             }
             const auto& c = pick.bravais[idx];
             const struct matrix_3x3 om_pick = eigen_to_dps(c.orientation);
-            // DPS OMs sit in the permuted a9 frame; Δ-vector/FFT3D OMs are
-            // reciprocal rows in the x/y/z frame (their raw AMAT is OMᵀ).
-            ts.amat = (method == "dps")
-                ? amat_from_dps_om(om_pick, geometry.wavelength_A)
-                : Eigen::Matrix3d(c.orientation.transpose());
+            // DPS, Δ-vector and FFT3D OMs are all reciprocal rows in the
+            // spots_to_rlp_xyz frame; the internal AMAT is OMᵀ.
+            ts.amat = c.orientation.transpose();
             struct cell_struct cell2{};
             dircell_from_om(om_pick, &cell2);
             ts.cell = cell_from_dps(cell2);
@@ -599,9 +599,8 @@ AutoIndexResult AutoIndexer::index(
 
     PathPick dps_pick;
     if (ierr == 0) {
-        result.amat << a9[0], a9[1], a9[2], a9[3], a9[4], a9[5], a9[6],
-            a9[7], a9[8];
-
+        // a9 is the MOSFLM-convention Fortran matrix; recover the DPS OM
+        // (reciprocal rows, xyz frame) and keep the internal AMAT = OMᵀ.
         struct matrix_3x3 om{};
         const double inv_w = 1.0 / geometry.wavelength_A;
         om.r[0].z = static_cast<float>(a9[0] * inv_w);
@@ -614,14 +613,14 @@ AutoIndexResult AutoIndexer::index(
         om.r[2].x = static_cast<float>(a9[7] * inv_w);
         om.r[2].y = static_cast<float>(a9[8] * inv_w);
 
+        result.amat = amat_from_dps_om(om);
         {
-            const SupercellReduceResult sr = shed_supercell(
-                amat_from_dps_om(om, geometry.wavelength_A), "DPS"
-            );
+            const SupercellReduceResult sr =
+                shed_supercell(result.amat, "DPS");
             if (sr.factor > 1) {
-                om = dps_om_from_amat(sr.amat, geometry.wavelength_A);
+                om = dps_om_from_amat(sr.amat);
                 reduce_cell(&om);
-                result.amat = amat_from_dps_om(om, geometry.wavelength_A);
+                result.amat = amat_from_dps_om(om);
             }
         }
 
@@ -816,14 +815,24 @@ AutoIndexResult AutoIndexer::index(
         winner = fft_pick;
     }
 
+    // Internal AMAT is the xyz-frame OMᵀ; CONTROL / PROCESS / XPARM expect
+    // a MOSFLM-convention A-matrix. Convert once at the output boundary.
+    const bool spt_invertx = spots.header.invflag != 0;
+    auto finalize_amat = [&]() {
+        result.amat = xyz_reciprocal_to_mosflm_amat(
+            result.amat, geometry.wavelength_A, spt_invertx
+        );
+        result.orientation =
+            OrientationMatrix::from_mosflm_orientation_matrix(result.amat);
+    };
+
     if (!winner.ok) {
         // All paths failed.
         if (ierr != 0) {
             return result;
         }
         result.bravais = dps_pick.bravais;
-        result.orientation =
-            OrientationMatrix::from_mosflm_orientation_matrix(result.amat);
+        finalize_amat();
         result.ok = result.cell.is_valid();
         return result;
     }
@@ -889,34 +898,48 @@ AutoIndexResult AutoIndexer::index(
         igeo.pixel_mm =
             (geometry.pixel_mm > 1e-9) ? geometry.pixel_mm : 0.075;
         igeo.yscale = geometry.yscale;
+        igeo.omega_deg = spots.header.omega_deg;
+        igeo.invertx = spt_invertx;
         IdxrefSettings ixset;
         auto obs = build_idxref_observations(
             spots, keep, local, igeo, &x, &y, &z
         );
+        // IDXREF works on MOSFLM-convention A (its predictions go through
+        // the C++ predictor); convert the xyz AMAT in and out.
+        const Eigen::Matrix3d amat0_mosflm = xyz_reciprocal_to_mosflm_amat(
+            result.amat, geometry.wavelength_A, spt_invertx
+        );
         const Eigen::Vector3i origin = select_index_origin(
-            result.cell, result.amat, obs, igeo, ixset
+            result.cell, amat0_mosflm, obs, igeo, ixset
         );
         if (origin.x() != 0 || origin.y() != 0 || origin.z() != 0) {
             std::cout << "  IDXREF: INDEX_ORIGIN " << origin.x() << " "
                       << origin.y() << " " << origin.z() << '\n';
         }
         IdxrefResult ix =
-            refine_idxref(result.cell, result.amat, obs, igeo, ixset);
+            refine_idxref(result.cell, amat0_mosflm, obs, igeo, ixset);
         ix.index_origin_h = origin.x();
         ix.index_origin_k = origin.y();
         ix.index_origin_l = origin.z();
         ix.indexed_frac_before = fit_frac0;
         if (ix.ok && ix.accepted) {
+            const Eigen::Matrix3d amat_ref_xyz = mosflm_amat_to_xyz_reciprocal(
+                ix.amat, geometry.wavelength_A, spt_invertx
+            );
             const IndexFitStats fit1 =
-                score_amat_vs_xyz(ix.amat, x, y, z, settings.hkldev);
+                score_amat_vs_xyz(amat_ref_xyz, x, y, z, settings.hkldev);
             ix.indexed_frac_after = fit1.indexed_frac;
             const bool frac_ok =
                 fit1.indexed_frac + 1e-12 >= fit_frac0 - 0.05;
             if (frac_ok) {
-                result.amat = ix.amat;
+                result.amat = amat_ref_xyz;
                 result.cell = ix.cell;
                 result.fit = fit1;
                 result.orientation = ix.orientation;
+                result.idxref_applied = true;
+                result.idxref_beam_x_mm = ix.beam_x_mm;
+                result.idxref_beam_y_mm = ix.beam_y_mm;
+                result.idxref_distance_mm = ix.distance_mm;
                 // Keep refined AMAT/cell; Bravais labels only if metric OK
                 // and indexing gate passes (else stay aP).
                 const Eigen::Matrix3d om_ref =
@@ -953,8 +976,10 @@ AutoIndexResult AutoIndexer::index(
                           << " rms_xy=" << std::setprecision(2)
                           << ix.rms_pos_initial << "→" << ix.rms_pos
                           << " rms_phi=" << ix.rms_phi_initial << "→"
-                          << ix.rms_phi << " F=" << std::setprecision(2)
+                          << ix.rms_phi                           << " F=" << std::setprecision(2)
                           << ix.distance_mm_initial << "→" << ix.distance_mm
+                          << " beam=" << beam_x << "," << beam_y << "→"
+                          << ix.beam_x_mm << "," << ix.beam_y_mm
                           << " cell=" << std::setprecision(2)
                           << result.cell.a << " " << result.cell.b << " "
                           << result.cell.c << " indexed="
@@ -973,8 +998,7 @@ AutoIndexResult AutoIndexer::index(
         }
     }
 
-    result.orientation =
-        OrientationMatrix::from_mosflm_orientation_matrix(result.amat);
+    finalize_amat();
     result.ok = result.cell.is_valid();
     return result;
 }
