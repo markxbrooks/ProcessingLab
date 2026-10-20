@@ -13,9 +13,10 @@ option(PROCESSINGLAB_BUILD_CPP
     ON
 )
 
-# Tiny pointer binary for IDE run configs (real CLI: mosflm_cpp_cli).
-add_executable(ProcessingLab main.cpp)
-
 if(PROCESSINGLAB_BUILD_CPP)
+    # Real binary: processing-lab/app/ipmosflm_main.cpp → target ProcessingLab.
     add_subdirectory(processing-lab)
+else()
+    # Tiny pointer binary for IDE run configs when the C++ port is disabled.
+    add_executable(ProcessingLab main.cpp)
 endif()

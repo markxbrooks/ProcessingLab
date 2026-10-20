@@ -85,13 +85,24 @@ if(NOT ZLIB_FOUND)
     message(FATAL_ERROR "ZLIB required for Gemmi MTZ I/O")
 endif()
 
-# Vendored CBFlib (Option A) — sibling of processing-lab under the ipmosflm tree.
-set(MOSFLM_IPMOSFLM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH
-    "ProcessingLab repository root (CBF + DPS libs)")
+# Vendored CBFlib (Option A) — sibling of processing-lab under the repo root.
+# Stale IDE caches from the mosflm-cpp → processing-lab rename leave
+# MOSFLM_IPMOSFLM_ROOT as ".../mosflm-cpp/.."; CMake EXISTS rejects that
+# unresolved path even though libcbf.a is present after normalization.
+get_filename_component(_mosflm_repo_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+if(NOT DEFINED CACHE{MOSFLM_IPMOSFLM_ROOT}
+   OR "${MOSFLM_IPMOSFLM_ROOT}" MATCHES "mosflm-cpp"
+   OR NOT EXISTS "${MOSFLM_IPMOSFLM_ROOT}/cbf/lib/libcbf.a")
+    set(MOSFLM_IPMOSFLM_ROOT "${_mosflm_repo_root}" CACHE PATH
+        "ProcessingLab repository root (CBF + DPS libs)" FORCE)
+endif()
+get_filename_component(MOSFLM_IPMOSFLM_ROOT "${MOSFLM_IPMOSFLM_ROOT}" ABSOLUTE)
 set(MOSFLM_CBF_INCLUDE_DIR "${MOSFLM_IPMOSFLM_ROOT}/cbf/include")
 set(MOSFLM_CBF_LIB "${MOSFLM_IPMOSFLM_ROOT}/cbf/lib/libcbf.a")
 if(NOT EXISTS "${MOSFLM_CBF_LIB}")
-    message(FATAL_ERROR "CBFlib not found at ${MOSFLM_CBF_LIB}")
+    message(FATAL_ERROR
+        "CBFlib not found at ${MOSFLM_CBF_LIB}\n"
+        "Build it first: make -C ${MOSFLM_IPMOSFLM_ROOT}/cbf  (or: make cbf-lib)")
 endif()
 
 # Prebuilt DPS (Cambridge Bravais + FFT indexer).
