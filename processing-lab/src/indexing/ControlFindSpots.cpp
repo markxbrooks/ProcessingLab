@@ -15,7 +15,6 @@
 #include <string>
 
 namespace mosflm::indexing {
-namespace {
 
 void apply_image_geometry_defaults(
     control::ControlState& state,
@@ -77,6 +76,8 @@ std::filesystem::path resolve_findspots_image_path(
         "CONTROL FINDSPOTS: no IMAGE/TEMPLATE and no --image override"
     );
 }
+
+namespace {
 
 void run_findspots(
     control::ControlState& state,

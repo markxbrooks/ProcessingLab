@@ -209,7 +209,11 @@ struct ControlGoResult {
 };
 
 /// Hook that runs AUTOINDEX and writes CELL/MATRIX into ``state``.
-using AutoIndexRunner = std::function<void(ControlState& state)>;
+/// ``image_override`` supplies header geometry CONTROL did not set.
+using AutoIndexRunner = std::function<void(
+    ControlState& state,
+    const std::optional<std::filesystem::path>& image_override
+)>;
 
 /// Hook that runs FINDSPOTS (load image → peak find → write ``.spt``).
 using FindSpotsRunner = std::function<void(

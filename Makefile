@@ -58,8 +58,12 @@ cpp-core: cbf-lib
 		-DMOSFLM_FORTRAN_ORACLE=OFF
 	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli ProcessingLab
 	mkdir -p bin
-	cp -f $(CPP_BUILD)/$(PROCESSINGLAB) bin/$(PROCESSINGLAB)
-	cp -f $(CPP_BUILD)/mosflm_cpp_cli$(EXEEXT) bin/mosflm_cpp_cli$(EXEEXT)
+	# Copy to a temp name then mv: overwriting a Mach-O in place on macOS
+	# leaves a stale code-signature cache and the binary dies with SIGKILL.
+	cp -f $(CPP_BUILD)/$(PROCESSINGLAB) bin/$(PROCESSINGLAB).tmp && \
+		mv -f bin/$(PROCESSINGLAB).tmp bin/$(PROCESSINGLAB)
+	cp -f $(CPP_BUILD)/mosflm_cpp_cli$(EXEEXT) bin/mosflm_cpp_cli$(EXEEXT).tmp && \
+		mv -f bin/mosflm_cpp_cli$(EXEEXT).tmp bin/mosflm_cpp_cli$(EXEEXT)
 	@echo "Installed thin binaries under bin/ (ProcessingLab; no amalgamation)."
 
 # Default release: C++ + DPS when gfortran is available.

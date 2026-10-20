@@ -539,6 +539,48 @@ AutoIndexResult AutoIndexer::index(
         return pick;
     };
 
+    // Raw Δ/FFT basis vs the classified table. Score the raw basis in its
+    // reduced form: HKLDEV is a per-axis tolerance, so a skewed basis of the
+    // same lattice indexes different spots and could beat every candidate.
+    // When raw still wins, keep the table and select its aP row.
+    auto consider_raw_basis = [&](PathPick& trial,
+                                  const Eigen::Matrix3d& om_red,
+                                  const std::string& method) -> TrialScore {
+        TrialScore raw;
+        raw.amat = om_red.transpose();
+        raw.cell = UnitCell::from_basis_rows(om_red.transpose().inverse());
+        raw.fit = score_amat_vs_xyz(raw.amat, x, y, z, settings.hkldev);
+        // Same 5% tie window pick_from_bravais used to rank candidates.
+        if (trial.ok &&
+            raw.fit.indexed_frac <= trial.chosen.fit.indexed_frac + 0.05) {
+            return raw;
+        }
+        std::size_t ap_idx = static_cast<std::size_t>(-1);
+        for (std::size_t k = 0; k < trial.bravais.size(); ++k) {
+            if (trial.bravais[k].system_id == "aP" &&
+                (ap_idx == static_cast<std::size_t>(-1) ||
+                 trial.bravais[k].criterion <
+                     trial.bravais[ap_idx].criterion)) {
+                ap_idx = k;
+            }
+        }
+        if (ap_idx == static_cast<std::size_t>(-1)) {
+            BravaisCandidate ap;
+            ap.character = 31;
+            ap.system_id = "aP";
+            ap.criterion = 0.0f;
+            ap.orientation = om_red;
+            trial.bravais.push_back(ap);
+            ap_idx = trial.bravais.size() - 1;
+        }
+        raw.idx = ap_idx;
+        trial.ok = raw.cell.is_valid();
+        trial.chosen = raw;
+        trial.chosen_idx = ap_idx;
+        trial.method = method;
+        return raw;
+    };
+
     // Every path can return an n× supercell that indexes ~100% of spots
     // (thaumatin short sweep: 58×149×174, V≈3×). Fit fraction cannot tell
     // it from the true cell; index parity can.
@@ -637,39 +679,21 @@ AutoIndexResult AutoIndexer::index(
                     );
                 }
             }
-            // Reduce only for Bravais triage; keep unreduced OM for INDEXFIT.
+            // Reduced basis for Bravais triage and the raw-basis score.
             const Eigen::Matrix3d om_red =
                 reduce_reciprocal_om(dv.reciprocal_om);
             PathPick trial = pick_from_bravais(
                 BravaisClassifier{}.classify(om_red, 1), "delta"
             );
             {
-                TrialScore raw;
-                raw.idx = 0;
-                raw.amat = dv.reciprocal_om.transpose();
-                raw.cell = dv.cell;
-                raw.fit =
-                    score_amat_vs_xyz(raw.amat, x, y, z, settings.hkldev);
-                BravaisCandidate ap;
-                ap.character = 31;
-                ap.system_id = "aP";
-                ap.criterion = 0.0f;
-                ap.orientation = dv.reciprocal_om;
+                const TrialScore raw =
+                    consider_raw_basis(trial, om_red, "delta");
                 std::cout << "  DIFFVECTOR: raw_index="
                           << static_cast<int>(std::lround(
                                  100.0 * raw.fit.indexed_frac
                              ))
                           << "% rmsd=" << std::setprecision(3)
                           << raw.fit.rmsd_hkl << '\n';
-                if (!trial.ok ||
-                    raw.fit.indexed_frac >
-                        trial.chosen.fit.indexed_frac + 0.02) {
-                    trial.ok = raw.cell.is_valid();
-                    trial.bravais = {ap};
-                    trial.chosen = raw;
-                    trial.chosen_idx = 0;
-                    trial.method = "delta";
-                }
             }
             if (!trial.ok) {
                 continue;
@@ -720,34 +744,13 @@ AutoIndexResult AutoIndexer::index(
             }
         }
         if (ft.ok) {
-            // Reduce only for Bravais triage; INDEXFIT keeps the FFT basis.
+            // Reduced basis for Bravais triage and the raw-basis score.
             const Eigen::Matrix3d om_red =
                 reduce_reciprocal_om(ft.reciprocal_om);
             PathPick trial = pick_from_bravais(
                 BravaisClassifier{}.classify(om_red, 1), "fft3d"
             );
-            {
-                TrialScore raw;
-                raw.idx = 0;
-                raw.amat = ft.reciprocal_om.transpose();
-                raw.cell = ft.cell;
-                raw.fit =
-                    score_amat_vs_xyz(raw.amat, x, y, z, settings.hkldev);
-                BravaisCandidate ap;
-                ap.character = 31;
-                ap.system_id = "aP";
-                ap.criterion = 0.0f;
-                ap.orientation = ft.reciprocal_om;
-                if (!trial.ok ||
-                    raw.fit.indexed_frac >
-                        trial.chosen.fit.indexed_frac + 0.02) {
-                    trial.ok = raw.cell.is_valid();
-                    trial.bravais = {ap};
-                    trial.chosen = raw;
-                    trial.chosen_idx = 0;
-                    trial.method = "fft3d";
-                }
-            }
+            (void)consider_raw_basis(trial, om_red, "fft3d");
             if (trial.ok) {
                 fft_pick = std::move(trial);
             }

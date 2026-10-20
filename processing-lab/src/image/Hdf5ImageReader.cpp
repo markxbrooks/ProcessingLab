@@ -63,6 +63,13 @@ void ensure_filters_registered() {
     });
 }
 
+/// Homebrew libhdf5 is built without thread safety (concurrent reads from
+/// OpenMP FINDSPOTS / PROCESS crash), so every entry point holds this lock.
+std::mutex& hdf5_mutex() {
+    static std::mutex m;
+    return m;
+}
+
 bool is_supported_hdf5_name(const std::filesystem::path& path) {
     const std::string name = path.filename().string();
     const std::string lower = [&] {
@@ -594,6 +601,7 @@ DiffractionImage Hdf5ImageReader::read(
             "Hdf5ImageReader: expected *_master.h5 or .nxs, got " + path.string()
         );
     }
+    const std::lock_guard<std::mutex> lock(hdf5_mutex());
     const hid_t hdf = open_file(path);
     try {
         MasterMeta meta = read_metadata(hdf, frame);
@@ -636,6 +644,7 @@ int Hdf5ImageReader::num_images(const std::filesystem::path& path) const {
             "Hdf5ImageReader: expected *_master.h5 or .nxs, got " + path.string()
         );
     }
+    const std::lock_guard<std::mutex> lock(hdf5_mutex());
     const hid_t hdf = open_file(path);
     try {
         DataLayout layout = open_data_layout(hdf);

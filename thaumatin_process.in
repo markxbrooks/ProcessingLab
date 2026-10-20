@@ -1,5 +1,6 @@
 ! Thaumatin HDF5 PROCESS — DIALS refined geometry oracle (integrated.expt).
 ! Frames 2–751 match DIALS image_range / batch numbering.
+NPROC 1
 SYMMETRY 75
 WAVELENGTH 0.97949913
 DISTANCE 199.78169135

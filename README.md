@@ -56,6 +56,7 @@ make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite ProcessingLab)
 
 ```commandline
 ./bin/ProcessingLab --image ~/Downloads/thaumatin_9_1_master.h5 <<'EOF'
+NPROC 1
 DIRECTORY /tmp
 FINDSPOTS THRESHOLD 5.0 MAXSPOTS 300 FIND 1 PHI 0.0 0.15 FILE /tmp/thaumatin_cpp.spt
 GO

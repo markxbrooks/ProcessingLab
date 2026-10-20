@@ -1699,7 +1699,7 @@ ControlGoResult ControlSession::go(
             !state_.findspots.spot_file.empty()) {
             state_.autoindex.spot_file = state_.findspots.spot_file;
         }
-        autoindex_runner_slot()(state_);
+        autoindex_runner_slot()(state_, image_override);
         state_.autoindex_pending = false;
         state_.done_run = true;
         out.ran_autoindex = true;

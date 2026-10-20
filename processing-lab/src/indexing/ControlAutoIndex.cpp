@@ -1,6 +1,7 @@
 #include "mosflm/indexing/ControlAutoIndex.hpp"
 
 #include "mosflm/control/ControlSession.hpp"
+#include "mosflm/image/ImageIO.hpp"
 #include "mosflm/indexing/AutoIndexer.hpp"
 #include "mosflm/indexing/BravaisSelect.hpp"
 #include "mosflm/indexing/SpotList.hpp"
@@ -12,7 +13,45 @@
 namespace mosflm::indexing {
 namespace {
 
-void run_autoindex(control::ControlState& state) {
+/// AUTOINDEX from a FILE without FINDSPOTS never saw the image header, so
+/// unset geometry would fall back to built-in defaults (DISTANCE 160 mm).
+void fill_geometry_from_header(
+    control::ControlState& state,
+    const std::optional<std::filesystem::path>& image_override
+) {
+    if (state.has_distance && state.has_wavelength && state.has_beam &&
+        state.has_pixel) {
+        return;
+    }
+    const int frame = state.findspots.image_number > 0
+                          ? state.findspots.image_number
+                          : 1;
+    try {
+        const auto img_path =
+            resolve_findspots_image_path(state, image_override, frame);
+        apply_image_geometry_defaults(
+            state, image::read_diffraction_image(img_path, frame)
+        );
+        // Say where geometry came from: the CLI may substitute a demo image.
+        std::cout << "  AUTOINDEX: header geometry from " << img_path
+                  << ": DISTANCE " << state.distance_mm << " WAVELENGTH "
+                  << state.wavelength_A << " BEAM " << state.beam_x_mm << " "
+                  << state.beam_y_mm << '\n';
+    } catch (const std::exception& ex) {
+        std::cout << "  AUTOINDEX: no image header (" << ex.what()
+                  << "); using CONTROL/default geometry\n";
+    }
+    if (!state.has_distance) {
+        std::cout << "  AUTOINDEX: WARNING DISTANCE not set; using default "
+                  << state.distance_mm << " mm\n";
+    }
+}
+
+void run_autoindex(
+    control::ControlState& state,
+    const std::optional<std::filesystem::path>& image_override
+) {
+    fill_geometry_from_header(state, image_override);
     std::filesystem::path spt = state.autoindex.spot_file;
     if (spt.empty()) {
         throw std::runtime_error(

@@ -91,8 +91,8 @@ int main() {
 
     ControlSession session;
     // Multi-frame FINDSPOTS loads frames under OpenMP; libhdf5 here is not
-    // thread-safe (concurrent H5 reads crash), so stay single-threaded.
-    session.parse_line("NPROC 1");
+    // thread-safe, so this exercises Hdf5ImageReader's lock.
+    session.parse_line("NPROC 4");
     session.parse_line("DISTANCE 199.78169135");
     session.parse_line("WAVELENGTH 0.97949913");
     session.parse_line("PIXEL 0.075 0.075");
