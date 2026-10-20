@@ -621,8 +621,10 @@ AutoIndexResult AutoIndexer::index(
                 const SupercellReduceResult sr =
                     shed_supercell(dv.reciprocal_om.transpose(), "DIFFVECTOR");
                 if (sr.factor > 1) {
-                    dv.reciprocal_om = sr.amat.transpose();
-                    dv.cell = UnitCell::from_basis_rows(sr.amat.inverse());
+                    dv.reciprocal_om = reduce_reciprocal_om(sr.amat.transpose());
+                    dv.cell = UnitCell::from_basis_rows(
+                        dv.reciprocal_om.transpose().inverse()
+                    );
                 }
             }
             // Reduce only for Bravais triage; keep unreduced OM for INDEXFIT.
@@ -701,8 +703,10 @@ AutoIndexResult AutoIndexer::index(
             const SupercellReduceResult sr =
                 shed_supercell(ft.reciprocal_om.transpose(), "FFT3D");
             if (sr.factor > 1) {
-                ft.reciprocal_om = sr.amat.transpose();
-                ft.cell = UnitCell::from_basis_rows(sr.amat.inverse());
+                ft.reciprocal_om = reduce_reciprocal_om(sr.amat.transpose());
+                ft.cell = UnitCell::from_basis_rows(
+                    ft.reciprocal_om.transpose().inverse()
+                );
             }
         }
         if (ft.ok) {
