@@ -3,6 +3,8 @@
 #include "mosflm/indexing/BravaisSelect.hpp"
 #include "mosflm/indexing/DiffVectorIndex.hpp"
 #include "mosflm/indexing/Fft3dIndex.hpp"
+#include "mosflm/indexing/IdxrefRefine.hpp"
+#include "mosflm/indexing/LocalIndexAssign.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -780,6 +782,97 @@ AutoIndexResult AutoIndexer::index(
                          std::lround(100.0 * settings.min_indexed_frac)
                      )
                   << "%; XDS-style gate)\n";
+    }
+
+    // IDXREF-v2: local HKL → INDEX_ORIGIN → geometry LS (incl. F) → Bravais gate.
+    if (settings.use_idxref_refine && result.cell.is_valid()) {
+        const double fit_frac0 = result.fit.indexed_frac;
+        LocalIndexSettings loc_set;
+        loc_set.max_spots = static_cast<std::size_t>(
+            std::min(n_xyz, std::max(40, settings.numsptdps))
+        );
+        const LocalIndexResult local = assign_local_indices(
+            result.amat, x, y, z, loc_set
+        );
+        IdxrefGeometry igeo;
+        igeo.distance_mm = geometry.distance_mm;
+        igeo.wavelength_A = geometry.wavelength_A;
+        igeo.beam_x_mm = beam_x;
+        igeo.beam_y_mm = beam_y;
+        igeo.pixel_mm =
+            (geometry.pixel_mm > 1e-9) ? geometry.pixel_mm : 0.075;
+        igeo.yscale = geometry.yscale;
+        IdxrefSettings ixset;
+        auto obs = build_idxref_observations(
+            spots, keep, local, igeo, &x, &y, &z
+        );
+        const Eigen::Vector3i origin = select_index_origin(
+            result.cell, result.amat, obs, igeo, ixset
+        );
+        if (origin.x() != 0 || origin.y() != 0 || origin.z() != 0) {
+            std::cout << "  IDXREF: INDEX_ORIGIN " << origin.x() << " "
+                      << origin.y() << " " << origin.z() << '\n';
+        }
+        IdxrefResult ix =
+            refine_idxref(result.cell, result.amat, obs, igeo, ixset);
+        ix.index_origin_h = origin.x();
+        ix.index_origin_k = origin.y();
+        ix.index_origin_l = origin.z();
+        ix.indexed_frac_before = fit_frac0;
+        if (ix.ok && ix.accepted) {
+            const IndexFitStats fit1 =
+                score_amat_vs_xyz(ix.amat, x, y, z, settings.hkldev);
+            ix.indexed_frac_after = fit1.indexed_frac;
+            const bool frac_ok =
+                fit1.indexed_frac + 1e-12 >= fit_frac0 - 0.05;
+            if (frac_ok) {
+                result.amat = ix.amat;
+                result.cell = ix.cell;
+                result.fit = fit1;
+                result.orientation = ix.orientation;
+                // Keep refined aP AMAT/cell; only relabel Bravais if metric OK.
+                const Eigen::Matrix3d om_ref = result.amat.transpose();
+                auto brav = BravaisClassifier{}.classify(om_ref, 1);
+                if (!brav.empty()) {
+                    const std::size_t bi = select_bravais_after_idxref(
+                        brav, result.cell, settings.max_penalty,
+                        settings.prefer_character, settings.prefer_system
+                    );
+                    if (bi != static_cast<std::size_t>(-1) &&
+                        bi < brav.size()) {
+                        result.bravais = std::move(brav);
+                        result.selected_character =
+                            result.bravais[bi].character;
+                        result.selected_system =
+                            result.bravais[bi].system_id;
+                        result.selected_symmetry_number =
+                            symmetry_number_for_lattice(
+                                result.selected_system
+                            );
+                    }
+                }
+                std::cout << "  IDXREF: n=" << ix.n_used
+                          << " rms_xy=" << std::setprecision(2)
+                          << ix.rms_pos_initial << "→" << ix.rms_pos
+                          << " rms_phi=" << ix.rms_phi_initial << "→"
+                          << ix.rms_phi << " F=" << std::setprecision(2)
+                          << ix.distance_mm_initial << "→" << ix.distance_mm
+                          << " cell=" << std::setprecision(2)
+                          << result.cell.a << " " << result.cell.b << " "
+                          << result.cell.c << " indexed="
+                          << static_cast<int>(std::lround(
+                                 100.0 * result.fit.indexed_frac
+                             ))
+                          << "%\n";
+            } else {
+                std::cout << "  IDXREF: rejected (indexed frac drop)\n";
+            }
+        } else if (ix.ok) {
+            std::cout << "  IDXREF: n=" << ix.n_used
+                      << " rms_xy=" << std::setprecision(2)
+                      << ix.rms_pos_initial << "→" << ix.rms_pos
+                      << " (not applied)\n";
+        }
     }
 
     result.orientation =

@@ -321,6 +321,167 @@ int find_lastgood_rank(const std::vector<BravaisCandidate>& candidates) {
     return lastgood;
 }
 
+namespace {
+
+bool near_angle(double value_deg, double ideal_deg, double tol_deg) {
+    return std::fabs(value_deg - ideal_deg) <= tol_deg;
+}
+
+bool near_axis_pair(double a, double b, double max_frac) {
+    const double m = 0.5 * (std::fabs(a) + std::fabs(b));
+    if (m < 1e-6) {
+        return false;
+    }
+    return std::fabs(a - b) <= max_frac * m;
+}
+
+}  // namespace
+
+bool lattice_metric_acceptable(
+    std::string_view system_id,
+    const UnitCell& cell,
+    double max_axis_frac,
+    double max_angle_deg
+) {
+    if (!cell.is_valid() || system_id.empty()) {
+        return false;
+    }
+    if (system_id == "aP") {
+        return true;
+    }
+
+    const double aa = cell.alpha_deg;
+    const double bb = cell.beta_deg;
+    const double gg = cell.gamma_deg;
+    const bool orth =
+        near_angle(aa, 90.0, max_angle_deg) &&
+        near_angle(bb, 90.0, max_angle_deg) &&
+        near_angle(gg, 90.0, max_angle_deg);
+
+    if (system_id.size() < 2) {
+        return false;
+    }
+    const char fam = static_cast<char>(
+        std::tolower(static_cast<unsigned char>(system_id[0]))
+    );
+    const char cent = static_cast<char>(
+        std::tolower(static_cast<unsigned char>(system_id[1]))
+    );
+
+    if (fam == 'm') {
+        // Monoclinic: unique angle (β) free; α=γ=90°.
+        return near_angle(aa, 90.0, max_angle_deg) &&
+               near_angle(gg, 90.0, max_angle_deg);
+    }
+    if (fam == 'o') {
+        return orth;
+    }
+    if (fam == 't') {
+        return orth && near_axis_pair(cell.a, cell.b, max_axis_frac);
+    }
+    if (fam == 'h' || fam == 'r') {
+        // Hexagonal setting: a≈b, α=β=90°, γ=120°.
+        if (cent == 'r') {
+            // Rhombohedral: a≈b≈c, angles equal (soft).
+            return near_axis_pair(cell.a, cell.b, max_axis_frac) &&
+                   near_axis_pair(cell.b, cell.c, max_axis_frac) &&
+                   near_angle(aa, bb, max_angle_deg) &&
+                   near_angle(bb, gg, max_angle_deg);
+        }
+        return near_axis_pair(cell.a, cell.b, max_axis_frac) &&
+               near_angle(aa, 90.0, max_angle_deg) &&
+               near_angle(bb, 90.0, max_angle_deg) &&
+               near_angle(gg, 120.0, max_angle_deg);
+    }
+    if (fam == 'c') {
+        return orth && near_axis_pair(cell.a, cell.b, max_axis_frac) &&
+               near_axis_pair(cell.b, cell.c, max_axis_frac);
+    }
+    return false;
+}
+
+std::size_t select_bravais_after_idxref(
+    const std::vector<BravaisCandidate>& candidates,
+    const UnitCell& refined_cell,
+    float max_penalty,
+    int prefer_character,
+    std::string_view prefer_system
+) {
+    if (candidates.empty()) {
+        return static_cast<std::size_t>(-1);
+    }
+
+    // Explicit user preference (insulin SOLUTION / SYSTEM) wins when present.
+    if (prefer_character >= 1 && prefer_character <= 44) {
+        const std::size_t idx = static_cast<std::size_t>(prefer_character - 1);
+        if (idx < candidates.size()) {
+            return idx;
+        }
+    }
+    if (!prefer_system.empty()) {
+        float best_c = std::numeric_limits<float>::max();
+        std::size_t best = static_cast<std::size_t>(-1);
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            if (candidates[i].system_id == prefer_system &&
+                candidates[i].criterion < best_c) {
+                best_c = candidates[i].criterion;
+                best = i;
+            }
+        }
+        if (best != static_cast<std::size_t>(-1)) {
+            return best;
+        }
+    }
+
+    // Default: stay on refined triclinic aP (XDS continues aP until CORRECT).
+    std::size_t ap_idx = static_cast<std::size_t>(-1);
+    float ap_crit = std::numeric_limits<float>::max();
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+        if (candidates[i].system_id == "aP" &&
+            candidates[i].criterion < ap_crit) {
+            ap_crit = candidates[i].criterion;
+            ap_idx = i;
+        }
+    }
+
+    // Accept higher symmetry only if metric matches and criterion is not junk.
+    const float crit_cut =
+        std::max(max_penalty, ap_crit < 1e20f ? (ap_crit + 25.0f) : 25.0f);
+    std::size_t best = ap_idx;
+    int best_rank = (ap_idx != static_cast<std::size_t>(-1))
+                        ? crystal_class_rank("aP")
+                        : 0;
+    float best_crit = (ap_idx != static_cast<std::size_t>(-1))
+                          ? candidates[ap_idx].criterion
+                          : std::numeric_limits<float>::max();
+
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+        const auto& c = candidates[i];
+        if (c.system_id == "aP") {
+            continue;
+        }
+        if (c.criterion > crit_cut) {
+            continue;
+        }
+        if (!lattice_metric_acceptable(c.system_id, refined_cell)) {
+            continue;
+        }
+        const int rank = crystal_class_rank(c.system_id);
+        // Prefer t/o/h/c over m: higher crystal_class_rank wins; tie → lower crit.
+        if (rank > best_rank ||
+            (rank == best_rank && c.criterion < best_crit)) {
+            best_rank = rank;
+            best_crit = c.criterion;
+            best = i;
+        }
+    }
+
+    if (best != static_cast<std::size_t>(-1)) {
+        return best;
+    }
+    return pick_min_criterion(candidates);
+}
+
 std::size_t select_suggested_bravais(
     const std::vector<BravaisCandidate>& candidates,
     float max_penalty,

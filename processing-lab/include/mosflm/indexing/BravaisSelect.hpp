@@ -59,6 +59,32 @@ namespace mosflm::indexing {
     std::string_view prefer_system = {}
 );
 
+/// Kabsch-style lattice metric check (≤3% axes, ≤3° angles vs ideal).
+///
+/// Used after IDXREF so SUGGLATT cannot promote mC/C2 on a skewed triclinic
+/// cell. Triclinic ``aP`` always passes.
+[[nodiscard]] bool lattice_metric_acceptable(
+    std::string_view system_id,
+    const UnitCell& cell,
+    double max_axis_frac = 0.03,
+    double max_angle_deg = 3.0
+);
+
+/// Post-IDXREF Bravais pick: keep refined aP unless a higher-symmetry
+/// character passes :func:`lattice_metric_acceptable` and has a low criterion.
+/// Prefers t/o/h/c over m when several pass. Honours ``prefer_*`` like
+/// :func:`select_suggested_bravais`.
+///
+/// \param refined_cell Cell used for the metric gate (IDXREF result).
+/// \return Index into ``candidates``, or ``npos`` if empty.
+[[nodiscard]] std::size_t select_bravais_after_idxref(
+    const std::vector<BravaisCandidate>& candidates,
+    const UnitCell& refined_cell,
+    float max_penalty = 50.0f,
+    int prefer_character = 0,
+    std::string_view prefer_system = {}
+);
+
 /// Write Mosflm-style lattice-character / penalty table (DPSCHOOSE format
 /// without DI/SDCELL/FRACN — ``No PENALTY LATT a b c alpha beta gamma``).
 ///

@@ -88,10 +88,32 @@ INDEXFIT (`%indexed` / RMSD HKL). No CCTBX/DIALS link — FFT is pure C++.
 | `FFT` / `FFT3D` / `NOFFT` | on | Enable / disable the native 3D-FFT path. |
 | `DPSONLY` | — | DPS only (disables Δ-vector and FFT). |
 | `FFTONLY` | — | FFT only (debug; skips DPS and Δ-vector). |
+| `IDXREF` | on (refine) | Enable Δ-vector **and** post-INDEXFIT geometry refine. |
+| `NOIDXREF` | — | Skip Kabsch §2.8-lite geometry LS (basis search unchanged). |
 
-Look for `DIFFVECTOR:` / `FFT3D:` / `INDEXFIT: method=dps|delta|fft3d` in the
-log. Explicit `SYSTEM` / `CHARACTER` / `SOLUTION` (e.g. insulin `SOLUTION 12`
-→ cI) keeps the DPS Bravais path and skips Δ-vector / FFT override.
+Look for `DIFFVECTOR:` / `FFT3D:` / `INDEXFIT: method=dps|delta|fft3d` /
+`IDXREF:` in the log. Explicit `SYSTEM` / `CHARACTER` / `SOLUTION` (e.g.
+insulin `SOLUTION 12` → cI) keeps the DPS Bravais path and skips Δ-vector /
+FFT override.
+
+#### IDXREF-v2 (after INDEXFIT)
+
+After the INDEXFIT winner, AUTOINDEX runs Kabsch-style **local HKL** assignment
+(shortest tree on reciprocal spots), an **INDEX_ORIGIN** scan
+(`h,k,l ∈ {-1,0,1}`), then a **geometry LS** on `.spt` centroids:
+missetting, full cell metric `(a,b,c,α,β,γ)`, beam centre, and — when the
+spot φ span is ≥20° — detector distance `F` (Kabsch `REFINE(IDXREF)` for
+wide wedges). Observations use `cpp_mm_to_mosflm_xdet_yscale` so XDET/YDET
+match `predict_xdet_ydet_px`. Cost is Kabsch XY+φ primary (HKL soft).
+
+On accept, the refined triclinic AMAT/cell is kept (XDS continues aP).
+Bravais is re-scored for the penalty table, but a higher-symmetry label is
+applied only if the refined metric passes a Kabsch-like 3%/3° gate
+(`lattice_metric_acceptable`); otherwise SUGGLATT stays on **aP** (no junk
+mC/C2). Explicit `SYSTEM` / `CHARACTER` / `SOLUTION` still forces preference.
+
+Log: `IDXREF: INDEX_ORIGIN …` (when non-zero) and
+`IDXREF: n=… rms_xy=…→… rms_phi=…→… F=…→… cell=… indexed=…%`.
 
 FFT needs denser φ coverage than classic single-frame DPS. The native FFT
 keeps a **fixed real-space window** up to ``DMAX`` (only low-|q| spots enter

@@ -123,6 +123,12 @@ int main() {
         CHECK(s.state().autoindex.use_dps);
         CHECK(!s.state().autoindex.use_fft3d);
         CHECK(!s.state().autoindex.use_diff_vector);
+        CHECK(s.state().autoindex.use_idxref_refine);
+        s.parse_line("AUTOINDEX NOIDXREF FILE spots.spt");
+        CHECK(!s.state().autoindex.use_idxref_refine);
+        s.parse_line("AUTOINDEX IDXREF FILE spots.spt");
+        CHECK(s.state().autoindex.use_idxref_refine);
+        CHECK(s.state().autoindex.use_diff_vector);
     }
 
     {

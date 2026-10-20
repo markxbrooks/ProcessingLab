@@ -44,6 +44,7 @@ void run_autoindex(control::ControlState& state) {
     settings.use_diff_vector = state.autoindex.use_diff_vector;
     settings.use_fft3d = state.autoindex.use_fft3d;
     settings.use_dps = state.autoindex.use_dps;
+    settings.use_idxref_refine = state.autoindex.use_idxref_refine;
     settings.min_indexed_frac = state.autoindex.min_indexed_frac;
 
     const AutoIndexResult result = AutoIndexer{}.index(spots, geo, settings);

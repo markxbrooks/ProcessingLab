@@ -36,6 +36,8 @@ struct AutoIndexControlSettings {
     bool use_fft3d{true};
     /// Cambridge DPS path (off with ``FFTONLY``).
     bool use_dps{true};
+    /// Geometry LS after INDEXFIT (Kabsch §2.8-lite). Off with ``NOIDXREF``.
+    bool use_idxref_refine{true};
     float min_indexed_frac{0.70f};
 };
 

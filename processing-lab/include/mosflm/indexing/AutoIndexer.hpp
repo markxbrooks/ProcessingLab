@@ -64,6 +64,8 @@ struct AutoIndexSettings {
     bool use_fft3d{true};
     /// Run Cambridge DPS ``index_fortran_`` (disable with CONTROL ``FFTONLY``).
     bool use_dps{true};
+    /// Geometry LS after INDEXFIT (Kabsch §2.8-lite). Off with ``NOIDXREF``.
+    bool use_idxref_refine{true};
     /// XDS ``SEPMIN=`` (units of ``0.001/WAVE``).
     float sepmin{6.0f};
     /// XDS ``CLUSTER_RADIUS=`` (same units as SEPMIN).

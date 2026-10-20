@@ -236,12 +236,22 @@ void ControlSession::parse_autoindex_args(const std::vector<std::string>& args) 
                 static_cast<float>(require_double(args[++i], "AUTOINDEX"));
             continue;
         }
-        if (u == "DELTA" || u == "DIFFVECTOR" || u == "IDXREF") {
+        if (u == "DELTA" || u == "DIFFVECTOR") {
             state_.autoindex.use_diff_vector = true;
             continue;
         }
         if (u == "NODELTA" || u == "NODIFFVECTOR") {
             state_.autoindex.use_diff_vector = false;
+            continue;
+        }
+        // IDXREF: enable Δ-vector (historical alias) + geometry refine on.
+        if (u == "IDXREF") {
+            state_.autoindex.use_diff_vector = true;
+            state_.autoindex.use_idxref_refine = true;
+            continue;
+        }
+        if (u == "NOIDXREF") {
+            state_.autoindex.use_idxref_refine = false;
             continue;
         }
         if (u == "FFT" || u == "FFT3D") {
