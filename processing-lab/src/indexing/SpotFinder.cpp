@@ -218,7 +218,7 @@ SpotList SpotFinder::find(
     out.header.nslow = height;
     out.header.pixel_mm = pixel_mm;
     out.header.yscale = 1.0;
-    out.header.omega_deg = 0.0;
+    out.header.omega_deg = image.metadata.rotation_axis_omega_deg;
     out.header.invflag = 0;
     out.header.liswung = 1;
     out.header.beam_x_mm = image.metadata.beam_x_mm;

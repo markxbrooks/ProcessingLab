@@ -292,6 +292,7 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             src/indexing/Fft3dIndex.cpp
             src/indexing/LocalIndexAssign.cpp
             src/indexing/IdxrefRefine.cpp
+            src/indexing/SpotToRlp.cpp
             src/indexing/ControlAutoIndex.cpp
             src/indexing/ControlFindSpots.cpp
         )
@@ -1059,6 +1060,19 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
 
+        # Thaumatin Eiger HDF5 FINDSPOTS→AUTOINDEX (soft-skip without master).
+        # Runs in the build dir: AUTOINDEX writes ./XPARM.XDS.
+        add_executable(test_thaumatin_autoindex
+            tests/differential/test_thaumatin_autoindex.cpp
+        )
+        target_link_libraries(test_thaumatin_autoindex PRIVATE mosflm_indexing)
+        add_test(
+            NAME thaumatin_autoindex
+            COMMAND test_thaumatin_autoindex
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        set_tests_properties(thaumatin_autoindex PROPERTIES TIMEOUT 600)
+
         add_executable(test_control_autoindex
             tests/differential/test_control_autoindex.cpp
         )
@@ -1086,6 +1100,16 @@ if(BUILD_TESTING)
         add_test(
             NAME fft3d_index
             COMMAND test_fft3d_index
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_rlp_roundtrip
+            tests/unit/test_rlp_roundtrip.cpp
+        )
+        target_link_libraries(test_rlp_roundtrip PRIVATE mosflm_indexing)
+        add_test(
+            NAME rlp_roundtrip
+            COMMAND test_rlp_roundtrip
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
 

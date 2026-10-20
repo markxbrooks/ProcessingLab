@@ -117,11 +117,13 @@ Log: `IDXREF: INDEX_ORIGIN …` (when non-zero) and
 
 FFT needs denser φ coverage than classic single-frame DPS. The native FFT
 keeps a **fixed real-space window** up to ``DMAX`` (only low-|q| spots enter
-the histogram) so cell edges are not crushed to ~10 Å junk. Basis search
-follows DIALS: seed the **three shortest non-collinear** peaks, inject
-``(u±v)/2`` candidates, then apply a ModelRankFilter-style doubled-cell /
-volume (≤1.25×) / ``n_indexed`` (≥0.9×) gate so face-diagonal **√2
-supercells** (~84 Å instead of ~58 Å for thaumatin) lose to the primitive.
+the histogram) so cell edges are not crushed to ~10 Å junk. Each FFT peak is
+**scored as a lattice vector** (fraction of spots with ``r·t`` near-integer on
+the full RLP list); bases are seeded from top-scored peaks (shortest-three is
+only a backup). Ranking **maximizes `%indexed`** and prefers **larger volume**
+on ties (sublattice / ⅓-cell guard). ``(u±v)/2`` injection still fights
+face-diagonal √2 supercells. Before Bravais, DPS ``reduce_cell`` is applied;
+if `%indexed` is below ``MININDEXED``, SUGGLATT stays on **aP**.
 For large cells:
 
 ```text

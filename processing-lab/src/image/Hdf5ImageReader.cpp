@@ -116,6 +116,29 @@ bool read_string(hid_t loc, const char* path, std::string& out) {
     return true;
 }
 
+/// NeXus ``vector`` attribute (3 doubles) on the object at ``obj_path``.
+bool read_vector_attr(hid_t loc, const char* obj_path, double out[3]) {
+    if (H5Aexists_by_name(loc, obj_path, "vector", H5P_DEFAULT) <= 0) {
+        return false;
+    }
+    // get_attribute_info writes one dim per rank — check rank first.
+    int rank = -1;
+    if (H5LTget_attribute_ndims(loc, obj_path, "vector", &rank) < 0 ||
+        rank != 1) {
+        return false;
+    }
+    hsize_t dims[1] = {0};
+    H5T_class_t cls{};
+    std::size_t type_size = 0;
+    if (H5LTget_attribute_info(
+            loc, obj_path, "vector", dims, &cls, &type_size
+        ) < 0 ||
+        cls != H5T_FLOAT || dims[0] != 3) {
+        return false;
+    }
+    return H5LTget_attribute_double(loc, obj_path, "vector", out) >= 0;
+}
+
 struct MasterMeta {
     int width{0};
     int height{0};
@@ -127,6 +150,7 @@ struct MasterMeta {
     double beam_y_mm{0.0};
     double osc_start_deg{0.0};
     double osc_range_deg{0.0};
+    double rotation_axis_omega_deg{0.0};
     std::string detector_id{"Eiger"};
     int nimages{0};
     int bit_depth{16};
@@ -301,13 +325,57 @@ MasterMeta read_metadata(hid_t hdf, int frame_1based) {
         return true;
     };
 
-    if (!try_angle_array("/entry/data/omega")) {
-        if (!try_angle_array("/entry/sample/goniometer/omega")) {
-            if (!try_angle_array("/entry/sample/goniometer/phi")) {
-                try_angle_array("/entry/sample/transformations/omega");
+    static const char* const kAnglePaths[] = {
+        "/entry/data/omega",
+        "/entry/sample/goniometer/omega",
+        "/entry/sample/goniometer/phi",
+        "/entry/sample/transformations/omega",
+    };
+    const char* angle_path = nullptr;
+    for (const char* p : kAnglePaths) {
+        if (try_angle_array(p)) {
+            angle_path = p;
+            break;
+        }
+    }
+
+    // --- rotation axis vs detector fast/slow → MOSFLM detector omega --------
+    // NeXus ``vector`` attributes share one lab frame, so only dot products
+    // matter: ys (the φ axis in SpotToRlp) = −sin ω·x + cos ω·y must equal
+    // the axis, giving ω = atan2(−axis·fast, axis·slow).
+    double axis[3];
+    double fast[3];
+    double slow[3];
+    const bool have_axis =
+        (angle_path != nullptr && read_vector_attr(hdf, angle_path, axis)) ||
+        read_vector_attr(hdf, "/entry/sample/transformations/omega", axis);
+    if (have_axis &&
+        read_vector_attr(
+            hdf, "/entry/instrument/detector/module/fast_pixel_direction", fast
+        ) &&
+        read_vector_attr(
+            hdf, "/entry/instrument/detector/module/slow_pixel_direction", slow
+        )) {
+        auto dot = [](const double* u, const double* v) {
+            return u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        };
+        const double norm = std::sqrt(dot(axis, axis) * dot(fast, fast));
+        const double norm_s = std::sqrt(dot(axis, axis) * dot(slow, slow));
+        if (norm > 1e-12 && norm_s > 1e-12) {
+            const double af = dot(axis, fast) / norm;
+            const double as = dot(axis, slow) / norm_s;
+            // Axis roughly normal to the detector: ω is undefined, keep 0.
+            if (std::hypot(af, as) > 0.5) {
+                constexpr double kRad2Deg = 180.0 / 3.14159265358979323846;
+                double om = std::atan2(-af, as) * kRad2Deg;
+                if (om < 0.0) {
+                    om += 360.0;
+                }
+                m.rotation_axis_omega_deg = om;
             }
         }
     }
+
     double osc_w = -1.0;
     if (read_double(
             hdf, "/entry/sample/goniometer/omega_range_average", osc_w
@@ -546,6 +614,7 @@ DiffractionImage Hdf5ImageReader::read(
         out.metadata.oscillation_start_deg = meta.osc_start_deg;
         out.metadata.oscillation_range_deg =
             meta.osc_range_deg > 0.0 ? meta.osc_range_deg : 0.0;
+        out.metadata.rotation_axis_omega_deg = meta.rotation_axis_omega_deg;
         out.metadata.detector_id = meta.detector_id;
 
         read_frame_pixels(

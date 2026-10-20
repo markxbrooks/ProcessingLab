@@ -137,6 +137,10 @@ int main() {
             !near_pct(edges[0], 58.0 * std::sqrt(2.0), 0.06),
             "tet locked onto √2 supercell ~82"
         );
+        // Volume must be full tet (~5e5), not a ~⅓ fractional subcell.
+        const double vol = std::fabs(result.cell.volume());
+        CHECK_MSG(vol > 3.5e5, "tet volume looks fractional (~1/3)");
+        CHECK_MSG(vol < 7.0e5, "tet volume unexpectedly large");
     }
 
     return mosflm_test::finish("fft3d_index");

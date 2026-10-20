@@ -26,6 +26,12 @@ struct ImageMetadata {
     double oscillation_start_deg{};
     double oscillation_range_deg{};
 
+    /// MOSFLM detector omega (``.spt`` header field 5), degrees: spot (x, y)
+    /// are rotated by this before the φ rotation about lab Y. 0 = rotation
+    /// axis along +slow (ADSC/SMV convention); 270 = axis along +fast.
+    /// Derived from NeXus axis/pixel-direction vectors for HDF5 masters.
+    double rotation_axis_omega_deg{0.0};
+
     std::string detector_id;
 
     /// Map into the geometry layer used by prediction / integration.

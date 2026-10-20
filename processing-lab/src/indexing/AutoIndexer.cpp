@@ -5,6 +5,8 @@
 #include "mosflm/indexing/Fft3dIndex.hpp"
 #include "mosflm/indexing/IdxrefRefine.hpp"
 #include "mosflm/indexing/LocalIndexAssign.hpp"
+#include "mosflm/indexing/SpotToRlp.hpp"
+#include "mosflm/indexing/SupercellReduce.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -90,6 +92,18 @@ Eigen::Matrix3d amat_from_dps_om(const struct matrix_3x3& om, double wave) {
     return A;
 }
 
+/// Inverse of ``amat_from_dps_om``.
+struct matrix_3x3 dps_om_from_amat(const Eigen::Matrix3d& A, double wave) {
+    struct matrix_3x3 om{};
+    const double inv_w = 1.0 / wave;
+    for (int i = 0; i < 3; ++i) {
+        om.r[i].z = static_cast<float>(A(i, 0) * inv_w);
+        om.r[i].x = static_cast<float>(A(i, 1) * inv_w);
+        om.r[i].y = static_cast<float>(A(i, 2) * inv_w);
+    }
+    return om;
+}
+
 struct matrix_3x3 eigen_to_dps(const Eigen::Matrix3d& M) {
     struct matrix_3x3 om{};
     for (int i = 0; i < 3; ++i) {
@@ -98,6 +112,23 @@ struct matrix_3x3 eigen_to_dps(const Eigen::Matrix3d& M) {
         om.r[i].z = static_cast<float>(M(i, 2));
     }
     return om;
+}
+
+Eigen::Matrix3d dps_to_eigen(const struct matrix_3x3& om) {
+    Eigen::Matrix3d M = Eigen::Matrix3d::Zero();
+    for (int i = 0; i < 3; ++i) {
+        M(i, 0) = om.r[i].x;
+        M(i, 1) = om.r[i].y;
+        M(i, 2) = om.r[i].z;
+    }
+    return M;
+}
+
+/// DPS Niggli-style reduction on a reciprocal orientation matrix (rows).
+Eigen::Matrix3d reduce_reciprocal_om(const Eigen::Matrix3d& om_in) {
+    struct matrix_3x3 om = eigen_to_dps(om_in);
+    reduce_cell(&om);
+    return dps_to_eigen(om);
 }
 
 /// Score how well MOSFLM AMAT indexes reciprocal xyz (x = A · hkl).
@@ -223,45 +254,23 @@ AutoIndexResult AutoIndexer::index(
         return result;
     }
 
-    // MOSFLM DPSCHOOSE: FR_MAT (OMEGA + INVERTX) → triangular xyz → ROTMATY.
-    // .spt INVFLAG≠0 ⇒ FINVERTX=-1 (ADSC). ROTMATY takes φ in degrees (DTOR).
-    // Spot-line field 4 is φ_end (insulin: 0.5°). At TWOTHETA=MU=0 the γ/ν
-    // path equals this triangular form.
-    constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
-    const double dist = geometry.distance_mm;
-    const double inv_l = 1.0 / geometry.wavelength_A;
-    const double omega = spots.header.omega_deg * kDeg2Rad;
-    const double finvertx = (spots.header.invflag != 0) ? -1.0 : 1.0;
-    const double fr11 = std::cos(omega) * finvertx;
-    const double fr12 = std::sin(omega);
-    const double fr21 = -std::sin(omega) * finvertx;
-    const double fr22 = std::cos(omega);
-    const int n_xyz = n;
-    result.n_spots_used = static_cast<std::size_t>(n_xyz);
-
-    std::vector<float> x(static_cast<std::size_t>(n_xyz));
-    std::vector<float> y(static_cast<std::size_t>(n_xyz));
-    std::vector<float> z(static_cast<std::size_t>(n_xyz));
-    std::vector<int> usespot(static_cast<std::size_t>(n_xyz), 1);
-    for (int i = 0; i < n_xyz; ++i) {
-        const auto& s = spots.spots[keep[static_cast<std::size_t>(i)]];
-        const double xt = s.x_mm - beam_x;
-        const double yt = s.y_mm - beam_y;
-        const double xs = xt * fr11 + yt * fr12;
-        const double ys = xt * fr21 + yt * fr22;
-        const double rlen = std::sqrt(xs * xs + ys * ys + dist * dist);
-        const double f = inv_l / rlen;
-        const double qx = f * xs;
-        const double qy = f * ys;
-        const double qz = f * dist - inv_l;
-        const double phi_rad = s.phi_end_deg * kDeg2Rad;
-        const double c = std::cos(phi_rad);
-        const double sn = std::sin(phi_rad);
-        // ROTMATY (TRANSP∘RTMATS about Y): x'=c x − s z, z'=s x + c z
-        x[static_cast<std::size_t>(i)] = static_cast<float>(c * qx - sn * qz);
-        y[static_cast<std::size_t>(i)] = static_cast<float>(qy);
-        z[static_cast<std::size_t>(i)] = static_cast<float>(sn * qx + c * qz);
+    // MOSFLM DPSCHOOSE: FR_MAT → triangular xyz → ROTMATY (see SpotToRlp).
+    SpotToRlpGeometry rlp_geo;
+    rlp_geo.distance_mm = geometry.distance_mm;
+    rlp_geo.wavelength_A = geometry.wavelength_A;
+    rlp_geo.beam_x_mm = beam_x;
+    rlp_geo.beam_y_mm = beam_y;
+    std::vector<float> x;
+    std::vector<float> y;
+    std::vector<float> z;
+    const std::size_t n_built = spots_to_rlp_xyz(spots, keep, rlp_geo, x, y, z);
+    const int n_xyz = static_cast<int>(n_built);
+    result.n_spots_used = n_built;
+    if (n_xyz < 20) {
+        result.ierr = -2;
+        return result;
     }
+    std::vector<int> usespot(static_cast<std::size_t>(n_xyz), 1);
 
     int numvect = settings.nvect;
     int numvectref = settings.nvref;
@@ -520,6 +529,22 @@ AutoIndexResult AutoIndexer::index(
         return pick;
     };
 
+    // Every path can return an n× supercell that indexes ~100% of spots
+    // (thaumatin short sweep: 58×149×174, V≈3×). Fit fraction cannot tell
+    // it from the true cell; index parity can.
+    auto shed_supercell = [&](const Eigen::Matrix3d& amat,
+                              const char* tag) -> SupercellReduceResult {
+        SupercellReduceSettings ss;
+        ss.hkldev = static_cast<double>(settings.hkldev);
+        SupercellReduceResult sr =
+            reduce_supercell_by_index_parity(amat, x, y, z, ss);
+        if (sr.factor > 1) {
+            std::cout << "  " << tag << ": supercell ÷" << sr.factor
+                      << " (index parity)\n";
+        }
+        return sr;
+    };
+
     PathPick dps_pick;
     if (ierr == 0) {
         result.amat << a9[0], a9[1], a9[2], a9[3], a9[4], a9[5], a9[6],
@@ -536,6 +561,17 @@ AutoIndexResult AutoIndexer::index(
         om.r[2].z = static_cast<float>(a9[6] * inv_w);
         om.r[2].x = static_cast<float>(a9[7] * inv_w);
         om.r[2].y = static_cast<float>(a9[8] * inv_w);
+
+        {
+            const SupercellReduceResult sr = shed_supercell(
+                amat_from_dps_om(om, geometry.wavelength_A), "DPS"
+            );
+            if (sr.factor > 1) {
+                om = dps_om_from_amat(sr.amat, geometry.wavelength_A);
+                reduce_cell(&om);
+                result.amat = amat_from_dps_om(om, geometry.wavelength_A);
+            }
+        }
 
         struct cell_struct cell{};
         dircell_from_om(om, &cell);
@@ -565,7 +601,7 @@ AutoIndexResult AutoIndexer::index(
             DiffVectorSettings dvs;
             dvs.sepmin = settings.sepmin * scale;
             dvs.cluster_radius = settings.cluster_radius * scale;
-            const DiffVectorResult dv = find_diff_vector_basis(
+            DiffVectorResult dv = find_diff_vector_basis(
                 x, y, z, geometry.wavelength_A, dvs, geometry.dmax_A
             );
             std::cout << "  DIFFVECTOR: sep×" << scale
@@ -581,12 +617,20 @@ AutoIndexResult AutoIndexer::index(
             if (!dv.ok) {
                 continue;
             }
+            {
+                const SupercellReduceResult sr =
+                    shed_supercell(dv.reciprocal_om.transpose(), "DIFFVECTOR");
+                if (sr.factor > 1) {
+                    dv.reciprocal_om = sr.amat.transpose();
+                    dv.cell = UnitCell::from_basis_rows(sr.amat.inverse());
+                }
+            }
+            // Reduce only for Bravais triage; keep unreduced OM for INDEXFIT.
+            const Eigen::Matrix3d om_red =
+                reduce_reciprocal_om(dv.reciprocal_om);
             PathPick trial = pick_from_bravais(
-                BravaisClassifier{}.classify(dv.reciprocal_om, 1), "delta"
+                BravaisClassifier{}.classify(om_red, 1), "delta"
             );
-            // Also score the unreduced Δ-vector basis (aP). Lab-frame basis
-            // vectors are rows of reciprocal_om; r = OM^T · hkl (Å⁻¹), so AMAT
-            // is OM^T — not the DPS (z,x,y) packing used for index_fortran_.
             {
                 TrialScore raw;
                 raw.idx = 0;
@@ -642,7 +686,7 @@ AutoIndexResult AutoIndexer::index(
         fs.b_max_A = static_cast<float>(
             (geometry.dmax_A > 20.0) ? geometry.dmax_A : 200.0
         );
-        const Fft3dResult ft = find_fft3d_basis(
+        Fft3dResult ft = find_fft3d_basis(
             x, y, z, geometry.wavelength_A, fs, geometry.dmax_A
         );
         std::cout << "  FFT3D: grid=" << ft.grid_n << " spots=" << ft.n_spots_used
@@ -654,8 +698,19 @@ AutoIndexResult AutoIndexer::index(
         }
         std::cout << '\n';
         if (ft.ok) {
+            const SupercellReduceResult sr =
+                shed_supercell(ft.reciprocal_om.transpose(), "FFT3D");
+            if (sr.factor > 1) {
+                ft.reciprocal_om = sr.amat.transpose();
+                ft.cell = UnitCell::from_basis_rows(sr.amat.inverse());
+            }
+        }
+        if (ft.ok) {
+            // Reduce only for Bravais triage; INDEXFIT keeps the FFT basis.
+            const Eigen::Matrix3d om_red =
+                reduce_reciprocal_om(ft.reciprocal_om);
             PathPick trial = pick_from_bravais(
-                BravaisClassifier{}.classify(ft.reciprocal_om, 1), "fft3d"
+                BravaisClassifier{}.classify(om_red, 1), "fft3d"
             );
             {
                 TrialScore raw;
@@ -712,8 +767,12 @@ AutoIndexResult AutoIndexer::index(
         if (std::fabs(fa - fb) > 0.05) {
             return fa > fb;
         }
-        // Near-equal indexing among Δ/FFT: prefer smaller cell (DIALS volume
-        // gate). Do not displace DPS on volume alone (insulin prefer_system).
+        // Near-equal indexing among Δ/FFT: prefer the smaller cell. A
+        // supercell indexes every spot its true cell does, so equal fractions
+        // mean the larger cell is the supercell. (A real ⅓ sub-cell indexes
+        // only ~⅓ of spots and loses on fraction above; the earlier
+        // "keep larger when ratio ≥2.2" rule masked the φ-axis bug and picked
+        // 3× supercells once spot→RLP geometry was right.)
         if ((a.method == "fft3d" || a.method == "delta") &&
             (b.method == "fft3d" || b.method == "delta")) {
             const double va = a.chosen.cell.volume();
@@ -782,6 +841,17 @@ AutoIndexResult AutoIndexer::index(
                          std::lround(100.0 * settings.min_indexed_frac)
                      )
                   << "%; XDS-style gate)\n";
+        // Keep AMAT/cell; do not promote higher symmetry for SUGGLATT.
+        if (!user_prefer) {
+            std::cout << "  INDEXFIT: skip SUGGLATT promote (indexed < "
+                      << static_cast<int>(std::lround(
+                             100.0 * settings.min_indexed_frac
+                         ))
+                      << "%)\n";
+            result.selected_system = "aP";
+            result.selected_character = 31;
+            result.selected_symmetry_number = 1;
+        }
     }
 
     // IDXREF-v2: local HKL → INDEX_ORIGIN → geometry LS (incl. F) → Bravais gate.
@@ -830,25 +900,36 @@ AutoIndexResult AutoIndexer::index(
                 result.cell = ix.cell;
                 result.fit = fit1;
                 result.orientation = ix.orientation;
-                // Keep refined aP AMAT/cell; only relabel Bravais if metric OK.
-                const Eigen::Matrix3d om_ref = result.amat.transpose();
+                // Keep refined AMAT/cell; Bravais labels only if metric OK
+                // and indexing gate passes (else stay aP).
+                const Eigen::Matrix3d om_ref =
+                    reduce_reciprocal_om(result.amat.transpose());
                 auto brav = BravaisClassifier{}.classify(om_ref, 1);
                 if (!brav.empty()) {
-                    const std::size_t bi = select_bravais_after_idxref(
-                        brav, result.cell, settings.max_penalty,
-                        settings.prefer_character, settings.prefer_system
-                    );
-                    if (bi != static_cast<std::size_t>(-1) &&
-                        bi < brav.size()) {
-                        result.bravais = std::move(brav);
-                        result.selected_character =
-                            result.bravais[bi].character;
-                        result.selected_system =
-                            result.bravais[bi].system_id;
-                        result.selected_symmetry_number =
-                            symmetry_number_for_lattice(
-                                result.selected_system
-                            );
+                    result.bravais = brav;
+                    if (fit_passes(
+                            result.fit, settings.min_indexed_frac,
+                            settings.max_rmsd_hkl
+                        ) ||
+                        user_prefer) {
+                        const std::size_t bi = select_bravais_after_idxref(
+                            brav, result.cell, settings.max_penalty,
+                            settings.prefer_character, settings.prefer_system
+                        );
+                        if (bi != static_cast<std::size_t>(-1) &&
+                            bi < brav.size()) {
+                            result.selected_character =
+                                brav[bi].character;
+                            result.selected_system = brav[bi].system_id;
+                            result.selected_symmetry_number =
+                                symmetry_number_for_lattice(
+                                    result.selected_system
+                                );
+                        }
+                    } else {
+                        result.selected_system = "aP";
+                        result.selected_character = 31;
+                        result.selected_symmetry_number = 1;
                     }
                 }
                 std::cout << "  IDXREF: n=" << ix.n_used

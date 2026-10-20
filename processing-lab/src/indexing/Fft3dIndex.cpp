@@ -4,6 +4,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <utility>
 #include <vector>
@@ -162,6 +163,8 @@ void fft3d(std::vector<Cplx>& data, int n, bool inverse) {
 struct Peak {
     Eigen::Vector3d r{Eigen::Vector3d::Zero()};
     double mag{0.0};
+    /// Fraction of RLPs with |r·t − round(r·t)| < tol (lattice-vector score).
+    double frac{0.0};
 };
 
 int score_basis(
@@ -300,9 +303,8 @@ std::vector<Cand> filter_doubled_cell(const std::vector<Cand>& solutions) {
     return accepted;
 }
 
-/// DIALS ModelRankFilter, adapted without refinement likelihood:
-/// strong n_indexed gate first (avoids tiny junk cells), then doubled-cell,
-/// then volume ≤1.25× min among survivors.
+/// Strong n_indexed gate, then doubled-cell filter.
+/// Do NOT cull by min volume — that discards true ~3× cells vs fractional peers.
 std::vector<Cand> model_rank_filter(std::vector<Cand> solutions) {
     if (solutions.empty()) {
         return solutions;
@@ -311,7 +313,6 @@ std::vector<Cand> model_rank_filter(std::vector<Cand> solutions) {
     for (const auto& s : solutions) {
         max_n = std::max(max_n, s.n_idx);
     }
-    // Stricter than DIALS 5% pre-filter: we lack model_likelihood.
     const int pre_cut = std::max(1, static_cast<int>(0.50 * max_n));
     {
         std::vector<Cand> keep;
@@ -342,51 +343,69 @@ std::vector<Cand> model_rank_filter(std::vector<Cand> solutions) {
     if (solutions.empty()) {
         return solutions;
     }
-    solutions = filter_doubled_cell(solutions);
-    if (solutions.empty()) {
-        return solutions;
-    }
-    double min_vol = solutions[0].vol;
-    for (const auto& s : solutions) {
-        min_vol = std::min(min_vol, s.vol);
-    }
-    {
-        std::vector<Cand> keep;
-        for (const auto& s : solutions) {
-            if (s.vol < 1.25 * min_vol) {
-                keep.push_back(s);
-            }
-        }
-        solutions = std::move(keep);
-    }
-    return solutions;
+    return filter_doubled_cell(solutions);
 }
 
 Cand pick_best_cand(const std::vector<Cand>& solutions) {
-    auto edge_sum = [](const UnitCell& u) { return u.a + u.b + u.c; };
-    Cand best;
-    best.n_idx = -1;
-    best.vol = 1e300;
-    best.S = -1e300;
+    if (solutions.empty()) {
+        return {};
+    }
+    int max_n = 0;
     for (const auto& s : solutions) {
+        max_n = std::max(max_n, s.n_idx);
+    }
+    const int n_keep = std::max(1, static_cast<int>(0.95 * max_n));
+    std::vector<Cand> top;
+    double max_vol = 0.0;
+    for (const auto& s : solutions) {
+        if (s.n_idx >= n_keep) {
+            top.push_back(s);
+            max_vol = std::max(max_vol, s.vol);
+        }
+    }
+    // Sublattice guard: drop ~⅓-volume peers when a ~3× cell also indexes well.
+    if (max_vol > 1.0) {
+        std::vector<Cand> kept;
+        for (const auto& s : top) {
+            if (s.vol >= 0.45 * max_vol) {
+                kept.push_back(s);
+            }
+        }
+        if (!kept.empty()) {
+            top = std::move(kept);
+        }
+    }
+    // Among survivors: max n_idx, then smaller volume (primitive over supercell).
+    Cand best = top[0];
+    for (const auto& s : top) {
         if (s.n_idx > best.n_idx) {
             best = s;
             continue;
         }
-        if (s.n_idx != best.n_idx) {
-            continue;
-        }
-        // Relative volume tie (FP noise on equivalent cells).
-        if (s.vol < best.vol * 0.99) {
-            best = s;
-            continue;
-        }
-        if (s.vol <= best.vol * 1.01 &&
-            edge_sum(s.cell) < edge_sum(best.cell) - 1e-3) {
+        if (s.n_idx == best.n_idx && s.vol < best.vol * 0.99) {
             best = s;
         }
     }
     return best;
+}
+
+/// Fraction of RLPs for which t is a near-integer lattice translation.
+double peak_integer_frac(
+    const Eigen::Vector3d& t,
+    const std::vector<Eigen::Vector3d>& rlps,
+    double tol
+) {
+    if (rlps.empty() || t.squaredNorm() < 1e-12) {
+        return 0.0;
+    }
+    int n_ok = 0;
+    for (const auto& r : rlps) {
+        const double xi = r.dot(t);
+        if (std::fabs(xi - std::round(xi)) <= tol) {
+            ++n_ok;
+        }
+    }
+    return static_cast<double>(n_ok) / static_cast<double>(rlps.size());
 }
 
 }  // namespace
@@ -619,41 +638,47 @@ Fft3dResult find_fft3d_basis(
         }
     }
 
-    // Mix strongest FFT peaks with shortest (primitive) candidates.
+    // Score peaks on the low-|q| FFT subset (cleaner lattice signal); score
+    // candidate bases on rlps_all so INDEXFIT %indexed matches the objective.
+    // Soft-gate only: demote low-frac peaks for seeding, keep them for enum.
+    const double tol = std::min(0.22, static_cast<double>(settings.index_tol));
+    const double peak_tol = std::min(0.20, tol);
+    double best_frac = 0.0;
+    for (auto& p : peaks) {
+        p.frac = peak_integer_frac(p.r, rlps_fft, peak_tol);
+        best_frac = std::max(best_frac, p.frac);
+    }
+    std::sort(peaks.begin(), peaks.end(), [](const Peak& a, const Peak& b) {
+        if (std::fabs(a.frac - b.frac) > 1e-6) {
+            return a.frac > b.frac;
+        }
+        return a.mag > b.mag;
+    });
+    const double frac_floor = std::max(0.50, 0.75 * best_frac);
+    std::size_t n_high = 0;
+    for (const auto& p : peaks) {
+        if (p.frac + 1e-12 >= frac_floor) {
+            ++n_high;
+        }
+    }
+    std::cout << "  FFT3D: peaks scored n=" << peaks.size()
+              << " best_frac=" << std::fixed << std::setprecision(2)
+              << best_frac << " high=" << n_high
+              << " spots_fft=" << rlps_fft.size() << "/" << rlps_all.size()
+              << '\n';
+
     std::vector<Peak> ranked = peaks;
+    std::vector<Peak> by_frac = peaks;
     std::vector<Peak> by_len = peaks;
     std::sort(by_len.begin(), by_len.end(), [](const Peak& a, const Peak& b) {
         return a.r.norm() < b.r.norm();
     });
-    {
-        std::vector<Peak> mixed;
-        mixed.reserve(40);
-        for (std::size_t i = 0; i < ranked.size() && mixed.size() < 20; ++i) {
-            mixed.push_back(ranked[i]);
-        }
-        for (std::size_t i = 0; i < by_len.size() && mixed.size() < 36; ++i) {
-            bool seen = false;
-            for (const auto& m : mixed) {
-                if ((m.r - by_len[i].r).norm() < 1.0) {
-                    seen = true;
-                    break;
-                }
-            }
-            if (!seen) {
-                mixed.push_back(by_len[i]);
-            }
-        }
-        ranked = std::move(mixed);
-    }
 
-    // Slightly tighter than CONTROL default — supercells inflate loose fits.
-    const double tol = std::min(0.22, static_cast<double>(settings.index_tol));
     const double min_vol = std::max(5000.0, 0.02 * b_max * b_max * b_max);
-    const double V0 = b_max * b_max * b_max;
-    constexpr double kVolLambda = 100.0;
-    auto vol_score = [&](int n_idx, double vol) -> double {
+    // Maximize indexed count; among near-ties prefer larger volume (sublattice).
+    auto rank_score = [&](int n_idx, double vol) -> double {
         const double vv = std::max(vol, 1.0);
-        return static_cast<double>(n_idx) - kVolLambda * std::log(vv / V0);
+        return static_cast<double>(n_idx) + 0.02 * std::log(vv);
     };
 
     std::vector<Cand> solutions;
@@ -669,7 +694,6 @@ Fft3dResult find_fft3d_basis(
         if (triple < min_vol) {
             return;
         }
-        // Reject near-coplanar bases (flat parallelepiped, tiny triple vs edges).
         const double edge_prod = a.norm() * b.norm() * c.norm();
         if (edge_prod > 1e-6 && triple < 0.20 * edge_prod) {
             return;
@@ -678,10 +702,10 @@ Fft3dResult find_fft3d_basis(
         if (om.squaredNorm() < 1e-18) {
             return;
         }
-        const int sc = score_basis(om, rlps_fft, tol);
-        // Soft floor: synthetic lattices clear easily; real spots are noisier.
+        // Score on full list so INDEXFIT %indexed matches the objective.
+        const int sc = score_basis(om, rlps_all, tol);
         const int min_sc = std::max(
-            10, static_cast<int>(0.12 * static_cast<double>(rlps_fft.size()))
+            10, static_cast<int>(0.12 * static_cast<double>(rlps_all.size()))
         );
         if (sc < min_sc) {
             return;
@@ -696,8 +720,6 @@ Fft3dResult find_fft3d_basis(
             cand.cell.c < b_min * 0.8) {
             return;
         }
-        // Rank by crystallographic cell volume (edges×angles), not a possibly
-        // flat triple product that under-reports supercell volume.
         const double vol = std::fabs(cand.cell.volume());
         if (vol < min_vol) {
             return;
@@ -707,34 +729,60 @@ Fft3dResult find_fft3d_basis(
         cand.c = c;
         cand.n_idx = sc;
         cand.vol = vol;
-        cand.S = vol_score(sc, vol);
+        cand.S = rank_score(sc, vol);
         for (const auto& s : solutions) {
             if (cells_similar(s.cell, cand.cell, 0.03) &&
-                cand.n_idx <= s.n_idx && cand.vol >= 0.98 * s.vol) {
+                cand.n_idx <= s.n_idx && cand.vol <= 1.02 * s.vol) {
                 return;
             }
         }
         solutions.push_back(std::move(cand));
     };
 
-    // DIALS: three shortest non-collinear peaks with appreciable weight.
-    // Restrict to the stronger half of the peak list, then sort by length.
-    // Independence floor is softer than min_vol — try_add still enforces volume.
     const double min_cross2 = b_min * b_min * 0.05;
     const double min_det = std::max(500.0, 0.01 * min_vol);
+
+    // Primary seed: top integer-scored non-collinear peaks (frac gate).
     {
-        std::vector<Peak> strong = ranked;
+        std::vector<Eigen::Vector3d> scored_basis;
+        for (const auto& p : by_frac) {
+            if (p.frac + 1e-12 < frac_floor) {
+                continue;
+            }
+            const Eigen::Vector3d& v = p.r;
+            if (v.norm() < b_min) {
+                continue;
+            }
+            if (scored_basis.empty()) {
+                scored_basis.push_back(v);
+                continue;
+            }
+            if (scored_basis.size() == 1) {
+                if (v.cross(scored_basis[0]).squaredNorm() > min_cross2) {
+                    scored_basis.push_back(v);
+                }
+                continue;
+            }
+            if (nearly_independent(
+                    scored_basis[0], scored_basis[1], v, min_det
+                )) {
+                scored_basis.push_back(v);
+                break;
+            }
+        }
+        if (scored_basis.size() == 3) {
+            try_add(scored_basis[0], scored_basis[1], scored_basis[2]);
+        }
+    }
+
+    // Secondary: three shortest (DIALS) — keep as a candidate only.
+    {
+        std::vector<Peak> strong = by_len;
         if (strong.size() > 8) {
             const std::size_t keep =
                 std::max<std::size_t>(8, strong.size() / 2);
             strong.resize(keep);
         }
-        std::sort(
-            strong.begin(), strong.end(),
-            [](const Peak& x, const Peak& y) {
-                return x.r.norm() < y.r.norm();
-            }
-        );
         std::vector<Eigen::Vector3d> short_basis;
         for (const auto& p : strong) {
             const Eigen::Vector3d& v = p.r;
@@ -758,20 +806,11 @@ Fft3dResult find_fft3d_basis(
                 break;
             }
         }
-        if (std::getenv("FFT3D_DEBUG_PEAKS") != nullptr) {
-            std::cout << "  FFT3D short_basis:";
-            for (const auto& v : short_basis) {
-                std::cout << " " << v.norm();
-            }
-            std::cout << '\n';
-        }
         if (short_basis.size() == 3) {
             try_add(short_basis[0], short_basis[1], short_basis[2]);
         }
     }
 
-    // Shortest-first triplets (primitive edges before diagonal supercells),
-    // then a few strong-peak combos for diversity.
     auto enum_triplets = [&](const std::vector<Peak>& pool_peaks,
                              std::size_t cap) {
         const std::size_t n_p = std::min(pool_peaks.size(), cap);
@@ -785,27 +824,22 @@ Fft3dResult find_fft3d_basis(
             }
         }
     };
-    enum_triplets(by_len, 24);
-    enum_triplets(ranked, 16);
+    enum_triplets(by_frac, 20);
+    enum_triplets(by_len, 16);
+    enum_triplets(ranked, 12);
 
     if (solutions.empty()) {
         return result;
     }
 
-    // Prefer high n_idx, then smaller volume, then shorter edge sum.
+    // Prefer high n_idx; among ties prefer smaller volume (supercell→primitive).
+    // pick_best_cand applies the ~⅓-volume sublattice guard afterward.
     std::sort(solutions.begin(), solutions.end(), [](const Cand& x,
                                                      const Cand& y) {
         if (x.n_idx != y.n_idx) {
             return x.n_idx > y.n_idx;
         }
-        if (x.vol < y.vol * 0.99) {
-            return true;
-        }
-        if (y.vol < x.vol * 0.99) {
-            return false;
-        }
-        return (x.cell.a + x.cell.b + x.cell.c) <
-               (y.cell.a + y.cell.b + y.cell.c);
+        return x.vol < y.vol;
     });
     if (solutions.size() > 40) {
         solutions.resize(40);
@@ -897,7 +931,7 @@ Fft3dResult find_fft3d_basis(
             if (vol2 < min_vol) {
                 return false;
             }
-            const int sc2 = score_basis(om2, rlps_fft, tol);
+            const int sc2 = score_basis(om2, rlps_all, tol);
             if (!accept_reduced(sc2, vol2, cell2)) {
                 return false;
             }
@@ -908,7 +942,7 @@ Fft3dResult find_fft3d_basis(
             best_cell = cell2;
             best_nidx = sc2;
             best_vol = vol2;
-            best_S = vol_score(sc2, vol2);
+            best_S = rank_score(sc2, vol2);
             return true;
         };
 
