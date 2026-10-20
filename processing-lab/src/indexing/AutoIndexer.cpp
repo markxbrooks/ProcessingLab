@@ -537,10 +537,15 @@ AutoIndexResult AutoIndexer::index(
         );
     }
 
+    const bool user_prefer =
+        settings.prefer_character > 0 || !settings.prefer_system.empty();
+
     PathPick delta_pick;
-    if (settings.use_diff_vector) {
-        // Try a few SEPMIN scales (large cells often need lower SEPMIN).
-        const float sep_scales[] = {1.0f, 0.5f, 0.25f};
+    // Do not let Δ-vector aP override an explicit SYSTEM/CHARACTER/SOLUTION
+    // (insulin SOLUTION 12 → cI must stay on the DPS Bravais path).
+    if (settings.use_diff_vector && !user_prefer) {
+        // One SEPMIN scale (DMAX already caps physical SEPMIN for large cells).
+        const float sep_scales[] = {1.0f};
         for (float scale : sep_scales) {
             DiffVectorSettings dvs;
             dvs.sepmin = settings.sepmin * scale;
@@ -564,6 +569,37 @@ AutoIndexResult AutoIndexer::index(
             PathPick trial = pick_from_bravais(
                 BravaisClassifier{}.classify(dv.reciprocal_om, 1), "delta"
             );
+            // Also score the unreduced Δ-vector basis (aP). Lab-frame basis
+            // vectors are rows of reciprocal_om; r = OM^T · hkl (Å⁻¹), so AMAT
+            // is OM^T — not the DPS (z,x,y) packing used for index_fortran_.
+            {
+                TrialScore raw;
+                raw.idx = 0;
+                raw.amat = dv.reciprocal_om.transpose();
+                raw.cell = dv.cell;
+                raw.fit =
+                    score_amat_vs_xyz(raw.amat, x, y, z, settings.hkldev);
+                BravaisCandidate ap;
+                ap.character = 31;
+                ap.system_id = "aP";
+                ap.criterion = 0.0f;
+                ap.orientation = dv.reciprocal_om;
+                std::cout << "  DIFFVECTOR: raw_index="
+                          << static_cast<int>(std::lround(
+                                 100.0 * raw.fit.indexed_frac
+                             ))
+                          << "% rmsd=" << std::setprecision(3)
+                          << raw.fit.rmsd_hkl << '\n';
+                if (!trial.ok ||
+                    raw.fit.indexed_frac >
+                        trial.chosen.fit.indexed_frac + 0.02) {
+                    trial.ok = raw.cell.is_valid();
+                    trial.bravais = {ap};
+                    trial.chosen = raw;
+                    trial.chosen_idx = 0;
+                    trial.method = "delta";
+                }
+            }
             if (!trial.ok) {
                 continue;
             }
@@ -599,9 +635,8 @@ AutoIndexResult AutoIndexer::index(
         }
         const double fa = a.chosen.fit.indexed_frac;
         const double fb = b.chosen.fit.indexed_frac;
-        // Weak Δ-vector solutions must clearly beat DPS before replacing it.
-        if (a.method == "delta" && b.method == "dps" && !a_pass &&
-            fa < fb + 0.10) {
+        // Weak Δ-vector solutions must beat DPS before replacing it.
+        if (a.method == "delta" && b.method == "dps" && !a_pass && fa <= fb) {
             return false;
         }
         if (std::fabs(fa - fb) > 0.05) {

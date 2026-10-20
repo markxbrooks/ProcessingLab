@@ -16,8 +16,8 @@ namespace mosflm::indexing {
 struct DiffVectorSettings {
     float sepmin{6.0f};
     float cluster_radius{2.0f};
-    /// Cap input RLVs (XDS local-indexing uses up to ~3000 strongest).
-    std::size_t max_spots{3000};
+    /// Cap input RLVs (pair enumeration is O(n²); 800 is enough for basis).
+    std::size_t max_spots{800};
     /// Keep the densest clusters for basis search.
     std::size_t max_clusters{60};
     /// Try triplets among the top-N densest clusters.

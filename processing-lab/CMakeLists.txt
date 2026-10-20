@@ -1028,4 +1028,15 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endif()
+
+    # 76c1b PROCESS I/σ + CORRECT-lite gates (XPARM-seeded; soft-skip if missing).
+    add_executable(test_76c1b_process_quality
+        tests/differential/test_76c1b_process_quality.cpp
+    )
+    target_link_libraries(test_76c1b_process_quality PRIVATE mosflm_geometry)
+    add_test(
+        NAME 76c1b_process_quality
+        COMMAND test_76c1b_process_quality
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 endif()
