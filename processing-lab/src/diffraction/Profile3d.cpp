@@ -603,8 +603,9 @@ crystal::MosflmReflection profile3d_to_mosflm(
     row.k0 = obs.k;
     row.l0 = obs.l;
     row.batch = std::max(1, obs.peak_frame);
-    row.intensity = static_cast<float>(obs.intensity);
-    row.sigma = static_cast<float>(obs.sigma);
+    // MOSFLM convention: I = summation, IPR = profile (as ProcessPipeline).
+    row.intensity = static_cast<float>(obs.summation_intensity);
+    row.sigma = static_cast<float>(obs.summation_sigma);
     row.ipr = static_cast<float>(
         obs.profile_ok ? obs.profile_intensity : obs.summation_intensity
     );
