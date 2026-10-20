@@ -90,8 +90,10 @@ std::vector<double> make_gaussian_profile(int half, double sigma_px) {
 }
 
 void normalize_profile(std::vector<double>& profile) {
+    // Learned averages of signed pixels can dip just below 0 in the tails.
     double sum = 0.0;
-    for (double v : profile) {
+    for (double& v : profile) {
+        v = std::max(v, 0.0);
         sum += v;
     }
     if (sum > 0.0) {
@@ -277,7 +279,11 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         if (!bg.ok) {
             continue;
         }
-        double peak_max = 0.0;
+        // Signed bg-subtracted values: clipping at 0 turns background noise
+        // into a positive pedestal over the whole box, and a profile with a
+        // pedestal over-reads sharp spots by ~1/(1 − pedestal fraction).
+        // Each learner is normalised to unit volume (not its noisy maximum).
+        double volume = 0.0;
         std::vector<double> local(static_cast<std::size_t>(np), 0.0);
         for (int dr = -peak_half; dr <= peak_half; ++dr) {
             for (int dc = -peak_half; dc <= peak_half; ++dc) {
@@ -287,20 +293,20 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
                 const double b = bg.at(
                     static_cast<double>(dc), static_cast<double>(dr)
                 );
-                const double v = std::max(0.0, od - b);
+                const double v = od - b;
                 const std::size_t idx = static_cast<std::size_t>(
                     (dr + peak_half) * side + (dc + peak_half)
                 );
                 local[idx] = v;
-                peak_max = std::max(peak_max, v);
+                volume += v;
             }
         }
-        if (peak_max < 1.0) {
+        if (volume < 1.0) {
             continue;
         }
         for (int k = 0; k < np; ++k) {
             const double contrib =
-                local[static_cast<std::size_t>(k)] / peak_max;
+                local[static_cast<std::size_t>(k)] / volume;
             region_acc[static_cast<std::size_t>(reg)]
                       [static_cast<std::size_t>(k)] += contrib;
             global_acc[static_cast<std::size_t>(k)] += contrib;
