@@ -235,21 +235,21 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         row.k0 = r.k;
         row.l0 = r.l;
         row.batch = 1;
-        // Default I/SIGI from summation; prefer profile when fit succeeded
-        // (DIALS-like: profile intensities correlate better for shared HKL).
+        // MOSFLM convention: I/SIGI = summation, IPR/SIGIPR = profile fit
+        // (summation when the fit failed). The per-slice 2D profile fit
+        // scatters ~15% vs pixel sums on fine-sliced Eiger data, while
+        // summation agrees to ~2%, so I must not be overwritten by IPR.
         row.intensity = static_cast<float>(r.intensity);
         row.sigma = static_cast<float>(r.sigma);
         if (po != nullptr) {
+            row.intensity = static_cast<float>(po->summation_intensity);
+            row.sigma = static_cast<float>(po->summation_sigma);
             row.ipr = static_cast<float>(
                 po->profile_ok ? po->profile_intensity : po->summation_intensity
             );
             row.sigipr = static_cast<float>(
                 po->profile_ok ? po->profile_sigma : po->summation_sigma
             );
-            if (po->profile_ok) {
-                row.intensity = row.ipr;
-                row.sigma = row.sigipr;
-            }
             const double bgrat =
                 po->npix_bg > 0
                     ? static_cast<double>(po->n_bg_rejected) /
