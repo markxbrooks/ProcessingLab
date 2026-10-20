@@ -744,6 +744,7 @@ void ControlSession::apply_keyword(
             throw std::invalid_argument("CONTROL DMIN needs 1 value");
         }
         state_.dmin_A = require_double(args[0], "DMIN");
+        state_.dmin_explicit = true;
         return;
     }
     if (key == "RESOLUTION") {
@@ -759,6 +760,7 @@ void ControlSession::apply_keyword(
         } else {
             state_.dmin_A = require_double(args[0], "RESOLUTION");
         }
+        state_.dmin_explicit = true;
         return;
     }
     if (key == "YSCALE") {
@@ -1695,6 +1697,72 @@ void run_process_profile_3d(
               << " unique HKL (shoeboxes=" << boxes.size() << ")\n";
 }
 
+/// REEK margin used by PROCESS prediction and the corner-resolution limit.
+constexpr double kProcessDetectorMarginPx = 24.0;
+
+void process_panel_beam(
+    const ControlState& state,
+    const image::ImageMetadata& meta,
+    const DetectorGeometry& det,
+    double& beam_x_mm,
+    double& beam_y_mm
+) {
+    if (state.has_beam) {
+        beam_x_mm = state.beam_x_mm;
+        beam_y_mm = state.beam_y_mm;
+        return;
+    }
+    if (meta.beam_x_mm > 0.0 || meta.beam_y_mm > 0.0) {
+        beam_x_mm = meta.beam_x_mm;
+        beam_y_mm = meta.beam_y_mm;
+        return;
+    }
+    const double px = det.pixel_size_x_mm > 0.0 ? det.pixel_size_x_mm : 0.1;
+    const double py = det.pixel_size_y_mm > 0.0 ? det.pixel_size_y_mm : 0.1;
+    beam_x_mm = 0.5 * static_cast<double>(det.nfast) * px;
+    beam_y_mm = 0.5 * static_cast<double>(det.nslow) * py;
+}
+
+DetectorGeometry process_limit_detector(
+    const ControlState& state,
+    const image::ImageMetadata& meta
+) {
+    DetectorGeometry det = meta.to_detector_geometry();
+    if (state.has_distance) {
+        det.distance_mm = state.distance_mm;
+    } else if (det.distance_mm <= 0.0) {
+        det.distance_mm = state.distance_mm;
+    }
+    if (state.has_wavelength) {
+        det.wavelength_A = state.wavelength_A;
+    } else if (det.wavelength_A <= 0.0) {
+        det.wavelength_A = state.wavelength_A;
+    }
+    if (state.has_pixel) {
+        det.pixel_size_x_mm = state.pixel_x_mm;
+        det.pixel_size_y_mm = state.pixel_y_mm;
+    }
+    return det;
+}
+
+/// Explicit DMIN/RESOLUTION, otherwise the farthest inset detector corner.
+double resolved_dmin_A(
+    const ControlState& state,
+    const image::ImageMetadata& meta
+) {
+    if (state.dmin_explicit && state.dmin_A > 0.0) {
+        return state.dmin_A;
+    }
+    const DetectorGeometry det = process_limit_detector(state, meta);
+    double beam_x = 0.0;
+    double beam_y = 0.0;
+    process_panel_beam(state, meta, det, beam_x, beam_y);
+    const double dmin = detector_corner_dmin_A(
+        det, beam_x, beam_y, kProcessDetectorMarginPx
+    );
+    return dmin > 0.0 ? dmin : 1.45;
+}
+
 }  // namespace
 
 std::filesystem::path ControlSession::resolve_image_path(
@@ -1823,7 +1891,7 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     prediction.mosaic_spread_deg = state_.mosaic_deg;
     prediction.divh_deg = state_.has_divergence ? state_.divh_deg : 0.0;
     prediction.divv_deg = state_.has_divergence ? state_.divv_deg : 0.0;
-    prediction.dmin_A = state_.dmin_A;
+    prediction.dmin_A = resolved_dmin_A(state_, image.metadata);
     prediction.dmax_A = state_.dmax_A;
     prediction.phi_step_deg = state_.phi_step_deg;
     prediction.apply_systematic_absences = true;
@@ -1836,7 +1904,15 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     // the Ewald gate with mosaic (REEK PROCESS policy).
     prediction.max_phi_width_deg = 5.0;
     prediction.apply_reek_detector_margin = true;
-    prediction.detector_margin_px = 24.0;
+    prediction.detector_margin_px = kProcessDetectorMarginPx;
+    {
+        double beam_x = 0.0;
+        double beam_y = 0.0;
+        process_panel_beam(state_, image.metadata, det, beam_x, beam_y);
+        prediction.use_panel_beam = det.nfast > 1 && det.nslow > 1;
+        prediction.panel_beam_x_mm = beam_x;
+        prediction.panel_beam_y_mm = beam_y;
+    }
     prediction.widen_ewald_with_mosaic = state_.widen_ewald_with_mosaic;
     prediction.rocking_model = state_.rocking_model;
     prediction.mosaic_ewald_scale = state_.mosaic_ewald_scale;
@@ -1918,13 +1994,11 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     // INIT/DEFPIX-lite trusted region (circular + DMIN/DMAX).
     {
         diffraction::TrustedRegionSettings tr;
-        tr.trusted_radius_frac = 0.98;
-        tr.dmin_A = state_.dmin_A;
+        tr.cover_panel = true;
+        tr.dmin_A = prediction.dmin_A;
         tr.dmax_A = state_.dmax_A > 0.0 ? state_.dmax_A : 0.0;
-        if (state_.has_beam) {
-            tr.beam_x_mm = state_.beam_x_mm;
-            tr.beam_y_mm = state_.beam_y_mm;
-        }
+        tr.beam_x_mm = prediction.panel_beam_x_mm;
+        tr.beam_y_mm = prediction.panel_beam_y_mm;
         measurement.trusted_mask =
             diffraction::build_trusted_mask(image, det, tr);
         measurement.trusted_width = image.metadata.width;
@@ -2140,6 +2214,7 @@ ControlGoResult ControlSession::go(
         osc_log = image0.metadata.oscillation_range_deg;
         start_log = image0.metadata.oscillation_start_deg;
     }
+    state_.dmin_A = resolved_dmin_A(state_, image0.metadata);
     print_process_integrate_header(
         state_, first, last, path0, osc_log, start_log, image0.metadata
     );

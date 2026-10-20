@@ -88,5 +88,54 @@ int main() {
     CHECK_CLOSE(x, 110.0, 1e-9);
     CHECK_CLOSE(y, 0.0, 1e-9);
 
+    // Farthest Eiger corner is ~1.15 Å; a 24 px inset is slightly lower.
+    {
+        DetectorGeometry eiger;
+        eiger.distance_mm = 199.78169135;
+        eiger.wavelength_A = 0.97949913;
+        eiger.pixel_size_x_mm = 0.075;
+        eiger.pixel_size_y_mm = 0.075;
+        eiger.nfast = 4148;
+        eiger.nslow = 4362;
+        const double beam_x = 166.15771234;
+        const double beam_y = 172.97150533;
+        const double d_edge =
+            mosflm::detector_corner_dmin_A(eiger, beam_x, beam_y, 0.0);
+        const double d_inset =
+            mosflm::detector_corner_dmin_A(eiger, beam_x, beam_y, 24.0);
+        CHECK(d_edge > 1.14 && d_edge < 1.17);
+        CHECK(d_inset > d_edge);
+        CHECK(d_inset > 1.15 && d_inset < 1.20);
+
+        // Beam-relative mm of panel pixel (0, 0): XDET uses y_mm, YDET uses x_mm.
+        CHECK(mosflm::spot_on_panel(
+            eiger, -beam_y, -beam_x, 0.0, true, beam_x, beam_y
+        ));
+        const double y_out = 4148.0 * 0.075 - beam_x;
+        CHECK(!mosflm::spot_on_panel(
+            eiger, -beam_y, y_out, 0.0, true, beam_x, beam_y
+        ));
+        CHECK(!mosflm::spot_on_panel(
+            eiger, -beam_y, -beam_x, 24.0, true, beam_x, beam_y
+        ));
+        const double x_in = 24.0 * 0.075 - beam_y;
+        const double y_in = 24.0 * 0.075 - beam_x;
+        CHECK(mosflm::spot_on_panel(
+            eiger, x_in, y_in, 24.0, true, beam_x, beam_y
+        ));
+    }
+
+    // Centered-beam fixtures keep the half-panel square.
+    {
+        DetectorGeometry sq;
+        sq.nfast = 2000;
+        sq.nslow = 2000;
+        sq.pixel_size_x_mm = 0.1;
+        sq.pixel_size_y_mm = 0.1;
+        CHECK(mosflm::spot_on_panel(sq, 0.0, 0.0, 0.0, false, 0.0, 0.0));
+        CHECK(mosflm::spot_on_panel(sq, 99.9, 0.0, 0.0, false, 0.0, 0.0));
+        CHECK(!mosflm::spot_on_panel(sq, 100.0, 0.0, 0.0, false, 0.0, 0.0));
+    }
+
     return mosflm_test::finish("detector");
 }

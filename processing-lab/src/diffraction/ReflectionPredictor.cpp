@@ -33,16 +33,20 @@ bool on_detector(
     const DetectorGeometry& det,
     double x_mm,
     double y_mm,
-    double margin_px
+    double margin_px,
+    bool use_panel_beam,
+    double panel_beam_x_mm,
+    double panel_beam_y_mm
 ) {
-    double xf = 0.0;
-    double yf = 0.0;
-    det.mm_to_pixel(x_mm, y_mm, xf, yf);
-    const double half_f =
-        0.5 * static_cast<double>(det.nfast) - margin_px;
-    const double half_s =
-        0.5 * static_cast<double>(det.nslow) - margin_px;
-    return std::fabs(xf) < half_f && std::fabs(yf) < half_s;
+    return spot_on_panel(
+        det,
+        x_mm,
+        y_mm,
+        margin_px,
+        use_panel_beam,
+        panel_beam_x_mm,
+        panel_beam_y_mm
+    );
 }
 
 /// MOSFLM DPSCHOOSE / REEK ice-ring resolution bands (Å), high→low inclusive.
@@ -75,7 +79,10 @@ EvalPhi evaluate_phi(
     double inv_lambda,
     double ewald_tol,
     const DetectorGeometry& det,
-    double margin_px
+    double margin_px,
+    bool use_panel_beam,
+    double panel_beam_x_mm,
+    double panel_beam_y_mm
 ) {
     EvalPhi out;
     const Eigen::Vector3d q = rotation_x_deg(phi_deg) * q0;
@@ -86,7 +93,15 @@ EvalPhi evaluate_phi(
     if (!det.lab_to_detector_mm(s1, out.x_mm, out.y_mm)) {
         return out;
     }
-    if (!on_detector(det, out.x_mm, out.y_mm, margin_px)) {
+    if (!on_detector(
+            det,
+            out.x_mm,
+            out.y_mm,
+            margin_px,
+            use_panel_beam,
+            panel_beam_x_mm,
+            panel_beam_y_mm
+        )) {
         return out;
     }
     out.ok = true;
@@ -185,7 +200,15 @@ PredictionResult predict_rocking(
                                         norm_cdf((f0 - phic) / sigma);
                     PredictedReflection spot;
                     if (!request.detector.lab_to_detector_mm(s1, spot.x_mm, spot.y_mm) ||
-                        !on_detector(request.detector, spot.x_mm, spot.y_mm, margin_px)) {
+                        !on_detector(
+                            request.detector,
+                            spot.x_mm,
+                            spot.y_mm,
+                            margin_px,
+                            st.use_panel_beam,
+                            st.panel_beam_x_mm,
+                            st.panel_beam_y_mm
+                        )) {
                         continue;
                     }
                     spot.h = h;
@@ -373,7 +396,10 @@ PredictionResult ReflectionPredictor::predict(
                         inv_lambda,
                         ewald_tol,
                         request.detector,
-                        margin_px
+                        margin_px,
+                        request.settings.use_panel_beam,
+                        request.settings.panel_beam_x_mm,
+                        request.settings.panel_beam_y_mm
                     );
                     if (!ev.ok) {
                         continue;

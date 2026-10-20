@@ -56,7 +56,7 @@ std::vector<std::uint8_t> build_trusted_mask(
         for (int c = 0; c < w; ++c) {
             const double dc = static_cast<double>(c) - bc;
             const double dr = static_cast<double>(r) - br;
-            if (std::hypot(dc, dr) > rmax) {
+            if (!settings.cover_panel && std::hypot(dc, dr) > rmax) {
                 mask[static_cast<std::size_t>(r) * static_cast<std::size_t>(w) +
                      static_cast<std::size_t>(c)] = 0;
                 continue;
