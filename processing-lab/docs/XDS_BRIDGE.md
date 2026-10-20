@@ -73,10 +73,11 @@ Set `MERGE_XY` / `MERGE_PHI` only when clustering persistent peaks.
 DiffractionLab `build_findspots_commands(..., for_indexing=True)` emits the
 same MULTIFRAME pattern with `MAXSPOTS 1500`.
 
-#### DPS + Kabsch Δ-vector (Wave 4)
+#### DPS + Δ-vector + FFT3D (INDEXFIT)
 
-AUTOINDEX runs **DPS** and a Kabsch-style **difference-vector** lattice search
-in parallel, then ranks both with INDEXFIT (`%indexed` / RMSD HKL):
+AUTOINDEX runs **DPS**, a Kabsch-style **difference-vector** search, and a
+native **DIALS-style 3D-FFT** lattice search, then ranks candidates with
+INDEXFIT (`%indexed` / RMSD HKL). No CCTBX/DIALS link — FFT is pure C++.
 
 | Knob | Default | Meaning |
 |------|---------|---------|
@@ -84,10 +85,29 @@ in parallel, then ranks both with INDEXFIT (`%indexed` / RMSD HKL):
 | `CLUSTER_RADIUS` | 2 | Same units as SEPMIN. |
 | `MININDEXED` | 0.70 | XDS-style soft gate (≥70% indexed). Below → `INDEXFIT: INSUFFICIENT` warning. |
 | `DELTA` / `NODELTA` | on | Enable / disable the Δ-vector candidate path. |
+| `FFT` / `FFT3D` / `NOFFT` | on | Enable / disable the native 3D-FFT path. |
+| `DPSONLY` | — | DPS only (disables Δ-vector and FFT). |
+| `FFTONLY` | — | FFT only (debug; skips DPS and Δ-vector). |
 
-Look for `DIFFVECTOR:` / `INDEXFIT: method=dps|delta` in the log. Explicit
-`SYSTEM` / `CHARACTER` / `SOLUTION` (e.g. insulin `SOLUTION 12` → cI) keeps
-the DPS Bravais path and skips Δ-vector override.
+Look for `DIFFVECTOR:` / `FFT3D:` / `INDEXFIT: method=dps|delta|fft3d` in the
+log. Explicit `SYSTEM` / `CHARACTER` / `SOLUTION` (e.g. insulin `SOLUTION 12`
+→ cI) keeps the DPS Bravais path and skips Δ-vector / FFT override.
+
+FFT needs denser φ coverage than classic single-frame DPS. The native FFT
+keeps a **fixed real-space window** up to ``DMAX`` (only low-|q| spots enter
+the histogram) so cell edges are not crushed to ~10 Å junk. Basis search
+follows DIALS: seed the **three shortest non-collinear** peaks, inject
+``(u±v)/2`` candidates, then apply a ModelRankFilter-style doubled-cell /
+volume (≤1.25×) / ``n_indexed`` (≥0.9×) gate so face-diagonal **√2
+supercells** (~84 Å instead of ~58 Å for thaumatin) lose to the primitive.
+For large cells:
+
+```text
+FINDSPOTS THRESHOLD 5 MAXSPOTS 20000 FIND 1 FILE spots.spt MULTIFRAME RANGE 1 900
+GO
+AUTOINDEX DPS THRESHOLD 12 DMAX 200 FFT …
+GO
+```
 
 BESTSOLAR-lite among LASTGOOD still prefers `mP` over a poorly indexing `mC`.
 If AUTOINDEX still fails on short φ wedges, seed from Xia2/XDS with `--xparm`

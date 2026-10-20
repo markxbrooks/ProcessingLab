@@ -60,6 +60,10 @@ struct AutoIndexSettings {
     float max_rmsd_hkl{0.25f};
     /// Kabsch Δ-vector lattice search (XDS IDXREF) as a second candidate.
     bool use_diff_vector{true};
+    /// DIALS-style native 3D-FFT lattice search (third INDEXFIT candidate).
+    bool use_fft3d{true};
+    /// Run Cambridge DPS ``index_fortran_`` (disable with CONTROL ``FFTONLY``).
+    bool use_dps{true};
     /// XDS ``SEPMIN=`` (units of ``0.001/WAVE``).
     float sepmin{6.0f};
     /// XDS ``CLUSTER_RADIUS=`` (same units as SEPMIN).
@@ -88,7 +92,7 @@ struct AutoIndexResult {
     int selected_symmetry_number{1};
     std::size_t n_spots_used{0};
     IndexFitStats fit{};
-    /// ``"dps"`` or ``"delta"`` — which lattice path won INDEXFIT ranking.
+    /// ``"dps"``, ``"delta"``, or ``"fft3d"`` — INDEXFIT winner.
     std::string index_method{"dps"};
 };
 

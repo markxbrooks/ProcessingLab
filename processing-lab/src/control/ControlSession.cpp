@@ -240,8 +240,28 @@ void ControlSession::parse_autoindex_args(const std::vector<std::string>& args) 
             state_.autoindex.use_diff_vector = true;
             continue;
         }
-        if (u == "NODELTA" || u == "NODIFFVECTOR" || u == "DPSONLY") {
+        if (u == "NODELTA" || u == "NODIFFVECTOR") {
             state_.autoindex.use_diff_vector = false;
+            continue;
+        }
+        if (u == "FFT" || u == "FFT3D") {
+            state_.autoindex.use_fft3d = true;
+            continue;
+        }
+        if (u == "NOFFT" || u == "NOFFT3D") {
+            state_.autoindex.use_fft3d = false;
+            continue;
+        }
+        if (u == "DPSONLY") {
+            state_.autoindex.use_diff_vector = false;
+            state_.autoindex.use_fft3d = false;
+            state_.autoindex.use_dps = true;
+            continue;
+        }
+        if (u == "FFTONLY") {
+            state_.autoindex.use_dps = false;
+            state_.autoindex.use_diff_vector = false;
+            state_.autoindex.use_fft3d = true;
             continue;
         }
     }

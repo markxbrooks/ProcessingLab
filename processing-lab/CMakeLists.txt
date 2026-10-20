@@ -289,6 +289,7 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
         list(APPEND MOSFLM_INDEXING_SOURCES
             src/indexing/AutoIndexer.cpp
             src/indexing/DiffVectorIndex.cpp
+            src/indexing/Fft3dIndex.cpp
             src/indexing/ControlAutoIndex.cpp
             src/indexing/ControlFindSpots.cpp
         )
@@ -1073,6 +1074,16 @@ if(BUILD_TESTING)
         add_test(
             NAME diff_vector_index
             COMMAND test_diff_vector_index
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_fft3d_index
+            tests/unit/test_fft3d_index.cpp
+        )
+        target_link_libraries(test_fft3d_index PRIVATE mosflm_indexing)
+        add_test(
+            NAME fft3d_index
+            COMMAND test_fft3d_index
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
 

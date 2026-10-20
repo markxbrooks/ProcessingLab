@@ -32,6 +32,10 @@ struct AutoIndexControlSettings {
     float sepmin{6.0f};
     float cluster_radius{2.0f};
     bool use_diff_vector{true};
+    /// Native DIALS-style 3D-FFT path (CONTROL ``FFT`` / ``NOFFT``).
+    bool use_fft3d{true};
+    /// Cambridge DPS path (off with ``FFTONLY``).
+    bool use_dps{true};
     float min_indexed_frac{0.70f};
 };
 

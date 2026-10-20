@@ -2,6 +2,7 @@
 
 #include "mosflm/indexing/BravaisSelect.hpp"
 #include "mosflm/indexing/DiffVectorIndex.hpp"
+#include "mosflm/indexing/Fft3dIndex.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -202,10 +203,18 @@ AutoIndexResult AutoIndexer::index(
             keep.push_back(i);
         }
     }
-    const int n = static_cast<int>(keep.size());
-    if (n > N_RS) {
-        throw std::runtime_error("AutoIndexer: too many spots for DPS N_RS");
+    // Prefer brightest spots when over DPS N_RS (FFT/Δ also use this list).
+    if (static_cast<int>(keep.size()) > N_RS) {
+        std::sort(keep.begin(), keep.end(), [&](std::size_t ia, std::size_t ib) {
+            const auto& a = spots.spots[ia];
+            const auto& b = spots.spots[ib];
+            const double sa = (a.sigma > 1e-6) ? a.sigma : 1.0;
+            const double sb = (b.sigma > 1e-6) ? b.sigma : 1.0;
+            return (a.intensity / sa) > (b.intensity / sb);
+        });
+        keep.resize(static_cast<std::size_t>(N_RS));
     }
+    const int n = static_cast<int>(keep.size());
     if (n < 20) {
         result.ierr = -2;
         result.n_spots_used = static_cast<std::size_t>(n);
@@ -287,45 +296,49 @@ AutoIndexResult AutoIndexer::index(
     float tarcell[6] = {0, 0, 0, 0, 0, 0};
     int centering = 0;
 
-    index_fortran_(
-        &numvect,
-        &numvectref,
-        &maxcyc,
-        &inicyc,
-        &convrg,
-        &numormat,
-        &stepscal,
-        &numrlp,
-        &numsptdps,
-        &npkfftmin,
-        &nmultfft,
-        &idumpth,
-        &theta1d,
-        &theta2d,
-        &sinthmin,
-        &volmin,
-        &hkldev,
-        &hklmin,
-        dumpfft,
-        &dumpvec,
-        &dumpref,
-        &dumpgen,
-        &dumpch,
-        &number_xyz,
-        &nlattice,
-        x.data(),
-        y.data(),
-        z.data(),
-        usespot.data(),
-        &d_max,
-        &d_min,
-        &index_mode,
-        a9,
-        &wave,
-        &ierr,
-        tarcell,
-        &centering
-    );
+    if (settings.use_dps) {
+        index_fortran_(
+            &numvect,
+            &numvectref,
+            &maxcyc,
+            &inicyc,
+            &convrg,
+            &numormat,
+            &stepscal,
+            &numrlp,
+            &numsptdps,
+            &npkfftmin,
+            &nmultfft,
+            &idumpth,
+            &theta1d,
+            &theta2d,
+            &sinthmin,
+            &volmin,
+            &hkldev,
+            &hklmin,
+            dumpfft,
+            &dumpvec,
+            &dumpref,
+            &dumpgen,
+            &dumpch,
+            &number_xyz,
+            &nlattice,
+            x.data(),
+            y.data(),
+            z.data(),
+            usespot.data(),
+            &d_max,
+            &d_min,
+            &index_mode,
+            a9,
+            &wave,
+            &ierr,
+            tarcell,
+            &centering
+        );
+    } else {
+        ierr = 1;  // mark DPS skipped; FFT/Δ may still recover
+    }
 
     result.ierr = ierr;
 
@@ -616,6 +629,60 @@ AutoIndexResult AutoIndexer::index(
         }
     }
 
+    PathPick fft_pick;
+    // Same user_prefer gate as Δ-vector — keep insulin SOLUTION on DPS.
+    if (settings.use_fft3d && !user_prefer) {
+        Fft3dSettings fs;
+        fs.max_spots = static_cast<std::size_t>(
+            std::min(n_xyz, std::max(20, settings.numsptdps * 4))
+        );
+        fs.grid_n = (geometry.dmax_A > 100.0) ? 128 : 64;
+        fs.b_max_A = static_cast<float>(
+            (geometry.dmax_A > 20.0) ? geometry.dmax_A : 200.0
+        );
+        const Fft3dResult ft = find_fft3d_basis(
+            x, y, z, geometry.wavelength_A, fs, geometry.dmax_A
+        );
+        std::cout << "  FFT3D: grid=" << ft.grid_n << " spots=" << ft.n_spots_used
+                  << " peaks=" << ft.n_peaks << " indexed=" << ft.n_indexed;
+        if (ft.ok) {
+            std::cout << " cell=" << std::fixed << std::setprecision(2)
+                      << ft.cell.a << " " << ft.cell.b << " " << ft.cell.c
+                      << " β=" << ft.cell.beta_deg;
+        }
+        std::cout << '\n';
+        if (ft.ok) {
+            PathPick trial = pick_from_bravais(
+                BravaisClassifier{}.classify(ft.reciprocal_om, 1), "fft3d"
+            );
+            {
+                TrialScore raw;
+                raw.idx = 0;
+                raw.amat = ft.reciprocal_om.transpose();
+                raw.cell = ft.cell;
+                raw.fit =
+                    score_amat_vs_xyz(raw.amat, x, y, z, settings.hkldev);
+                BravaisCandidate ap;
+                ap.character = 31;
+                ap.system_id = "aP";
+                ap.criterion = 0.0f;
+                ap.orientation = ft.reciprocal_om;
+                if (!trial.ok ||
+                    raw.fit.indexed_frac >
+                        trial.chosen.fit.indexed_frac + 0.02) {
+                    trial.ok = raw.cell.is_valid();
+                    trial.bravais = {ap};
+                    trial.chosen = raw;
+                    trial.chosen_idx = 0;
+                    trial.method = "fft3d";
+                }
+            }
+            if (trial.ok) {
+                fft_pick = std::move(trial);
+            }
+        }
+    }
+
     auto better = [&](const PathPick& a, const PathPick& b) -> bool {
         // Is path ``a`` better than ``b``?
         if (!a.ok) {
@@ -635,12 +702,23 @@ AutoIndexResult AutoIndexer::index(
         }
         const double fa = a.chosen.fit.indexed_frac;
         const double fb = b.chosen.fit.indexed_frac;
-        // Weak Δ-vector solutions must beat DPS before replacing it.
-        if (a.method == "delta" && b.method == "dps" && !a_pass && fa <= fb) {
+        // Weak alternate solutions must beat DPS before replacing it.
+        if ((a.method == "delta" || a.method == "fft3d") &&
+            b.method == "dps" && !a_pass && fa <= fb) {
             return false;
         }
         if (std::fabs(fa - fb) > 0.05) {
             return fa > fb;
+        }
+        // Near-equal indexing among Δ/FFT: prefer smaller cell (DIALS volume
+        // gate). Do not displace DPS on volume alone (insulin prefer_system).
+        if ((a.method == "fft3d" || a.method == "delta") &&
+            (b.method == "fft3d" || b.method == "delta")) {
+            const double va = a.chosen.cell.volume();
+            const double vb = b.chosen.cell.volume();
+            if (va > 1.0 && vb > 1.0 && std::fabs(va - vb) > 0.05 * vb) {
+                return va < vb;
+            }
         }
         const auto& ca = a.bravais[a.chosen_idx];
         const auto& cb = b.bravais[b.chosen_idx];
@@ -652,17 +730,16 @@ AutoIndexResult AutoIndexer::index(
         return a.chosen.fit.rmsd_hkl < b.chosen.fit.rmsd_hkl;
     };
 
-    PathPick winner;
-    if (better(delta_pick, dps_pick)) {
+    PathPick winner = dps_pick;
+    if (better(delta_pick, winner)) {
         winner = delta_pick;
-    } else if (dps_pick.ok) {
-        winner = dps_pick;
-    } else if (delta_pick.ok) {
-        winner = delta_pick;
+    }
+    if (better(fft_pick, winner)) {
+        winner = fft_pick;
     }
 
     if (!winner.ok) {
-        // DPS failed and Δ-vector found nothing usable.
+        // All paths failed.
         if (ierr != 0) {
             return result;
         }
@@ -673,7 +750,7 @@ AutoIndexResult AutoIndexer::index(
         return result;
     }
 
-    // Δ-vector alone can recover when DPS ierr ≠ 0.
+    // Δ-vector / FFT can recover when DPS ierr ≠ 0.
     result.ierr = 0;
     result.bravais = winner.bravais;
     result.amat = winner.chosen.amat;

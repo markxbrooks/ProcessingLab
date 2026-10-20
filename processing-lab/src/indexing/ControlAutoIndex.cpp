@@ -42,6 +42,8 @@ void run_autoindex(control::ControlState& state) {
     settings.sepmin = state.autoindex.sepmin;
     settings.cluster_radius = state.autoindex.cluster_radius;
     settings.use_diff_vector = state.autoindex.use_diff_vector;
+    settings.use_fft3d = state.autoindex.use_fft3d;
+    settings.use_dps = state.autoindex.use_dps;
     settings.min_indexed_frac = state.autoindex.min_indexed_frac;
 
     const AutoIndexResult result = AutoIndexer{}.index(spots, geo, settings);

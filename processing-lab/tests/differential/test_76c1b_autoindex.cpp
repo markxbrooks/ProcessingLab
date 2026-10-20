@@ -104,7 +104,7 @@ int main() {
     }
 
     session.parse_line(
-        "AUTOINDEX DPS THRESHOLD 12 HKLDEV 0.3 NVECT 40 NVREF 40 FILE " +
+        "AUTOINDEX DPS THRESHOLD 12 HKLDEV 0.3 NVECT 40 NVREF 40 FFT FILE " +
         (work / "76c1b.spt").string()
     );
     {

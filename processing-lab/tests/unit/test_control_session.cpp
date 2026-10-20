@@ -111,6 +111,22 @@ int main() {
 
     {
         ControlSession s;
+        CHECK(s.state().autoindex.use_fft3d);
+        CHECK(s.state().autoindex.use_dps);
+        s.parse_line("AUTOINDEX NOFFT FILE spots.spt");
+        CHECK(!s.state().autoindex.use_fft3d);
+        s.parse_line("AUTOINDEX FFTONLY FILE spots.spt");
+        CHECK(s.state().autoindex.use_fft3d);
+        CHECK(!s.state().autoindex.use_dps);
+        CHECK(!s.state().autoindex.use_diff_vector);
+        s.parse_line("AUTOINDEX DPSONLY FILE spots.spt");
+        CHECK(s.state().autoindex.use_dps);
+        CHECK(!s.state().autoindex.use_fft3d);
+        CHECK(!s.state().autoindex.use_diff_vector);
+    }
+
+    {
+        ControlSession s;
         CHECK(std::fabs(s.state().min_fractioncalc - 0.5) < 1e-12);
         s.parse_line("MINFRAC 0.25");
         CHECK(std::fabs(s.state().min_fractioncalc - 0.25) < 1e-12);
