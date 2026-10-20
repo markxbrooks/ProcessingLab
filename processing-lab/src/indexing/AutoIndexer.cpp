@@ -396,7 +396,11 @@ AutoIndexResult AutoIndexer::index(
             }
             const auto& c = pick.bravais[idx];
             const struct matrix_3x3 om_pick = eigen_to_dps(c.orientation);
-            ts.amat = amat_from_dps_om(om_pick, geometry.wavelength_A);
+            // DPS OMs sit in the permuted a9 frame; Δ-vector/FFT3D OMs are
+            // reciprocal rows in the x/y/z frame (their raw AMAT is OMᵀ).
+            ts.amat = (method == "dps")
+                ? amat_from_dps_om(om_pick, geometry.wavelength_A)
+                : Eigen::Matrix3d(c.orientation.transpose());
             struct cell_struct cell2{};
             dircell_from_om(om_pick, &cell2);
             ts.cell = cell_from_dps(cell2);
@@ -466,6 +470,12 @@ AutoIndexResult AutoIndexer::index(
                     const double fb = b.fit.indexed_frac;
                     if (std::fabs(fa - fb) > 0.05) {
                         return fa > fb;
+                    }
+                    // Trials are all within LASTGOOD: highest symmetry wins.
+                    const int ra = crystal_class_rank(ca.system_id);
+                    const int rb = crystal_class_rank(cb.system_id);
+                    if (ra != rb) {
+                        return ra > rb;
                     }
                     const int pa = monoclinic_prefer_key(ca.system_id);
                     const int pb = monoclinic_prefer_key(cb.system_id);

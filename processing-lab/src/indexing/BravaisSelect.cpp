@@ -445,8 +445,18 @@ std::size_t select_bravais_after_idxref(
     }
 
     // Accept higher symmetry only if metric matches and criterion is not junk.
-    const float crit_cut =
+    float crit_cut =
         std::max(max_penalty, ap_crit < 1e20f ? (ap_crit + 25.0f) : 25.0f);
+    // A Mosflm LASTGOOD penalty jump admits everything below it, as in
+    // select_suggested_bravais (real-data raw goofs sit far above 50).
+    const int lastgood = find_lastgood_rank(candidates);
+    if (lastgood > 1) {
+        const auto order = order_by_penalty(candidates);
+        crit_cut = std::max(
+            crit_cut,
+            candidates[order[static_cast<std::size_t>(lastgood - 1)]].criterion
+        );
+    }
     std::size_t best = ap_idx;
     int best_rank = (ap_idx != static_cast<std::size_t>(-1))
                         ? crystal_class_rank("aP")
@@ -463,7 +473,12 @@ std::size_t select_bravais_after_idxref(
         if (c.criterion > crit_cut) {
             continue;
         }
-        if (!lattice_metric_acceptable(c.system_id, refined_cell)) {
+        // Gate on the candidate's own conventional cell: the aP cell's axis
+        // order (and centring) need not match the candidate setting.
+        const UnitCell own = cell_from_dps_om(c.orientation);
+        if (!lattice_metric_acceptable(
+                c.system_id, own.is_valid() ? own : refined_cell
+            )) {
             continue;
         }
         const int rank = crystal_class_rank(c.system_id);

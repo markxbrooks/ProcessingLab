@@ -71,11 +71,13 @@ namespace mosflm::indexing {
 );
 
 /// Post-IDXREF Bravais pick: keep refined aP unless a higher-symmetry
-/// character passes :func:`lattice_metric_acceptable` and has a low criterion.
-/// Prefers t/o/h/c over m when several pass. Honours ``prefer_*`` like
-/// :func:`select_suggested_bravais`.
+/// character passes :func:`lattice_metric_acceptable` on its own conventional
+/// cell and has a low criterion (≤ soft cut, or ≤ the LASTGOOD penalty when a
+/// jump is found). Prefers t/o/h/c over m when several pass. Honours
+/// ``prefer_*`` like :func:`select_suggested_bravais`.
 ///
-/// \param refined_cell Cell used for the metric gate (IDXREF result).
+/// \param refined_cell Fallback metric-gate cell (IDXREF result) when a
+///     candidate orientation is degenerate.
 /// \return Index into ``candidates``, or ``npos`` if empty.
 [[nodiscard]] std::size_t select_bravais_after_idxref(
     const std::vector<BravaisCandidate>& candidates,
