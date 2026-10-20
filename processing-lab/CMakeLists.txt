@@ -293,6 +293,7 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             src/indexing/LocalIndexAssign.cpp
             src/indexing/IdxrefRefine.cpp
             src/indexing/SpotToRlp.cpp
+            src/indexing/SupercellReduce.cpp
             src/indexing/ControlAutoIndex.cpp
             src/indexing/ControlFindSpots.cpp
         )
@@ -1090,6 +1091,16 @@ if(BUILD_TESTING)
         add_test(
             NAME diff_vector_index
             COMMAND test_diff_vector_index
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_supercell_reduce
+            tests/unit/test_supercell_reduce.cpp
+        )
+        target_link_libraries(test_supercell_reduce PRIVATE mosflm_indexing)
+        add_test(
+            NAME supercell_reduce
+            COMMAND test_supercell_reduce
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
 
