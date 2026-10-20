@@ -183,6 +183,8 @@ DiffVectorResult find_diff_vector_basis(
             return a.center.squaredNorm() < b.center.squaredNorm();
         }
     );
+    // Keep a long list for basis shortening; rank/truncated a working set.
+    std::vector<DiffVectorCluster> clusters_all = clusters;
     const std::size_t cluster_cap =
         std::max(settings.max_clusters, static_cast<std::size_t>(120));
     if (clusters.size() > cluster_cap) {
@@ -390,6 +392,119 @@ DiffVectorResult find_diff_vector_basis(
 
     if (best_explained_frac < 0.0 || best_explained < 10) {
         return result;
+    }
+
+    // Adjust basis length along each axis by integer factors of cluster
+    // vectors. Superlattice (too-large direct cell) ⇒ reciprocal too short
+    // ⇒ lengthen; sublattice ⇒ shorten.
+    {
+        Eigen::Vector3d b[3] = {
+            best_om.row(0), best_om.row(1), best_om.row(2)
+        };
+        Eigen::Matrix3d B0;
+        B0.col(0) = b[0];
+        B0.col(1) = b[1];
+        B0.col(2) = b[2];
+        const double vol0 = 1.0 / std::max(1e-18, std::fabs(B0.determinant()));
+
+        auto try_replace = [&](int i, const Eigen::Vector3d& neu) -> bool {
+            Eigen::Vector3d trial[3] = {b[0], b[1], b[2]};
+            trial[i] = neu;
+            if (trial[i].dot(b[i]) < 0.0) {
+                trial[i] = -trial[i];
+            }
+            if (!nearly_independent(trial[0], trial[1], trial[2], min_det)) {
+                return false;
+            }
+            Eigen::Matrix3d Bt;
+            Bt.col(0) = trial[0];
+            Bt.col(1) = trial[1];
+            Bt.col(2) = trial[2];
+            const double vol = 1.0 / std::fabs(Bt.determinant());
+            if (vol > 2.0e7 || vol < 5.0e3) {
+                return false;
+            }
+            // Do not collapse the cell volume by >2.5× (lengthen overshoot).
+            if (vol < vol0 / 2.5) {
+                return false;
+            }
+            Eigen::FullPivLU<Eigen::Matrix3d> lu(Bt);
+            if (!lu.isInvertible()) {
+                return false;
+            }
+            const Eigen::Matrix3d Binv = lu.inverse();
+            int explained = 0;
+            for (const auto& c2 : clusters) {
+                const Eigen::Vector3d hkl = Binv * c2.center;
+                double max_dev = 0.0;
+                for (int k = 0; k < 3; ++k) {
+                    max_dev = std::max(
+                        max_dev, std::fabs(hkl[k] - std::round(hkl[k]))
+                    );
+                }
+                if (max_dev <= static_cast<double>(settings.index_tol)) {
+                    explained += c2.count;
+                }
+            }
+            if (explained + 5 < best_explained) {
+                return false;
+            }
+            b[0] = trial[0];
+            b[1] = trial[1];
+            b[2] = trial[2];
+            best_explained = std::max(best_explained, explained);
+            best_om.row(0) = b[0];
+            best_om.row(1) = b[1];
+            best_om.row(2) = b[2];
+            return true;
+        };
+
+        bool changed = true;
+        int guard = 0;
+        while (changed && guard++ < 10) {
+            changed = false;
+            for (int i = 0; i < 3; ++i) {
+                const double bi_len = b[i].norm();
+                if (!(bi_len > 1e-12)) {
+                    continue;
+                }
+                const Eigen::Vector3d bi_u = b[i] / bi_len;
+                for (const auto& cl : clusters_all) {
+                    const double cl_len = cl.center.norm();
+                    if (cl_len < len_lo || cl_len > len_hi) {
+                        continue;
+                    }
+                    const Eigen::Vector3d cu = cl.center / cl_len;
+                    if (std::fabs(bi_u.dot(cu)) < 0.97) {
+                        continue;
+                    }
+                    // Lengthen: cluster ≈ n * b_i (fix too-large direct edge).
+                    {
+                        const double ratio = cl_len / bi_len;
+                        const int n = static_cast<int>(std::lround(ratio));
+                        if (n >= 2 && n <= 8 &&
+                            std::fabs(ratio - static_cast<double>(n)) <= 0.12) {
+                            if (try_replace(i, cl.center)) {
+                                changed = true;
+                                break;
+                            }
+                        }
+                    }
+                    // Shorten: b_i ≈ n * cluster (fix too-small direct edge).
+                    {
+                        const double ratio = bi_len / cl_len;
+                        const int n = static_cast<int>(std::lround(ratio));
+                        if (n >= 2 && n <= 8 &&
+                            std::fabs(ratio - static_cast<double>(n)) <= 0.12) {
+                            if (try_replace(i, cl.center)) {
+                                changed = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     result.reciprocal_om = best_om;

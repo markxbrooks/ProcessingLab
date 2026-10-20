@@ -61,22 +61,38 @@ Recommended CONTROL for indexing:
 ```text
 FINDSPOTS THRESHOLD 5 MAXSPOTS 1500 FIND 1 FILE spots.spt MULTIFRAME RANGE 1 50
 GO
-AUTOINDEX DPS THRESHOLD 15 …
+AUTOINDEX DPS THRESHOLD 15 SEPMIN 6 CLUSTER_RADIUS 2 …
 GO
 ```
 
 `MULTIFRAME` without `RANGE` defaults to a 50-frame wedge from `FIND`.
 For CBF/SMV templates, each frame path is resolved separately (HDF5 masters
-still use the frame index). Default `MERGE_XY 0` keeps per-frame 3D spots;
-set `MERGE_XY` / `MERGE_PHI` only when clustering persistent peaks.
+still use the frame index). Default `MERGE_XY 0` keeps per-frame 3D spots
+and **φ-stratifies** `MAXSPOTS` so the brightest frames do not starve later φ.
+Set `MERGE_XY` / `MERGE_PHI` only when clustering persistent peaks.
 DiffractionLab `build_findspots_commands(..., for_indexing=True)` emits the
 same MULTIFRAME pattern with `MAXSPOTS 1500`.
 
-After DPS + Bravais SUGGLATT, ProcessingLab applies a BESTSOLAR-lite gate
-(`%indexed` / RMSD HKL) and may fall back among LASTGOOD candidates (preferring
-`mP` over a poorly indexing `mC`). Look for `INDEXFIT:` / `PROCESSINGLAB_INDEXED`
-in the log. If AUTOINDEX still fails, seed from Xia2/XDS with `--xparm`
+#### DPS + Kabsch Δ-vector (Wave 4)
+
+AUTOINDEX runs **DPS** and a Kabsch-style **difference-vector** lattice search
+in parallel, then ranks both with INDEXFIT (`%indexed` / RMSD HKL):
+
+| Knob | Default | Meaning |
+|------|---------|---------|
+| `SEPMIN` | 6 | XDS units of `0.001/WAVE` (Å⁻¹). Auto-capped via `DMAX` so large-cell `\|b*\|` is not excluded. |
+| `CLUSTER_RADIUS` | 2 | Same units as SEPMIN. |
+| `MININDEXED` | 0.70 | XDS-style soft gate (≥70% indexed). Below → `INDEXFIT: INSUFFICIENT` warning. |
+| `DELTA` / `NODELTA` | on | Enable / disable the Δ-vector candidate path. |
+
+Look for `DIFFVECTOR:` / `INDEXFIT: method=dps|delta` in the log. Explicit
+`SYSTEM` / `CHARACTER` / `SOLUTION` (e.g. insulin `SOLUTION 12` → cI) keeps
+the DPS Bravais path and skips Δ-vector override.
+
+BESTSOLAR-lite among LASTGOOD still prefers `mP` over a poorly indexing `mC`.
+If AUTOINDEX still fails on short φ wedges, seed from Xia2/XDS with `--xparm`
 pointing at an **index-stage** `XPARM.XDS` (not a prior bad ProcessingLab
-`GXPARM.XDS`).
+`GXPARM.XDS`). Harden CI with `MOSFLM_76C1B_REQUIRE_CELL=1` once spot-only
+recovery is solid.
 
 Optional multi-image COLSPOT: `FINDSPOTS MULTIFRAME RANGE first last …`. Multi-frame PROCESS runs periodic post-refinement (`POSTREFINE PERIOD n`, default every 25 frames).
