@@ -3,6 +3,7 @@
 #include "mosflm/diffraction/ProcessPipeline.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
+#include "mosflm/util/OpenMP.hpp"
 
 #include <Eigen/Dense>
 
@@ -116,6 +117,9 @@ struct ControlState {
     /// Periodic post-refinement interval in frames (0 = only when
     /// ``POSTREFINE`` without PERIOD; CONTROL ``POSTREFINE PERIOD n``).
     int postrefine_period{25};
+    /// OpenMP worker count for MULTIFRAME FINDSPOTS / PROCESS (CONTROL
+    /// ``NPROC``). Default from ``PROCESSINGLAB_NPROC`` or hardware.
+    int nproc{mosflm::util::default_nproc()};
 
     UnitCell cell{78.19, 78.19, 78.19, 90.0, 90.0, 90.0};
     int symmetry_number{1};

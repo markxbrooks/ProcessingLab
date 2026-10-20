@@ -59,7 +59,8 @@ CCP4) enables `Hdf5ImageReader` for Dectris Eiger NeXus masters
   testdata/images/known_indexed/cpp_process.in
 # Find spots → .spt → AUTOINDEX → multi-frame PROCESS (HDF5 master):
 ./build/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/master.h5 <<'EOF'
-FINDSPOTS THRESHOLD 5 FIND 1 FILE spots.spt
+NPROC 8
+FINDSPOTS THRESHOLD 5 FIND 1 FILE spots.spt MULTIFRAME RANGE 1 50
 GO
 AUTOINDEX DPS THRESHOLD 20
 GO
@@ -67,6 +68,7 @@ PROCESS 1 TO 10
 GO
 EXIT
 EOF
+# OpenMP: brew install libomp (Apple Clang). See docs/XDS_BRIDGE.md § NPROC.
 # Wall-time vs F77 ipmosflm (CCP4 default /apps/ccp4/ccp4-9/bin/ipmosflm):
 ./tools/bench_ipmosflm_perf.sh
 # or: ctest --test-dir build -R ipmosflm_perf --output-on-failure

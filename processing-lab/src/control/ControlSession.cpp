@@ -9,6 +9,7 @@
 #include "mosflm/io/XparmIO.hpp"
 #include "mosflm/image/ImageIO.hpp"
 #include "mosflm/refinement/PostRefinement.hpp"
+#include "mosflm/util/OpenMP.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -19,7 +20,9 @@
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace mosflm::control {
 namespace {
@@ -607,6 +610,18 @@ void ControlSession::apply_keyword(
         } else {
             state_.auto_sigma_msd = false;
         }
+        return;
+    }
+    if (key == "NPROC" || key == "THREADS" || key == "NTHREADS") {
+        if (args.empty() || upper(args[0]) == "OFF" || upper(args[0]) == "1") {
+            state_.nproc = 1;
+        } else {
+            state_.nproc = std::max(1, std::min(require_int(args[0], "NPROC"), 32));
+        }
+        util::apply_nproc(state_.nproc);
+        std::cout << "  NPROC: " << state_.nproc << " thread(s)"
+                  << (util::openmp_enabled() ? " (OpenMP)" : " (serial build)")
+                  << '\n';
         return;
     }
     if (key == "POSTREFINE" || key == "POSTREFL") {
@@ -1797,45 +1812,118 @@ ControlGoResult ControlSession::go(
         state_.enable_postrefinement;
     bool autosigma_done = false;
 
-    for (int frame = first; frame <= last; ++frame) {
-        if (!batch_header_printed ||
-            (frame - batch_first) >= k_log_batch) {
-            if (batch_header_printed) {
-                print_process_batch_footer(batch_integrated, state_);
-                if (!autosigma_done && state_.auto_sigma_msd) {
-                    autosigma_done = auto_estimate_sigma_msd(
-                        state_, acc, osc_log
-                    );
-                    sigmar = state_.mosaic_deg;
-                    sigmab =
-                        state_.has_divergence
-                            ? 0.5 * std::max(state_.divh_deg, state_.divv_deg)
-                            : 0.0;
-                }
-                batch_integrated = 0;
-                batch_first = frame;
-            }
-            const int batch_last =
-                std::min(batch_first + k_log_batch - 1, last);
-            // Symbol legend once per PROCESS; table header every batch.
-            print_process_batch_banner(
-                batch_first, batch_last, /*print_symbols=*/!batch_header_printed
-            );
-            batch_header_printed = true;
+    util::apply_nproc(state_.nproc);
+    const int nproc = std::max(1, state_.nproc);
+    // Chunk size matches POSTREFINE period so AMAT/MOSAIC stay frozen inside
+    // an OpenMP region; barriers stay serial.
+    const int chunk_size =
+        want_periodic_postref
+            ? std::max(1, state_.postrefine_period)
+            : (last - first + 1);
+    if (multi && nproc > 1) {
+        std::cout << "  NPROC: PROCESS OpenMP " << nproc
+                  << " thread(s), chunk=" << chunk_size << '\n';
+    }
+
+    struct FrameOutcome {
+        diffraction::ProcessResult result{};
+        crystal::CrystalMetadata crystal{};
+        ProcessImageStats stats{};
+        std::string error;
+        bool ok{false};
+    };
+
+    for (int chunk0 = first; chunk0 <= last; chunk0 += chunk_size) {
+        const int chunk1 = std::min(chunk0 + chunk_size - 1, last);
+        const int n_chunk = chunk1 - chunk0 + 1;
+        std::vector<FrameOutcome> outcomes(
+            static_cast<std::size_t>(n_chunk)
+        );
+
+        // Snapshot geometry for this chunk (state_ must not mutate in parallel).
+        const double chunk_sigmab = sigmab;
+        const double chunk_sigmar = sigmar;
+        if (multi && n_chunk > 1) {
+            std::cout << "  PROCESS: frames " << chunk0 << "-" << chunk1
+                      << " (nproc=" << nproc << ") …" << std::flush;
         }
 
-        ProcessImageStats stats;
-        try {
-            const auto img_path = resolve_image_path(image_override, frame);
-            const auto image =
-                (frame == first)
-                    ? image0
-                    : image::read_diffraction_image(img_path, frame);
-            auto req = make_process_request(image, frame);
-            crystal = req.crystal;
-            auto one = pipe.run(req);
-            stats = make_process_image_stats(one, sigmab, sigmar);
-            batch_integrated += stats.n_integrated;
+#if defined(PROCESSINGLAB_HAS_OPENMP) && PROCESSINGLAB_HAS_OPENMP
+#pragma omp parallel for num_threads(nproc) schedule(dynamic, 1) \
+    if (nproc > 1 && n_chunk > 1)
+#endif
+        for (int frame = chunk0; frame <= chunk1; ++frame) {
+            const std::size_t i =
+                static_cast<std::size_t>(frame - chunk0);
+            FrameOutcome& outc = outcomes[i];
+            try {
+                const auto img_path =
+                    resolve_image_path(image_override, frame);
+                const auto image =
+                    (frame == first)
+                        ? image0
+                        : image::read_diffraction_image(img_path, frame);
+                auto req = make_process_request(image, frame);
+                outc.crystal = req.crystal;
+                diffraction::ProcessPipeline local_pipe;
+                auto one = local_pipe.run(req);
+                outc.stats =
+                    make_process_image_stats(one, chunk_sigmab, chunk_sigmar);
+                outc.result = std::move(one);
+                outc.ok = true;
+            } catch (const std::exception& ex) {
+                outc.ok = false;
+                outc.error = ex.what();
+                outc.stats.ier = -1;
+                outc.stats.sigmab = chunk_sigmab;
+                outc.stats.sigmar = chunk_sigmar;
+            }
+        }
+        if (multi && n_chunk > 1) {
+            std::cout << " done\n";
+        }
+
+        // Serial: logging, append, postrefine, AUTOSIGMA (frame order).
+        for (int frame = chunk0; frame <= chunk1; ++frame) {
+            if (!batch_header_printed ||
+                (frame - batch_first) >= k_log_batch) {
+                if (batch_header_printed) {
+                    print_process_batch_footer(batch_integrated, state_);
+                    if (!autosigma_done && state_.auto_sigma_msd) {
+                        autosigma_done = auto_estimate_sigma_msd(
+                            state_, acc, osc_log
+                        );
+                        sigmar = state_.mosaic_deg;
+                        sigmab = state_.has_divergence
+                                     ? 0.5 * std::max(
+                                           state_.divh_deg, state_.divv_deg
+                                       )
+                                     : 0.0;
+                    }
+                    batch_integrated = 0;
+                    batch_first = frame;
+                }
+                const int batch_last =
+                    std::min(batch_first + k_log_batch - 1, last);
+                print_process_batch_banner(
+                    batch_first, batch_last,
+                    /*print_symbols=*/!batch_header_printed
+                );
+                batch_header_printed = true;
+            }
+
+            const std::size_t i =
+                static_cast<std::size_t>(frame - chunk0);
+            FrameOutcome& outc = outcomes[i];
+            if (!outc.ok) {
+                print_process_image_row(frame, outc.stats);
+                std::cout << " *** IER=-1: " << outc.error << "\n";
+                throw std::runtime_error(outc.error);
+            }
+            batch_integrated += outc.stats.n_integrated;
+            if (n_frames == 0) {
+                crystal = outc.crystal;
+            }
             if (want_periodic_postref) {
                 const int period = std::max(1, state_.postrefine_period);
                 const bool due =
@@ -1844,23 +1932,21 @@ ControlGoResult ControlSession::go(
                         : ((frame - first) % period == period - 1 ||
                            frame == last);
                 if (due) {
-                    postrefine_from_observations(state_, one, req.detector);
+                    const auto img_path =
+                        resolve_image_path(image_override, frame);
+                    const auto image =
+                        (frame == first)
+                            ? image0
+                            : image::read_diffraction_image(img_path, frame);
+                    auto req = make_process_request(image, frame);
+                    postrefine_from_observations(
+                        state_, outc.result, req.detector
+                    );
                 }
             }
-            append_process_result(acc, std::move(one), frame);
-        } catch (const std::exception& ex) {
-            stats.ier = -1;
-            stats.sigmab = sigmab;
-            stats.sigmar = sigmar;
-            print_process_image_row(frame, stats);
-            std::cout << " *** IER=-1: " << ex.what() << "\n";
-            throw;
-        }
-        print_process_image_row(frame, stats);
-        ++n_frames;
-
-        if (!multi && frame == last) {
-            // Single-frame: still show the one-row table + footer.
+            print_process_image_row(frame, outc.stats);
+            append_process_result(acc, std::move(outc.result), frame);
+            ++n_frames;
         }
     }
 

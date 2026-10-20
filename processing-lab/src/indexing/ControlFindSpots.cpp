@@ -128,6 +128,7 @@ void run_findspots(
         mfs.merge_phi_tol_deg = state.findspots.merge_phi_tol_deg;
         mfs.min_frames = state.findspots.min_frames;
         mfs.max_spots = state.findspots.max_spots;
+        mfs.nproc = state.nproc;
         // CBF/SMV ignore the frame argument to read_diffraction_image — resolve
         // TEMPLATE / IMAGE path for each frame index (HDF5 masters still use f).
         spots = find_spots_multiframe(

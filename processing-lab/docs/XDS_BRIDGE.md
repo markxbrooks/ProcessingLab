@@ -96,3 +96,25 @@ pointing at an **index-stage** `XPARM.XDS` (not a prior bad ProcessingLab
 recovery is solid.
 
 Optional multi-image COLSPOT: `FINDSPOTS MULTIFRAME RANGE first last …`. Multi-frame PROCESS runs periodic post-refinement (`POSTREFINE PERIOD n`, default every 25 frames).
+
+### NPROC (OpenMP frame parallelism)
+
+When built with OpenMP (`brew install libomp` on macOS), CONTROL `NPROC n`
+(aliases `THREADS` / `NTHREADS`) parallelizes:
+
+| Stage | How |
+|-------|-----|
+| `FINDSPOTS MULTIFRAME` | `#pragma omp parallel for` over frames; quota / merge stays serial |
+| `PROCESS first TO last` | Parallel inside each `POSTREFINE PERIOD` chunk; postrefine + `AUTOSIGMA` stay serial barriers |
+
+`NPROC OFF` / `1` forces serial. Default is `PROCESSINGLAB_NPROC` env, else
+hardware max (clamped to 32). Serial builds ignore `NPROC` (log shows
+`(serial build)`). Example:
+
+```text
+NPROC 8
+FINDSPOTS … MULTIFRAME RANGE 1 50
+…
+PROCESS 1 TO 900
+GO
+```

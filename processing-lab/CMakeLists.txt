@@ -133,6 +133,40 @@ else()
     message(WARNING "HDF5 not found — Hdf5ImageReader stub only")
 endif()
 
+# Optional OpenMP for frame-level FINDSPOTS / PROCESS parallelism.
+# Apple Clang needs Homebrew libomp (-Xpreprocessor -fopenmp); plain
+# find_package(OpenMP) often fails without hints.
+if(APPLE AND NOT OpenMP_CXX_FOUND)
+    foreach(_omp_prefix
+            "$ENV{HOMEBREW_PREFIX}/opt/libomp"
+            /opt/homebrew/opt/libomp
+            /usr/local/opt/libomp)
+        if(EXISTS "${_omp_prefix}/lib/libomp.dylib")
+            set(OpenMP_CXX_FLAGS
+                "-Xpreprocessor -fopenmp -I${_omp_prefix}/include"
+                CACHE STRING "OpenMP CXX flags" FORCE)
+            set(OpenMP_C_FLAGS
+                "-Xpreprocessor -fopenmp -I${_omp_prefix}/include"
+                CACHE STRING "OpenMP C flags" FORCE)
+            set(OpenMP_CXX_LIB_NAMES "omp" CACHE STRING "OpenMP CXX libs" FORCE)
+            set(OpenMP_C_LIB_NAMES "omp" CACHE STRING "OpenMP C libs" FORCE)
+            set(OpenMP_omp_LIBRARY "${_omp_prefix}/lib/libomp.dylib"
+                CACHE FILEPATH "libomp" FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+find_package(OpenMP)
+set(MOSFLM_HAS_OPENMP OFF)
+if(OpenMP_CXX_FOUND)
+    set(MOSFLM_HAS_OPENMP ON)
+    message(STATUS "OpenMP found — enabling NPROC frame parallelism")
+else()
+    message(WARNING
+        "OpenMP not found — NPROC runs serial "
+        "(macOS: brew install libomp)")
+endif()
+
 set(MOSFLM_GEOMETRY_SOURCES
     src/geometry/UnitCell.cpp
     src/geometry/CellFix.cpp
@@ -209,6 +243,13 @@ target_compile_definitions(mosflm_geometry
     PUBLIC
         GEMMI_WRITE_IMPLEMENTATION
 )
+
+if(MOSFLM_HAS_OPENMP)
+    target_link_libraries(mosflm_geometry PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(mosflm_geometry
+        PUBLIC PROCESSINGLAB_HAS_OPENMP=1
+    )
+endif()
 
 if(MOSFLM_HAS_HDF5)
     target_include_directories(mosflm_geometry PRIVATE
@@ -487,6 +528,12 @@ if(BUILD_TESTING)
         COMMAND test_control_session
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
+
+    add_executable(test_openmp_nproc
+        tests/unit/test_openmp_nproc.cpp
+    )
+    target_link_libraries(test_openmp_nproc PRIVATE mosflm_geometry)
+    add_test(NAME openmp_nproc COMMAND test_openmp_nproc)
 
     add_executable(test_xinfo_xds_import
         tests/unit/test_xinfo_xds_import.cpp

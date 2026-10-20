@@ -27,20 +27,24 @@ SpotList find_spots_multiframe(
     const FrameLoader& load,
     const MultiFrameSpotSettings& settings
 ) {
-    SpotFinder finder;
-    SpotListHeader header;
     const int n_frames = std::max(1, last_frame - first_frame + 1);
     // Cap per-frame peak search — 50×MAXSPOTS full-detector NMS crawls.
     // Over-sample ×3 so intensity ranking across frames still fills the budget.
     const int per_frame_cap = std::max(
         40, (settings.max_spots * 3 + n_frames - 1) / n_frames
     );
+    const int nproc = std::max(1, settings.nproc);
 
     // Collect per-frame lists so we can stratify by frame (not fragile φ).
     std::vector<std::vector<Spot>> by_frame(
         static_cast<std::size_t>(n_frames)
     );
-    std::size_t n_raw = 0;
+    std::vector<SpotListHeader> headers(static_cast<std::size_t>(n_frames));
+
+#if defined(PROCESSINGLAB_HAS_OPENMP) && PROCESSINGLAB_HAS_OPENMP
+#pragma omp parallel for num_threads(nproc) schedule(dynamic, 1) \
+    if (nproc > 1 && n_frames > 1)
+#endif
     for (int f = first_frame; f <= last_frame; ++f) {
         const auto image = load(f);
         SpotFindSettings fs = settings.per_frame;
@@ -51,18 +55,21 @@ SpotList find_spots_multiframe(
             fs.phi_end_deg =
                 fs.phi_start_deg + image.metadata.oscillation_range_deg;
         }
-        auto list = finder.find(image, fs);
-        if (f == first_frame) {
-            header = list.header;
-        }
+        // Thread-local finder (find is const, but avoid any shared mutable).
+        auto list = SpotFinder{}.find(image, fs);
         const std::size_t idx =
             static_cast<std::size_t>(f - first_frame);
-        n_raw += list.spots.size();
+        headers[idx] = list.header;
         by_frame[idx] = std::move(list.spots);
     }
 
+    std::size_t n_raw = 0;
+    for (const auto& spots : by_frame) {
+        n_raw += spots.size();
+    }
+
     SpotList out;
-    out.header = header;
+    out.header = headers.empty() ? SpotListHeader{} : headers.front();
 
     // No merge: keep 3D (xy,φ) observations — needed for large-cell DPS.
     if (settings.merge_xy_mm <= 0.0) {

@@ -100,6 +100,17 @@ int main() {
 
     {
         ControlSession s;
+        CHECK(s.state().nproc >= 1);
+        s.parse_line("NPROC 4");
+        CHECK_EQ(s.state().nproc, 4);
+        s.parse_line("NPROC OFF");
+        CHECK_EQ(s.state().nproc, 1);
+        s.parse_line("THREADS 8");
+        CHECK_EQ(s.state().nproc, 8);
+    }
+
+    {
+        ControlSession s;
         CHECK(std::fabs(s.state().min_fractioncalc - 0.5) < 1e-12);
         s.parse_line("MINFRAC 0.25");
         CHECK(std::fabs(s.state().min_fractioncalc - 0.25) < 1e-12);

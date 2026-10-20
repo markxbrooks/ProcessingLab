@@ -20,6 +20,8 @@ struct MultiFrameSpotSettings {
     /// Minimum number of frames a merged spot must appear on.
     int min_frames{1};
     int max_spots{2000};
+    /// OpenMP threads for per-frame load+find (1 = serial).
+    int nproc{1};
 };
 
 /// Load frames via ``read_frame(frame_1based) → DiffractionImage``.
