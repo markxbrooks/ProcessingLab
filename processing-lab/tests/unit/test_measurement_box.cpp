@@ -6,6 +6,7 @@
 #include "mosflm/diffraction/ReflectionPredictor.hpp"
 #include "test_util.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -16,6 +17,7 @@ using mosflm::diffraction::MeasIntegrator;
 using mosflm::diffraction::MeasurementBoxSettings;
 using mosflm::diffraction::PredictedReflection;
 using mosflm::diffraction::fit_background_plane;
+using mosflm::diffraction::poisson_upper_limit;
 using mosflm::image::DiffractionImage;
 
 int main() {
@@ -124,6 +126,29 @@ int main() {
     CHECK_CLOSE(plane.a, 2.0, 1e-6);
     CHECK_CLOSE(plane.b, 3.0, 1e-6);
     CHECK_CLOSE(plane.c, 50.0, 1e-6);
+
+    // Poisson upper limit: λ = 0.1 keeps 0–2 counts, rejects ≥ 3.
+    CHECK_CLOSE(poisson_upper_limit(0.1, 3.0), 2.0, 1e-12);
+    CHECK_CLOSE(poisson_upper_limit(400.0, 3.0), 460.0, 1e-9);
+    CHECK(poisson_upper_limit(20.0, 3.0) >= 20.0 + 3.0 * std::sqrt(20.0) - 1.0);
+
+    // Sparse photon-counting rim (≈10% of pixels hold 1 count): the clipped
+    // plane must keep the 1-count pixels, not collapse to c = 0.
+    DiffractionImage sparse;
+    sparse.metadata.width = 32;
+    sparse.metadata.height = 32;
+    sparse.pixels.assign(32u * 32u, 0);
+    for (std::size_t i = 0; i < sparse.pixels.size(); i += 10) {
+        sparse.pixels[i] = 1;
+    }
+    const auto sp_plane =
+        fit_background_plane(sparse, 16, 16, 1, 6, empty, empty, 3.0);
+    CHECK(sp_plane.ok);
+    CHECK_MSG(
+        sp_plane.c > 0.05 && sp_plane.c < 0.15,
+        "sparse plane c " + mosflm_test::fmt(sp_plane.c)
+    );
+    CHECK_EQ(sp_plane.n_rejected, 0);
 
     return mosflm_test::finish("measurement_box");
 }

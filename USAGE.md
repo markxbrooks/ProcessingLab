@@ -109,7 +109,7 @@ it and writes `XPARM.XDS`; `GO` after `PROCESS` integrates and writes MTZ /
 | `IMAGE` | Single-frame path. |
 | `TEMPLATE` | Multi-frame basename with `#` digits (`76c1b_1_####.cbf`). |
 | `PROCESS first TO last [START φ] [ANGLE Δφ]` | Frames to integrate. `START`/`ANGLE` override header φ. |
-| `DMIN` / `DMAX` / `RESOLUTION` | Predictor resolution limits (Å). Default `DMIN` 1.45. |
+| `DMIN` / `DMAX` / `RESOLUTION` | Predictor resolution limits (Å). Unset `DMIN` uses the farthest inset detector corner. An explicit value overrides that. |
 | `PHI_OFFSET` | Added to every frame’s φ. |
 
 ### Spot search and indexing

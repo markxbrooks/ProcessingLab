@@ -49,6 +49,40 @@ struct DetectorGeometry {
 };
 
 /**
+ * Highest resolution (smallest d, Å) among the four panel corners.
+ *
+ * Corners are inset by ``margin_px``. ``beam_x_mm`` / ``beam_y_mm`` are the
+ * beam in millimetres from the panel origin. PROCESS leaves
+ * ``DetectorGeometry::beam_*`` at 0, so the beam is passed separately.
+ * The result is reduced by a relative 1e-4 so ``d < dmin`` keeps a reflection
+ * that lands on that pixel. Returns 0 when the geometry cannot be used.
+ */
+[[nodiscard]] double detector_corner_dmin_A(
+    const DetectorGeometry& det,
+    double beam_x_mm,
+    double beam_y_mm,
+    double margin_px
+);
+
+/**
+ * True when a beam-relative C++ detector position (mm) lies on the panel.
+ *
+ * ``use_panel_beam`` false: square centered on the beam,
+ * ``|pixel| < n/2 - margin`` (legacy fixtures, beam at the panel centre).
+ * ``use_panel_beam`` true: MOSFLM ``XDET``/``YDET`` inside
+ * ``[margin, n - margin)``.
+ */
+[[nodiscard]] bool spot_on_panel(
+    const DetectorGeometry& det,
+    double x_mm,
+    double y_mm,
+    double margin_px,
+    bool use_panel_beam,
+    double panel_beam_x_mm,
+    double panel_beam_y_mm
+);
+
+/**
  * MOSFLM ``ROTMAT2``: detector normal from TILT/TWIST (radians).
  *
  * ``DETNOR = (sin(-TILT), sin(-TWIST)·cos(-TILT), cos(-TWIST)·cos(-TILT))``

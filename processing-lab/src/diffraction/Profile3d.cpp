@@ -224,14 +224,19 @@ Background3d fit_background_3d(
                 break;
             }
             const double sd = std::sqrt(std::max(m2 / static_cast<double>(n), 1e-6));
-            const double cut = nsigma * sd;
             int dropped = 0;
             for (auto& s : samples) {
                 if (!s.keep) {
                     continue;
                 }
-                const double r = s.od - out.at(s.dc, s.dr, s.dphi);
-                if (std::fabs(r) > cut) {
+                // High outliers only: a symmetric clip on sparse Eiger
+                // counts rejects every 1-count voxel and zeroes the bg.
+                const double model = out.at(s.dc, s.dr, s.dphi);
+                const double lim = std::max(
+                    model + mean + nsigma * sd,
+                    poisson_upper_limit(model, nsigma)
+                );
+                if (s.od > lim) {
                     s.keep = false;
                     ++dropped;
                 }
@@ -379,7 +384,9 @@ std::vector<Profile3dObservation> Profile3dFitter::fit(
         pr.i_sum = i_sum;
         pr.bg_mean =
             (n_peak > 0) ? (bg_under / static_cast<double>(n_peak)) : 0.0;
-        double var = std::fabs(i_sum);
+        // Poisson: all counts in the peak (signal + background under it),
+        // plus the background-level error scaled to the peak volume.
+        double var = std::max(i_sum + bg_under, 0.0);
         if (n_peak > 0) {
             var += (static_cast<double>(n_peak * n_peak) /
                     static_cast<double>(pr.npix_bg)) *
@@ -512,6 +519,8 @@ std::vector<Profile3dObservation> Profile3dFitter::fit(
         double pr_dphi = 0.0;
         double sumprod = 0.0;
         double bg_under = 0.0;
+        double pr_p2b = 0.0;
+        double pr_p3 = 0.0;
         int n_peak = 0;
         for (int iphi = 0; iphi < nphi; ++iphi) {
             const double dphi = static_cast<double>(iphi - cphi);
@@ -531,9 +540,12 @@ std::vector<Profile3dObservation> Profile3dFitter::fit(
                     pr_1 += P;
                     pr_p2 += P * P;
                     pr_dphi += P * dphi;
-                    bg_under += pr.bg.at(
+                    const double b = pr.bg.at(
                         static_cast<double>(dc), static_cast<double>(dr), dphi
                     );
+                    bg_under += b;
+                    pr_p2b += P * P * std::max(b, 0.0);
+                    pr_p3 += P * P * P;
                     ++n_peak;
                 }
             }
@@ -549,17 +561,18 @@ std::vector<Profile3dObservation> Profile3dFitter::fit(
         const double bg_mean =
             (n_peak > 0) ? (bg_under / static_cast<double>(n_peak)) : 0.0;
         const int n_bg = std::max(1, obs.npix_bg);
-        double var = std::fabs(iprf);
+        // I = k·ΣP(od − b) with k = ΣP/ΣP²: each voxel holds Poisson counts
+        // m = b + I·P/ΣP, and the fitted background level adds
+        // (k·ΣP)²·bg/n_bg (n_peak²·bg/n_bg for a flat profile). The signed
+        // I keeps E[var] unbiased for weak spots (as raw counts do for
+        // summation); max(I, 0) would overstate σ when the true I is ~0.
+        const double k = pr_1 / pr_p2;
+        double var = k * k * (pr_p2b + iprf / pr_1 * pr_p3);
         if (n_peak > 0) {
-            var += (static_cast<double>(n_peak * n_peak) /
-                    static_cast<double>(n_bg)) *
+            var += k * k * pr_1 * pr_1 / static_cast<double>(n_bg) *
                    std::fabs(bg_mean);
         }
         obs.profile_sigma = std::sqrt(std::max(var, 1.0));
-        if (obs.summation_sigma > 0.0 &&
-            obs.profile_sigma > 3.0 * obs.summation_sigma) {
-            obs.profile_sigma = obs.summation_sigma;
-        }
         obs.pkratio =
             std::fabs(obs.summation_intensity - iprf) /
             std::max(std::fabs(iprf), 1.0);

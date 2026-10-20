@@ -24,10 +24,21 @@ struct BackgroundPlane {
 };
 
 /**
+ * Highest background count kept for an expected count ``lambda``.
+ *
+ * Returns the smallest ``k`` with Poisson ``P(X > k) < p``, where ``p`` is
+ * the one-sided Gaussian tail beyond ``nsigma``. Sparse photon-counting
+ * backgrounds (λ ≪ 1) keep their 1- and 2-count pixels: a symmetric
+ * ``nsigma·sd`` clip rejects them and drives the background to zero.
+ */
+[[nodiscard]] double poisson_upper_limit(double lambda, double nsigma);
+
+/**
  * Fit a tilted background plane in the measurement-box rim.
  *
  * Excludes the peak square and neighbour peak footprints. Optional
- * ``reject_nsigma`` iterates residual sigma-clip (BGREJECT stand-in).
+ * ``reject_nsigma`` iterates a one-sided (high) outlier clip at the larger
+ * of ``reject_nsigma·sd`` and the Poisson limit (BGREJECT stand-in).
  */
 [[nodiscard]] BackgroundPlane fit_background_plane(
     const image::DiffractionImage& image,

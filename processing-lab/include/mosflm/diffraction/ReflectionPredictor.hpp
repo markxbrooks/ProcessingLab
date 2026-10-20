@@ -78,6 +78,12 @@ struct PredictionSettings {
     /// Scale applied to mosaic+divergence when widening the Ewald gate
     /// (1 = full; 0.5 ≈ REEK-like PROCESS for insulin).
     double mosaic_ewald_scale{1.0};
+    /// When true, the on-detector test uses ``panel_beam_*`` and the real
+    /// panel rectangle. When false, a square centered on the beam (legacy
+    /// fixtures whose beam sits at the panel centre).
+    bool use_panel_beam{false};
+    double panel_beam_x_mm{0.0};
+    double panel_beam_y_mm{0.0};
     /// Rocking-curve prediction (oscillation scans only): solve the Ewald
     /// crossing φc analytically and model each reflection's rocking curve as
     /// a Gaussian in φ with σ = (mosaic + max(DIVH,DIVV)) / (2.355 ζ), where

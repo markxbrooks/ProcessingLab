@@ -1,5 +1,9 @@
 #include "mosflm/geometry/DetectorGeometry.hpp"
 
+#include "mosflm/geometry/LabFrame.hpp"
+
+#include <algorithm>
+
 namespace mosflm {
 namespace {
 
@@ -102,6 +106,87 @@ double DetectorGeometry::two_theta_deg(double x_mm, double y_mm) const {
     const double dy = y_mm - beam_y_mm;
     const double r = std::sqrt(dx * dx + dy * dy);
     return std::atan2(r, distance_mm) * (180.0 / 3.14159265358979323846);
+}
+
+double detector_corner_dmin_A(
+    const DetectorGeometry& det,
+    double beam_x_mm,
+    double beam_y_mm,
+    double margin_px
+) {
+    const double px = det.pixel_size_x_mm;
+    const double py = det.pixel_size_y_mm;
+    const double dist = det.distance_mm;
+    const double wave = det.wavelength_A;
+    if (!(px > 0.0) || !(py > 0.0) || !(dist > 0.0) || !(wave > 0.0) ||
+        det.nfast < 2 || det.nslow < 2) {
+        return 0.0;
+    }
+    const double m = std::max(0.0, margin_px);
+    const double c0 = m;
+    const double c1 = static_cast<double>(det.nfast - 1) - m;
+    const double r0 = m;
+    const double r1 = static_cast<double>(det.nslow - 1) - m;
+    if (!(c1 > c0) || !(r1 > r0)) {
+        return 0.0;
+    }
+
+    auto d_at = [&](double col, double row) -> double {
+        const double rad = std::hypot(col * px - beam_x_mm, row * py - beam_y_mm);
+        if (rad < 1e-9) {
+            return 1.0e6;
+        }
+        const double theta = 0.5 * std::atan2(rad, dist);
+        const double s = std::sin(theta);
+        if (s < 1e-12) {
+            return 1.0e6;
+        }
+        return wave / (2.0 * s);
+    };
+
+    double dmin = d_at(c0, r0);
+    dmin = std::min(dmin, d_at(c1, r0));
+    dmin = std::min(dmin, d_at(c0, r1));
+    dmin = std::min(dmin, d_at(c1, r1));
+    // Keep a reflection whose d equals the corner pixel (`d < dmin` rejects).
+    return dmin * (1.0 - 1.0e-4);
+}
+
+bool spot_on_panel(
+    const DetectorGeometry& det,
+    double x_mm,
+    double y_mm,
+    double margin_px,
+    bool use_panel_beam,
+    double panel_beam_x_mm,
+    double panel_beam_y_mm
+) {
+    const double margin = std::max(0.0, margin_px);
+    if (use_panel_beam) {
+        double xdet = 0.0;
+        double ydet = 0.0;
+        cpp_mm_to_mosflm_xdet_yscale(
+            x_mm,
+            y_mm,
+            panel_beam_x_mm,
+            panel_beam_y_mm,
+            det.pixel_size_x_mm,
+            det.pixel_size_y_mm,
+            det.yscale,
+            xdet,
+            ydet
+        );
+        const double fast_hi = static_cast<double>(det.nfast) - margin;
+        const double slow_hi = static_cast<double>(det.nslow) - margin;
+        return xdet >= margin && xdet < fast_hi && ydet >= margin &&
+               ydet < slow_hi;
+    }
+    double xf = 0.0;
+    double yf = 0.0;
+    det.mm_to_pixel(x_mm, y_mm, xf, yf);
+    const double half_f = 0.5 * static_cast<double>(det.nfast) - margin;
+    const double half_s = 0.5 * static_cast<double>(det.nslow) - margin;
+    return std::fabs(xf) < half_f && std::fabs(yf) < half_s;
 }
 
 }  // namespace mosflm

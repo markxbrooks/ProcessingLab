@@ -91,7 +91,10 @@ struct ControlState {
     double divv_deg{0.0};
     double separation_x_mm{0.57};
     double separation_y_mm{0.57};
-    double dmin_A{1.45};
+    /// High-resolution cutoff (Å). 0, or not ``dmin_explicit``, means PROCESS
+    /// uses the farthest inset detector corner.
+    double dmin_A{0.0};
+    bool dmin_explicit{false};
     double dmax_A{200.0};
     /// Predictor φ sample step (degrees); 0.025 matches known_indexed_insulin.
     double phi_step_deg{0.025};

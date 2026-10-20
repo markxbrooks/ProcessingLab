@@ -8,6 +8,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <random>
+#include <string>
 #include <vector>
 
 using mosflm::DetectorGeometry;
@@ -227,6 +229,124 @@ int main() {
             std::fabs(obs[0].intensity - i_true) < std::fabs(i2d - i_true),
             "3D closer to true I than 2D+sum"
         );
+    }
+
+    // Sparse Eiger background (λ = 0.1 counts/voxel, no peak): I must be
+    // unbiased with ~half negative, and σ must match the scatter (χ² ≈ 1).
+    // A symmetric bg clip zeroes the bg here and gives I ≈ +24, never < 0.
+    {
+        Profile3dSettings sp = s3;
+        sp.use_phi_bg = false;
+        sp.box.bg_reject_nsigma = 3.0;
+        sp.min_learners = 1000000;  // fixed Gaussian profile
+        std::mt19937 rng(12345);
+        std::poisson_distribution<int> pois(0.1);
+        std::vector<Shoebox> boxes;
+        for (int n = 0; n < 2000; ++n) {
+            auto box = make_empty_box(3, 2, 5);
+            for (auto& v : box.pixels) {
+                v = pois(rng);
+            }
+            boxes.push_back(std::move(box));
+        }
+        const auto obs = Profile3dFitter{}.fit(boxes, det, iset, sp);
+        double sum_i = 0.0, chi2_sum = 0.0, chi2_prf = 0.0;
+        int n_ok = 0, n_neg = 0, n_zero = 0;
+        for (const auto& o : obs) {
+            if (!o.ok || !o.profile_ok) {
+                continue;
+            }
+            ++n_ok;
+            sum_i += o.summation_intensity;
+            n_neg += o.summation_intensity < 0.0 ? 1 : 0;
+            n_zero += o.summation_intensity == 0.0 ? 1 : 0;
+            chi2_sum += std::pow(o.summation_intensity / o.summation_sigma, 2);
+            chi2_prf += std::pow(o.profile_intensity / o.profile_sigma, 2);
+        }
+        CHECK(n_ok > 1900);
+        const double mean_i = sum_i / n_ok;
+        CHECK_MSG(std::fabs(mean_i) < 0.6, "sparse bg mean I " + mosflm_test::fmt(mean_i));
+        CHECK_MSG(
+            n_neg > n_ok / 3, "sparse bg negatives " + std::to_string(n_neg)
+        );
+        CHECK_MSG(n_zero < n_ok / 20, "sparse bg zeros " + std::to_string(n_zero));
+        chi2_sum /= n_ok;
+        chi2_prf /= n_ok;
+        CHECK_MSG(
+            chi2_sum > 0.8 && chi2_sum < 1.25,
+            "summation chi2 " + mosflm_test::fmt(chi2_sum)
+        );
+        CHECK_MSG(
+            chi2_prf > 0.8 && chi2_prf < 1.25,
+            "profile chi2 " + mosflm_test::fmt(chi2_prf)
+        );
+    }
+
+    // Strong spot on a moderate background: σ matches the repeat scatter.
+    {
+        Profile3dSettings sp = s3;
+        sp.use_phi_bg = false;
+        sp.box.bg_reject_nsigma = 3.0;
+        sp.min_learners = 1000000;
+        const int peak_half = 3;
+        const int nphi = 5;
+        const int cphi = nphi / 2;
+        double psum = 0.0;
+        for (int iphi = 0; iphi < nphi; ++iphi) {
+            for (int dr = -peak_half; dr <= peak_half; ++dr) {
+                for (int dc = -peak_half; dc <= peak_half; ++dc) {
+                    psum += gaussian3(dc, dr, iphi - cphi, 1.2, 0.8);
+                }
+            }
+        }
+        std::mt19937 rng(777);
+        std::vector<Shoebox> boxes;
+        for (int n = 0; n < 1000; ++n) {
+            auto box = make_empty_box(peak_half, 2, nphi);
+            const int outer = box.outer_half;
+            for (int iphi = 0; iphi < nphi; ++iphi) {
+                for (int dr = -outer; dr <= outer; ++dr) {
+                    for (int dc = -outer; dc <= outer; ++dc) {
+                        double m = 2.0;
+                        if (std::abs(dc) <= peak_half && std::abs(dr) <= peak_half) {
+                            m += 2000.0 *
+                                 gaussian3(dc, dr, iphi - cphi, 1.2, 0.8) / psum;
+                        }
+                        box.pixels[box.index(iphi, dr, dc)] =
+                            std::poisson_distribution<int>(m)(rng);
+                    }
+                }
+            }
+            boxes.push_back(std::move(box));
+        }
+        const auto obs = Profile3dFitter{}.fit(boxes, det, iset, sp);
+        std::vector<double> is, ip, ss, sprf;
+        for (const auto& o : obs) {
+            if (o.ok && o.profile_ok) {
+                is.push_back(o.summation_intensity);
+                ss.push_back(o.summation_sigma);
+                ip.push_back(o.profile_intensity);
+                sprf.push_back(o.profile_sigma);
+            }
+        }
+        auto ratio = [](const std::vector<double>& v, const std::vector<double>& s) {
+            double mean = 0.0, m2 = 0.0, ms = 0.0;
+            for (double x : v) {
+                mean += x;
+            }
+            mean /= static_cast<double>(v.size());
+            for (std::size_t i = 0; i < v.size(); ++i) {
+                m2 += (v[i] - mean) * (v[i] - mean);
+                ms += s[i];
+            }
+            const double sd = std::sqrt(m2 / static_cast<double>(v.size() - 1));
+            return (ms / static_cast<double>(s.size())) / sd;
+        };
+        CHECK(is.size() > 950);
+        const double rs = ratio(is, ss);
+        const double rp = ratio(ip, sprf);
+        CHECK_MSG(rs > 0.85 && rs < 1.15, "strong summation σ/sd " + mosflm_test::fmt(rs));
+        CHECK_MSG(rp > 0.85 && rp < 1.15, "strong profile σ/sd " + mosflm_test::fmt(rp));
     }
 
     return mosflm_test::finish("profile3d");

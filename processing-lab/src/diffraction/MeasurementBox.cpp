@@ -253,6 +253,23 @@ BackgroundPlane solve_plane(const std::vector<BgSample>& samples) {
 
 }  // namespace
 
+double poisson_upper_limit(double lambda, double nsigma) {
+    const double mu = std::max(lambda, 1e-6);
+    if (mu > 100.0) {
+        return mu + nsigma * std::sqrt(mu);
+    }
+    const double p = 0.5 * std::erfc(nsigma / std::sqrt(2.0));
+    double term = std::exp(-mu);  // P(X = 0)
+    double cdf = term;
+    int k = 0;
+    while (1.0 - cdf >= p && k < 1000) {
+        ++k;
+        term *= mu / static_cast<double>(k);
+        cdf += term;
+    }
+    return static_cast<double>(k);
+}
+
 BackgroundPlane fit_background_plane(
     const image::DiffractionImage& image,
     int c0,
@@ -298,11 +315,17 @@ BackgroundPlane fit_background_plane(
             if (sd < 1e-9) {
                 break;
             }
-            const double lim = reject_nsigma * sd;
+            // High outliers only (zingers, neighbour tails): low counts are
+            // genuine background on sparse photon-counting detectors.
             std::vector<BgSample> kept;
             kept.reserve(samples.size());
             for (std::size_t i = 0; i < samples.size(); ++i) {
-                if (std::fabs(resid[i] - mean) <= lim) {
+                const double model = samples[i].od - resid[i];
+                const double lim = std::max(
+                    model + mean + reject_nsigma * sd,
+                    poisson_upper_limit(model, reject_nsigma)
+                );
+                if (samples[i].od <= lim) {
                     kept.push_back(samples[i]);
                 }
             }
@@ -453,10 +476,13 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
                     if (sd < 1e-9) {
                         break;
                     }
-                    const double lim = box.bg_reject_nsigma * sd;
+                    const double lim = std::max(
+                        mean + box.bg_reject_nsigma * sd,
+                        poisson_upper_limit(mean, box.bg_reject_nsigma)
+                    );
                     std::vector<BgSample> kept;
                     for (const auto& s : samples) {
-                        if (std::fabs(s.od - mean) <= lim) {
+                        if (s.od <= lim) {
                             kept.push_back(s);
                         }
                     }

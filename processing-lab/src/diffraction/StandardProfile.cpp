@@ -421,21 +421,21 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         const double bg_mean =
             (n_peak > 0) ? (bg_under / static_cast<double>(n_peak)) : 0.0;
         const int n_bg = std::max(1, obs.npix_bg);
+        // Signed k keeps E[var] unbiased for weak spots; max(k, 0) overstates
+        // σ when the true I is ~0.
         const double k_fit = numer / pr4_valid;
         const double var_k_peak =
-            std::max(p2b_valid + std::max(k_fit, 0.0) * p3_valid, 0.0) /
+            std::max(p2b_valid + k_fit * p3_valid, 0.0) /
             (pr4_valid * pr4_valid);
         const double dk_db = p_valid / pr4_valid;
         const double var_k_bg =
             dk_db * dk_db * std::fabs(bg_mean) / static_cast<double>(n_bg);
         double var = pr.pr3 * pr.pr3 * (var_k_peak + var_k_bg);
-        var = std::max(var, 1.0);
+        // No unit floor: a sparse Eiger slice can have var < 1, and partial
+        // slices are summed (≈7 per reflection), so a floor of 1 per slice
+        // inflates σ of weak reflections. Keep σ > 0 only.
+        var = std::max(var, 1e-6);
         obs.profile_sigma = std::sqrt(var);
-        // Never report a worse σ than summation for the same box.
-        if (obs.summation_sigma > 0.0 &&
-            obs.profile_sigma > 3.0 * obs.summation_sigma) {
-            obs.profile_sigma = obs.summation_sigma;
-        }
         obs.pkratio =
             std::fabs(obs.summation_intensity - iprf) /
             std::max(std::fabs(iprf), 1.0);

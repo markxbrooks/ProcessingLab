@@ -12,7 +12,11 @@ namespace mosflm::diffraction {
 /// detectors (Eiger). Untrusted pixels are excluded from background rims.
 struct TrustedRegionSettings {
     /// Keep pixels inside this fraction of the panel half-diagonal (0–1).
+    /// Ignored when ``cover_panel`` is true.
     double trusted_radius_frac{0.98};
+    /// Trust the rectangular panel. The beam-centered circle misses the far
+    /// corner when the beam is offset. ``dmin_A`` / ``dmax_A`` still apply.
+    bool cover_panel{false};
     /// Resolution limits in Å (dmax, dmin); 0 disables that bound.
     double dmax_A{0.0};
     double dmin_A{0.0};
