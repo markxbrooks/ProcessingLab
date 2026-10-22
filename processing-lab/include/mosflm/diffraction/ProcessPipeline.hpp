@@ -74,8 +74,12 @@ struct ProfileLog {
 };
 
 /// Print ``log`` like XDS INTEGRATE.LP: spot and rocking σ per detector
-/// position, then the average profile scaled to 100 (three φ sections per
-/// row).
+/// position, then the average profile scaled to 100.
+///
+/// The profile is one φ section per block, between ``PROFILE_MAP`` and
+/// ``PROFILE_MAP_END``. Each section is ``# phi=<image offset>`` followed by
+/// ``side`` lines of ``side`` space-separated integers. A log scanner can
+/// split those lines and stack the sections into an array.
 void write_profile_log(std::ostream& os, const ProfileLog& log);
 
 struct ProcessResult {

@@ -228,27 +228,34 @@ void write_profile_log(std::ostream& os, const ProfileLog& log) {
         }
     }
     const double peak = *std::max_element(avg.begin(), avg.end());
+    // One φ section per block. Width-4 fields stay separated at the scale
+    // peak (100); the old width-3 dump glued 41 and 100 into "41100".
+    // PROFILE_MAP / PROFILE_MAP_END bracket the block for a log scanner.
     os << "\n\n ***** AVERAGE THREE-DIMENSIONAL PROFILE OF " << std::setw(7)
        << n_total << " STRONG REFLECTION SLICES *****\n"
-       << " (sections: images " << -kNphi / 2 << " ... +" << kNphi / 2
+       << " (one section per image, " << -kNphi / 2 << " ... +" << kNphi / 2
        << " from the calculated phi; " << side << "x" << side
-       << " pixels around the predicted position)\n\n";
-    for (int block = 0; block < kNphi; block += 3) {
-        os << '\n';
+       << " pixels around the predicted position; scaled to 100)\n"
+       << "PROFILE_MAP side=" << side << " nphi=" << kNphi << " scale=100\n";
+    for (int ip = 0; ip < kNphi; ++ip) {
+        os << "# phi=" << (ip - kNphi / 2) << '\n';
         for (int r = 0; r < side; ++r) {
-            for (int ip = block; ip < std::min(block + 3, kNphi); ++ip) {
-                os << "  ";
-                for (int c = 0; c < side; ++c) {
-                    const double v =
-                        avg[static_cast<std::size_t>(ip * np + r * side + c)];
-                    os << std::setw(3)
-                       << (peak > 0.0 ? static_cast<int>(std::lround(100.0 * v / peak)) : 0);
+            for (int c = 0; c < side; ++c) {
+                const double v =
+                    avg[static_cast<std::size_t>(ip * np + r * side + c)];
+                const int scaled =
+                    peak > 0.0
+                        ? static_cast<int>(std::lround(100.0 * v / peak))
+                        : 0;
+                if (c != 0) {
+                    os << ' ';
                 }
+                os << std::setw(4) << scaled;
             }
             os << '\n';
         }
-        os << '\n';
     }
+    os << "PROFILE_MAP_END\n";
     os << std::flush;
 }
 
