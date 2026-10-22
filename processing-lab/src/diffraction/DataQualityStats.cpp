@@ -13,6 +13,11 @@
 namespace mosflm::diffraction {
 namespace {
 
+/// FLAG bit for a negative profile-fitted intensity (ProcessPipeline). A
+/// negative I is a valid measurement of a weak reflection, not a misfit:
+/// rejecting it empties the high-resolution shells and biases them upward.
+constexpr int kFlagNegProfile = 4;
+
 using Miller = std::tuple<int, int, int>;
 
 struct Obs {
@@ -365,7 +370,7 @@ DataQualityReport compute_data_quality(
     int n_sysabs_isigi = 0;
 
     for (const auto& row : reflections) {
-        if (row.flag != 0) {
+        if ((row.flag & ~kFlagNegProfile) != 0) {
             ++report.n_rejected_misfits;
             continue;
         }
@@ -485,6 +490,11 @@ void write_data_quality_table(
 ) {
     os << "\n          COMPLETENESS AND QUALITY OF DATA SET\n"
        << "          ------------------------------------\n\n"
+       << " NOTE: computed from UNSCALED integrated intensities (no batch\n"
+       << "       scale, absorption or decay correction, no outlier\n"
+       << "       rejection). R-factors are therefore higher than after\n"
+       << "       scaling (AIMLESS / XSCALE / CORRECT); use them to compare\n"
+       << "       integration runs, not as final merging statistics.\n\n"
        << " R-FACTOR\n"
        << " observed = (SUM(ABS(I(h,i)-I(h))))/(SUM(I(h,i)))\n"
        << " expected = expected R-FACTOR derived from Sigma(I)\n\n"
@@ -511,7 +521,7 @@ void write_data_quality_table(
        << "            Anomal_Corr & SigAno. At least two observations\n"
        << "            for each (+ and -) parity are required.\n\n\n"
        << " SUBSET OF INTENSITY DATA WITH SIGNAL/NOISE >= -3.0 AS FUNCTION"
-          " OF RESOLUTION\n"
+          " OF RESOLUTION (UNSCALED)\n"
        << " RESOLUTION     NUMBER OF REFLECTIONS    COMPLETENESS R-FACTOR"
           "  R-FACTOR COMPARED I/SIGMA   R-meas  CC(1/2)  Anomal  SigAno"
           "   Nano\n"

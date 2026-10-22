@@ -51,10 +51,11 @@ OpenMP workers: CONTROL `NPROC n` (aliases `THREADS` / `NTHREADS`), or the
 | ------ | ------------------ |
 | HDF5 / NeXus Eiger master (`*_master.h5`, `.nxs`) | `--image master.h5`. Frame numbers are indices in the master. Keep `data_*.h5` beside it. |
 | miniCBF / CBF | `DIRECTORY` + `TEMPLATE` with `#` placeholders, e.g. `sweep_####.cbf`. |
-| SMV (ADSC) | Same `DIRECTORY` / `TEMPLATE` / `--image` pattern. |
+| SMV (ADSC) | Same `DIRECTORY` / `TEMPLATE` / `--image` pattern. Read as MOSFLM does: `XDET` runs along the file's slow axis (DIALS `XDET` is the fast axis). |
 
-`TEMPLATE` must win over `--image` for multi-frame CBF/SMV: a lone `--image`
-path would otherwise be reused for every frame. HDF5 masters are fine as a
+For multi-frame CBF/SMV (`FINDSPOTS … MULTIFRAME`), each frame is read from
+the `--image` file's sibling with that frame number (same zero padding), else
+from `TEMPLATE`; it is an error if neither exists. HDF5 masters are fine as a
 single `--image`.
 
 Geometry not set in CONTROL is filled from the image header on first read
@@ -110,6 +111,8 @@ it and writes `XPARM.XDS`; `GO` after `PROCESS` integrates and writes MTZ /
 | `TEMPLATE` | Multi-frame basename with `#` digits (`76c1b_1_####.cbf`). |
 | `PROCESS first TO last [START φ] [ANGLE Δφ]` | Frames to integrate. `START`/`ANGLE` override header φ. |
 | `DMIN` / `DMAX` / `RESOLUTION` | Predictor resolution limits (Å). Unset `DMIN` uses the farthest inset detector corner. An explicit value overrides that. |
+| `REFINE ALL` or `REFINE ORIENTATION CELL DISTANCE BEAM TILT` (any subset) | Parameters positional refinement may change during PROCESS. Default `ALL`; `--xparm` sets `ORIENTATION` (as XDS INTEGRATE; the imported cell and detector are kept). |
+| `INVERTX ON\|OFF` | Handedness of a supplied `MATRIX`: `ON` (default) for MOSFLM/ADSC matrices, `OFF` for ProcessingLab or XDS-frame matrices (`--xparm` sets it). |
 | `PHI_OFFSET` | Added to every frame’s φ. |
 
 ### Spot search and indexing
@@ -247,7 +250,8 @@ with `--xds-inp` and/or `--xparm`, or let the image header fill geometry.
 `--xparm` (or CONTROL `XPARM` / `GXPARM`) seeds:
 
 - `CELL`, `SYMMETRY`, `WAVELENGTH`, `DISTANCE`, `PIXEL`, `BEAM` (from `ORGX`/`ORGY` × pixel size)
-- `MATRIX` when the file contains an orientation
+- `MATRIX` when the file contains an orientation, with `INVERTX OFF` and
+  `REFINE ORIENTATION`
 
 Use an **index-stage** `XPARM.XDS` (Xia2 `…/index/XPARM.XDS` or ProcessingLab’s
 own post-AUTOINDEX file). A previous bad `GXPARM.XDS` will lock PROCESS onto

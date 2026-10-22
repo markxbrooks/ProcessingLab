@@ -1,5 +1,6 @@
 #include "mosflm/image/DiffractionImage.hpp"
 
+#include <cctype>
 #include <cbf.h>
 #include <cbf_simple.h>
 
@@ -71,6 +72,26 @@ void parse_minicbf_comment_header(const std::string& text, ImageMetadata& meta) 
 
     grab(R"(#\s*Start_angle\s+([0-9.eE+-]+)\s*deg)", meta.oscillation_start_deg);
     grab(R"(#\s*Angle_increment\s+([0-9.eE+-]+)\s*deg)", meta.oscillation_range_deg);
+
+    // Rotation axis on the detector → MOSFLM detector omega (as the HDF5
+    // reader derives from NeXus vectors: ω = atan2(−axis·fast, axis·slow)).
+    // Pilatus miniCBF "X, CW" is the axis along +fast (DIALS (1,0,0) with
+    // fast (1,0,0)), i.e. ω = 270°, the thaumatin Eiger setting; "X, CCW"
+    // reverses it (90°). Y axes are left at 0° (not verified on data).
+    {
+        std::regex re(R"(#\s*Oscillation_axis\s+([XYxy])\s*,\s*(CW|CCW))", std::regex::icase);
+        std::smatch m;
+        if (std::regex_search(text, m, re) && m.size() > 2) {
+            const char axis = static_cast<char>(std::toupper(m[1].str()[0]));
+            std::string sense = m[2].str();
+            for (auto& ch : sense) {
+                ch = static_cast<char>(std::toupper(ch));
+            }
+            if (axis == 'X') {
+                meta.rotation_axis_omega_deg = (sense == "CW") ? 270.0 : 90.0;
+            }
+        }
+    }
 
     {
         std::regex re(R"(#\s*Detector:\s*([^\r\n]+))", std::regex::icase);

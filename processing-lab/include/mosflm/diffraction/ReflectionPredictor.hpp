@@ -65,6 +65,11 @@ struct PredictionSettings {
     /// Reject spots whose observed φ interval exceeds this width (NWMAX-like).
     /// Zero disables. F77 insulin rejects ~12 "too wide in φ".
     double max_phi_width_deg{0.0};
+    /// Rocking model only (replaces ``max_phi_width_deg`` there): skip
+    /// reflections with Lorentz factor ``ζ`` below this (XDS
+    /// ``MINIMUM_ZETA``). A cap on the φ width itself also scales with
+    /// MOSAIC and dropped every reflection once MOSAIC passed ~0.85°.
+    double min_zeta{0.05};
     /// Reject near-spindle (cusp) reflections: ``|q_x| / |q| < cusp_fraction``.
     bool exclude_cusp{false};
     double cusp_fraction{0.05};

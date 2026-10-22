@@ -76,5 +76,19 @@ int main() {
     );
     CHECK_MSG(text.find("total") != std::string::npos, "missing total row");
 
+    // Negative-profile flag (4) is kept; real misfits (e.g. overlap 16,
+    // overload 256, or 4 combined with them) are rejected.
+    auto weak = make_ref(4, 2, 0, -3.0f, 2.0f);
+    weak.flag = 4;
+    auto overlap = make_ref(4, 2, 0, 30.0f, 2.0f);
+    overlap.flag = 16;
+    auto overload_neg = make_ref(4, 2, 0, -1.0f, 2.0f);
+    overload_neg.flag = 256 | 4;
+    const auto flagged = compute_data_quality(
+        crystal, {weak, overlap, overload_neg}, 200.0, 1.45, 9, -3.0
+    );
+    CHECK_EQ(flagged.n_accepted_obs, 1);
+    CHECK_EQ(flagged.n_rejected_misfits, 2);
+
     return mosflm_test::finish("data_quality_stats");
 }

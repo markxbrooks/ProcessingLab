@@ -32,7 +32,7 @@ struct DataQualityReport {
     std::vector<ResolutionShellStats> shells;
     ResolutionShellStats total{};
     int n_in_subset{0};          ///< Observations with I/σ ≥ min_isigma
-    int n_rejected_misfits{0};   ///< flag ≠ 0 (Aimless-style rejects)
+    int n_rejected_misfits{0};   ///< flag ≠ 0 apart from the negative-profile bit (4)
     int n_systematic_absent{0};
     /// Mean I/σ of systematically absent observations (CORRECT-lite sanity).
     double mean_isigma_systematic_absent{-99.0};

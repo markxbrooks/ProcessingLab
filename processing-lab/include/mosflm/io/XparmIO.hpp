@@ -36,7 +36,16 @@ struct XparmGeometry {
     /// Detector X/Y axis directions (XDS lab). Identity defaults.
     double det_x[3]{1.0, 0.0, 0.0};
     double det_y[3]{0.0, 1.0, 0.0};
-    /// Orientation: 3×3 A matrix (MOSFLM-like rows) if known.
+    /// Where the incident beam meets the detector (px, fast / slow), from a
+    /// classic XDS file. ORGX/ORGY is the foot of the detector normal, which
+    /// differs from the beam position when the beam is not normal to the
+    /// detector (e.g. 22 px on a 0.56° beam tilt at 385 mm).
+    bool has_direct_beam{false};
+    double beam_fast_px{0.0};
+    double beam_slow_px{0.0};
+    /// Orientation: 3×3 A matrix (MOSFLM-like rows) if known. From a classic
+    /// XDS file it is expressed in the frame with the beam along +z and the
+    /// rotation axis along +x (ProcessingLab's lab frame).
     bool has_amat{false};
     Eigen::Matrix3d amat{Eigen::Matrix3d::Identity()};
 };

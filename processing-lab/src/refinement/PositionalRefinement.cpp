@@ -110,7 +110,9 @@ Eigen::VectorXd residuals(
         r(3 * i) = w * (x - o.xdet_obs_px);
         r(3 * i + 1) = w * (y - o.ydet_obs_px);
         if (has_phi) {
-            r(3 * i + 2) = w * phi_weight * (phi - o.phi_obs_deg);
+            r(3 * i + 2) = std::isfinite(o.phi_sigma_deg) && o.phi_sigma_deg > 0.0
+                               ? w * (phi - o.phi_obs_deg) / o.phi_sigma_deg
+                               : w * phi_weight * (phi - o.phi_obs_deg);
         }
     }
     return r;

@@ -193,7 +193,9 @@ struct Spot {
     double sigma{};
 };
 
-std::vector<Spot> read_spots(const fs::path& path) {
+/// ``swap_xy``: DIALS exports XDET/YDET along the file's fast/slow axes;
+/// ProcessingLab (like ipmosflm) has XDET along the ADSC slow axis.
+std::vector<Spot> read_spots(const fs::path& path, bool swap_xy = false) {
     gemmi::Mtz mtz;
     mtz.read_file(path.string());
     const auto* X = mtz.column_with_label("XDET");
@@ -205,8 +207,8 @@ std::vector<Spot> read_spots(const fs::path& path) {
     out.reserve(static_cast<std::size_t>(mtz.nreflections));
     for (int i = 0; i < mtz.nreflections; ++i) {
         Spot s;
-        s.xdet = (*X)[static_cast<std::size_t>(i)];
-        s.ydet = (*Y)[static_cast<std::size_t>(i)];
+        s.xdet = (*(swap_xy ? Y : X))[static_cast<std::size_t>(i)];
+        s.ydet = (*(swap_xy ? X : Y))[static_cast<std::size_t>(i)];
         s.intensity = (*I)[static_cast<std::size_t>(i)];
         s.sigma = (*S)[static_cast<std::size_t>(i)];
         out.push_back(s);
@@ -381,7 +383,7 @@ int main() {
 
     // Detector-plane proximity (robust when DIALS UB ≠ MOSFLM MATRIX).
     const auto cpp_spots = read_spots(cpp_mtz);
-    const auto dials_spots = read_spots(dials_mtz);
+    const auto dials_spots = read_spots(dials_mtz, /*swap_xy=*/true);
     std::vector<double> nearest;
     nearest.reserve(dials_spots.size());
     std::size_t within_30 = 0;

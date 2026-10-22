@@ -11,6 +11,7 @@
 #include "mosflm/refinement/PostRefinement.hpp"
 
 #include <filesystem>
+#include <iosfwd>
 #include <vector>
 
 namespace mosflm::diffraction {
@@ -51,6 +52,32 @@ struct ProcessRequest {
 };
 
 /// In-memory spot table + integrated observations from one PROCESS call.
+/// Average 3D profile of strong reflections, logged like XDS INTEGRATE.LP.
+///
+/// Background-subtracted counts of strong slices (summation I/σ ≥ 3, FLAG 0)
+/// summed on a (φ, row, column) grid around the predicted pixel, per
+/// detector region (``kGrid`` × ``kGrid``). φ sections are whole images from
+/// the calculated φ, −``kNphi``/2 … +``kNphi``/2.
+struct ProfileLog {
+    static constexpr int kNphi = 9;
+    static constexpr int kGrid = 3;
+    int half{0};          ///< Peak half-width (pixels); side = 2·half + 1.
+    int width{0};         ///< Image size, for region centres.
+    int height{0};
+    double osc_deg{0.0};  ///< Image width (φ section size).
+    std::vector<double> sum;  ///< [region][φ][row][column]
+    std::vector<int> n;       ///< Slices added per region.
+
+    /// Add another log (same ``half``) into this one.
+    void add(const ProfileLog& other);
+    [[nodiscard]] bool empty() const;
+};
+
+/// Print ``log`` like XDS INTEGRATE.LP: spot and rocking σ per detector
+/// position, then the average profile scaled to 100 (three φ sections per
+/// row).
+void write_profile_log(std::ostream& os, const ProfileLog& log);
+
 struct ProcessResult {
     std::vector<PredictedReflection> predictions;
     std::vector<IntegratedReflection> integrated;
@@ -71,6 +98,8 @@ struct ProcessResult {
     double image_beam_y_mm{0.0};
     /// Per-image φ range for MTZ batch headers (filled by the frame loop).
     std::vector<crystal::BatchScan> batch_scans;
+    /// Strong-reflection 3D profile from this image (rocking mode).
+    ProfileLog profile_log{};
 };
 
 /// Own the known-indexed pipeline without Fortran GENERATE / REEK / PROCESS.

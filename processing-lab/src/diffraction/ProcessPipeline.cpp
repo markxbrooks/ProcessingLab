@@ -4,6 +4,10 @@
 #include "mosflm/geometry/LabFrame.hpp"
 
 #include <algorithm>
+#include <ostream>
+#include <numeric>
+#include <iomanip>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -41,7 +45,212 @@ float encode_bgpkratios(double bgrat, double pkrat) {
     return static_cast<float>(ia);
 }
 
+/// Add one strong slice to ``log``: background-subtracted pixels around the
+/// predicted pixel (``xdet``, ``ydet``) in φ section ``dphi_images``.
+void accumulate_profile(
+    ProfileLog& log,
+    const image::DiffractionImage& image,
+    double xdet,
+    double ydet,
+    int half,
+    const MeasObservation& m,
+    double dphi_images,
+    double osc_deg
+) {
+    constexpr int kNphi = ProfileLog::kNphi;
+    constexpr int kGrid = ProfileLog::kGrid;
+    const int ip = static_cast<int>(std::lround(dphi_images)) + kNphi / 2;
+    if (half < 1 || ip < 0 || ip >= kNphi) {
+        return;
+    }
+    const int w = image.metadata.width;
+    const int h = image.metadata.height;
+    const int c0 = static_cast<int>(std::lround(xdet));
+    const int r0 = static_cast<int>(std::lround(ydet));
+    if (c0 - half < 0 || r0 - half < 0 || c0 + half >= w || r0 + half >= h) {
+        return;
+    }
+    if (log.sum.empty()) {
+        const int side = 2 * half + 1;
+        log.half = half;
+        log.width = w;
+        log.height = h;
+        log.osc_deg = osc_deg;
+        log.sum.assign(
+            static_cast<std::size_t>(kGrid * kGrid * kNphi * side * side), 0.0
+        );
+        log.n.assign(static_cast<std::size_t>(kGrid * kGrid), 0);
+    } else if (half != log.half) {
+        return;
+    }
+    const auto px = [&](int c, int r) {
+        return image.pixels[static_cast<std::size_t>(r) * static_cast<std::size_t>(w) +
+                            static_cast<std::size_t>(c)];
+    };
+    for (int dr = -half; dr <= half; ++dr) {
+        for (int dc = -half; dc <= half; ++dc) {
+            if (px(c0 + dc, r0 + dr) < 0) {
+                return;  // masked / overloaded pixel in the box
+            }
+        }
+    }
+    const int side = 2 * half + 1;
+    const int reg = std::min(kGrid - 1, c0 * kGrid / w) +
+                    kGrid * std::min(kGrid - 1, r0 * kGrid / h);
+    double* dst = &log.sum[static_cast<std::size_t>((reg * kNphi + ip) * side * side)];
+    for (int dr = -half; dr <= half; ++dr) {
+        for (int dc = -half; dc <= half; ++dc) {
+            const double b = m.bg_a * dc + m.bg_b * dr + m.bg_c;
+            dst[(dr + half) * side + (dc + half)] +=
+                static_cast<double>(px(c0 + dc, r0 + dr)) - b;
+        }
+    }
+    ++log.n[static_cast<std::size_t>(reg)];
+}
+
 }  // namespace
+
+void ProfileLog::add(const ProfileLog& other) {
+    if (other.sum.empty()) {
+        return;
+    }
+    if (sum.empty()) {
+        *this = other;
+        return;
+    }
+    if (other.half != half) {
+        return;
+    }
+    for (std::size_t i = 0; i < sum.size(); ++i) {
+        sum[i] += other.sum[i];
+    }
+    for (std::size_t i = 0; i < n.size(); ++i) {
+        n[i] += other.n[i];
+    }
+}
+
+bool ProfileLog::empty() const {
+    return sum.empty() || std::accumulate(n.begin(), n.end(), 0) == 0;
+}
+
+void write_profile_log(std::ostream& os, const ProfileLog& log) {
+    if (log.empty()) {
+        return;
+    }
+    constexpr int kNphi = ProfileLog::kNphi;
+    constexpr int kGrid = ProfileLog::kGrid;
+    constexpr int kRegions = kGrid * kGrid;
+    const int side = 2 * log.half + 1;
+    const int np = side * side;
+    const auto at = [&](int reg, int ip, int k) {
+        return log.sum[static_cast<std::size_t>((reg * kNphi + ip) * np + k)];
+    };
+    const int n_total = std::accumulate(log.n.begin(), log.n.end(), 0);
+
+    // Spot σ (pixels) and rocking σ (degrees) per region from the moments of
+    // the positive part of the summed profile (φ binned in whole images).
+    std::array<double, kRegions> sxy{};
+    std::array<double, kRegions> sphi{};
+    for (int reg = 0; reg < kRegions; ++reg) {
+        double w = 0.0, mx = 0.0, my = 0.0, mp = 0.0;
+        double vx = 0.0, vy = 0.0, vp = 0.0;
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int ip = 0; ip < kNphi; ++ip) {
+                for (int k = 0; k < np; ++k) {
+                    const double v = std::max(0.0, at(reg, ip, k));
+                    const double x = k % side - log.half;
+                    const double y = k / side - log.half;
+                    const double f = ip - kNphi / 2;
+                    if (pass == 0) {
+                        w += v;
+                        mx += v * x;
+                        my += v * y;
+                        mp += v * f;
+                    } else {
+                        vx += v * (x - mx) * (x - mx);
+                        vy += v * (y - my) * (y - my);
+                        vp += v * (f - mp) * (f - mp);
+                    }
+                }
+            }
+            if (pass == 0) {
+                if (!(w > 0.0)) {
+                    break;
+                }
+                mx /= w;
+                my /= w;
+                mp /= w;
+            }
+        }
+        if (w > 0.0) {
+            sxy[static_cast<std::size_t>(reg)] = std::sqrt(0.5 * (vx + vy) / w);
+            sphi[static_cast<std::size_t>(reg)] = std::sqrt(vp / w) * log.osc_deg;
+        }
+    }
+
+    os << "\n SPOT SIZE AND ROCKING WIDTH FROM " << std::setw(7) << n_total
+       << " STRONG REFLECTION SLICES AT " << kRegions
+       << " POSITIONS ON THE DETECTOR SURFACE.\n"
+       << " (SIGMA_XY in pixels; SIGMA_PHI in degrees, phi binned in whole"
+          " images of " << std::fixed << std::setprecision(3) << log.osc_deg
+       << " deg)\n";
+    os << " POSITION NUMBER     ";
+    for (int reg = 0; reg < kRegions; ++reg) {
+        os << std::setw(7) << reg + 1;
+    }
+    os << "\n X-COORDINATE (pixel)" << std::setprecision(1);
+    for (int reg = 0; reg < kRegions; ++reg) {
+        os << std::setw(7) << (reg % kGrid + 0.5) * log.width / kGrid;
+    }
+    os << "\n Y-COORDINATE (pixel)";
+    for (int reg = 0; reg < kRegions; ++reg) {
+        os << std::setw(7) << (reg / kGrid + 0.5) * log.height / kGrid;
+    }
+    os << "\n NUMBER              ";
+    for (int reg = 0; reg < kRegions; ++reg) {
+        os << std::setw(7) << log.n[static_cast<std::size_t>(reg)];
+    }
+    os << "\n SIGMA_XY (pixel)    " << std::setprecision(2);
+    for (int reg = 0; reg < kRegions; ++reg) {
+        os << std::setw(7) << sxy[static_cast<std::size_t>(reg)];
+    }
+    os << "\n SIGMA_PHI (degree)  " << std::setprecision(3);
+    for (int reg = 0; reg < kRegions; ++reg) {
+        os << std::setw(7) << sphi[static_cast<std::size_t>(reg)];
+    }
+    os << "\n";
+
+    // Average profile over all regions, scaled to a maximum of 100.
+    std::vector<double> avg(static_cast<std::size_t>(kNphi * np), 0.0);
+    for (int reg = 0; reg < kRegions; ++reg) {
+        for (int i = 0; i < kNphi * np; ++i) {
+            avg[static_cast<std::size_t>(i)] += at(reg, i / np, i % np);
+        }
+    }
+    const double peak = *std::max_element(avg.begin(), avg.end());
+    os << "\n\n ***** AVERAGE THREE-DIMENSIONAL PROFILE OF " << std::setw(7)
+       << n_total << " STRONG REFLECTION SLICES *****\n"
+       << " (sections: images " << -kNphi / 2 << " ... +" << kNphi / 2
+       << " from the calculated phi; " << side << "x" << side
+       << " pixels around the predicted position)\n\n";
+    for (int block = 0; block < kNphi; block += 3) {
+        os << '\n';
+        for (int r = 0; r < side; ++r) {
+            for (int ip = block; ip < std::min(block + 3, kNphi); ++ip) {
+                os << "  ";
+                for (int c = 0; c < side; ++c) {
+                    const double v =
+                        avg[static_cast<std::size_t>(ip * np + r * side + c)];
+                    os << std::setw(3)
+                       << (peak > 0.0 ? static_cast<int>(std::lround(100.0 * v / peak)) : 0);
+                }
+            }
+            os << '\n';
+        }
+        os << '\n';
+    }
+    os << std::flush;
+}
 
 ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
     ProcessResult out;
@@ -397,6 +606,23 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         );
         row.xdet = static_cast<float>(xdet);
         row.ydet = static_cast<float>(ydet);
+        // XDS-style average 3D profile of strong slices (logged per batch).
+        if (request.integration.mosflm_detector_axes && rocking &&
+            po != nullptr && ibad == 0 && po->summation_sigma > 0.0 &&
+            po->summation_intensity >= 3.0 * po->summation_sigma) {
+            const double osc =
+                request.scan.phi_end_deg - request.scan.phi_start_deg;
+            if (osc > 0.0) {
+                accumulate_profile(
+                    out.profile_log, request.image, xdet, ydet,
+                    po->box_half_px, *po,
+                    (0.5 * (request.scan.phi_start_deg + request.scan.phi_end_deg) -
+                     pm.phi_calc) / osc,
+                    osc
+                );
+            }
+        }
+
         // Observed centroid: pixel (col,row) == XDET/YDET on MOSFLM axes.
         if (request.integration.mosflm_detector_axes && po != nullptr &&
             std::isfinite(po->xobs_px) && std::isfinite(po->yobs_px)) {

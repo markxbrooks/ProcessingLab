@@ -31,6 +31,9 @@ int main() {
     CHECK_CLOSE(image.metadata.oscillation_start_deg, 0.0, 1e-9);
     CHECK_CLOSE(image.metadata.oscillation_range_deg, 1.0, 1e-9);
     CHECK(image.metadata.detector_id == "SYNTHETIC-MINI");
+    // No "Oscillation_axis" line → detector omega stays 0 (Pilatus
+    // "X, CW" sets 270°, checked end to end on 76c1b against XDS).
+    CHECK_CLOSE(image.metadata.rotation_axis_omega_deg, 0.0, 1e-12);
 
     // Background ~50, plus the planted peak at the centre.
     CHECK_EQ(static_cast<int>(image.pixels[0]), 50);

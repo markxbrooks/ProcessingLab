@@ -8,6 +8,7 @@
 #include "mosflm/indexing/SpotList.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -42,6 +43,60 @@ void apply_image_geometry_defaults(
     }
 }
 
+namespace {
+
+/// HDF5 / NeXus masters hold every frame; the reader selects by index.
+bool is_multi_frame_container(const std::filesystem::path& p) {
+    std::string ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return ext == ".h5" || ext == ".hdf5" || ext == ".nxs";
+}
+
+/// ``p`` with the last digit run of its stem replaced by ``frame`` (same
+/// zero padding), e.g. ``x_1_0001.cbf`` → ``x_1_0037.cbf``; empty if the
+/// stem has no digits.
+std::filesystem::path with_frame_number(const std::filesystem::path& p, int frame) {
+    const std::string stem = p.stem().string();
+    const auto end = stem.find_last_of("0123456789");
+    if (end == std::string::npos) {
+        return {};
+    }
+    auto begin = end;
+    while (begin > 0 && std::isdigit(static_cast<unsigned char>(stem[begin - 1]))) {
+        --begin;
+    }
+    const std::size_t width = end - begin + 1;
+    std::string num = std::to_string(frame);
+    if (num.size() < width) {
+        num.insert(0, width - num.size(), '0');
+    }
+    return p.parent_path() /
+           (stem.substr(0, begin) + num + stem.substr(end + 1) + p.extension().string());
+}
+
+/// TEMPLATE (``#`` run → zero-padded ``frame``) under DIRECTORY.
+std::filesystem::path template_path(const control::ControlState& state, int frame) {
+    const std::string& tmpl = state.image_template;
+    const auto hash = tmpl.find('#');
+    std::string name = tmpl;
+    if (hash != std::string::npos) {
+        std::size_t n = 0;
+        while (hash + n < tmpl.size() && tmpl[hash + n] == '#') {
+            ++n;
+        }
+        std::string num = std::to_string(frame);
+        if (num.size() < n) {
+            num.insert(0, n - num.size(), '0');
+        }
+        name = tmpl.substr(0, hash) + num + tmpl.substr(hash + n);
+    }
+    return state.directory / name;
+}
+
+}  // namespace
+
 std::filesystem::path resolve_findspots_image_path(
     const control::ControlState& state,
     const std::optional<std::filesystem::path>& image_override,
@@ -56,24 +111,33 @@ std::filesystem::path resolve_findspots_image_path(
                    : state.directory / state.image_path;
     }
     if (!state.image_template.empty()) {
-        const std::string& tmpl = state.image_template;
-        const auto hash = tmpl.find('#');
-        std::string name = tmpl;
-        if (hash != std::string::npos) {
-            std::size_t n = 0;
-            while (hash + n < tmpl.size() && tmpl[hash + n] == '#') {
-                ++n;
-            }
-            std::string num = std::to_string(frame_hint);
-            if (num.size() < n) {
-                num.insert(0, n - num.size(), '0');
-            }
-            name = tmpl.substr(0, hash) + num + tmpl.substr(hash + n);
-        }
-        return state.directory / name;
+        return template_path(state, frame_hint);
     }
     throw std::runtime_error(
         "CONTROL FINDSPOTS: no IMAGE/TEMPLATE and no --image override"
+    );
+}
+
+std::filesystem::path resolve_findspots_frame_path(
+    const control::ControlState& state,
+    const std::optional<std::filesystem::path>& image_override,
+    int frame
+) {
+    const auto file = resolve_findspots_image_path(state, image_override, frame);
+    if (is_multi_frame_container(file)) {
+        return file;
+    }
+    const auto sibling = with_frame_number(file, frame);
+    std::error_code ec;
+    if (!sibling.empty() && std::filesystem::exists(sibling, ec)) {
+        return sibling;
+    }
+    if (!state.image_template.empty()) {
+        return template_path(state, frame);
+    }
+    throw std::runtime_error(
+        "CONTROL FINDSPOTS MULTIFRAME: no image for frame " +
+        std::to_string(frame) + " (" + sibling.string() + " missing, no TEMPLATE)"
     );
 }
 
@@ -130,13 +194,13 @@ void run_findspots(
         mfs.min_frames = state.findspots.min_frames;
         mfs.max_spots = state.findspots.max_spots;
         mfs.nproc = state.nproc;
-        // CBF/SMV ignore the frame argument to read_diffraction_image — resolve
-        // TEMPLATE / IMAGE path for each frame index (HDF5 masters still use f).
+        // CBF/SMV ignore the frame argument to read_diffraction_image, so each
+        // frame needs its own file (HDF5 masters still use f).
         spots = find_spots_multiframe(
             first, last,
             [&](int f) {
                 const auto path_f =
-                    resolve_findspots_image_path(state, image_override, f);
+                    resolve_findspots_frame_path(state, image_override, f);
                 return image::read_diffraction_image(path_f, f);
             },
             mfs

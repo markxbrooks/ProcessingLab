@@ -34,6 +34,30 @@ bool nearly_orthonormal_identity(const Eigen::Matrix3d& A) {
            (A.transpose() * A - I).norm() < 0.2;
 }
 
+/// Map from the XDS lab frame to ProcessingLab's lab frame. Rows are the
+/// new x, y, z: z is the beam, x the rotation axis made normal to the beam.
+/// ProcessingLab predicts with the beam along +z and rotation about x, so
+/// XDS vectors must be brought into that frame; otherwise a tilted beam or
+/// axis (0.5–0.6° on many beamlines) shifts φ by ±0.5° and positions.
+///
+/// x is negated: with the detector omega of an axis along +fast (CCOM 90°,
+/// as for Pilatus "X, CW" and the thaumatin Eiger) ProcessingLab's detector
+/// mapping has the opposite x handedness to XDS, and predictions come out
+/// mirrored about the beam (XDET = 2·beam − XCAL). The mirror commutes with
+/// rotation about x and leaves the beam unchanged, so φ and the Miller
+/// indices are unaffected (checked against XDS INTEGRATE.HKL: 1.6 px, 0.02°).
+Eigen::Matrix3d xds_to_lab_frame(const double beam[3], const double axis[3]) {
+    const Eigen::Vector3d z = Eigen::Vector3d(beam[0], beam[1], beam[2]).normalized();
+    Eigen::Vector3d x(axis[0], axis[1], axis[2]);
+    x = (x - x.dot(z) * z).normalized();
+    const Eigen::Vector3d y = z.cross(x);
+    Eigen::Matrix3d R;
+    R.row(0) = -x;
+    R.row(1) = y;
+    R.row(2) = z;
+    return R;
+}
+
 /// Build Mosflm AMAT from XDS real-space unit-cell axes (lab Å).
 Eigen::Matrix3d mosflm_amat_from_xds_real_axes(
     const Eigen::Vector3d& ax,
@@ -87,9 +111,11 @@ bool try_parse_xds_classic(
         return false;
     }
 
-    // Wavelength + beam (4 tokens, wave in [0.3,3]).
+    // Wavelength + beam: exactly 4 tokens, wave in [0.3,3]. (The 6-token
+    // "starting frame, angle, osc, axis" row before it starts with the frame
+    // number, e.g. 1, which would otherwise be read as λ = 1 Å.)
     for (const auto& r : rows) {
-        if (r.size() < 4) {
+        if (r.size() != 4) {
             continue;
         }
         try {
@@ -161,8 +187,9 @@ bool try_parse_xds_classic(
         axes_ok = false;
     }
     if (axes_ok) {
+        const Eigen::Matrix3d R = xds_to_lab_frame(g.beam_dir, g.rot_axis);
         const Eigen::Matrix3d A = mosflm_amat_from_xds_real_axes(
-            ax, bx, cx, g.wavelength_A > 0.1 ? g.wavelength_A : 1.0
+            R * ax, R * bx, R * cx, g.wavelength_A > 0.1 ? g.wavelength_A : 1.0
         );
         if (A.norm() > 1e-6) {
             g.amat = A;
@@ -193,10 +220,37 @@ bool try_parse_xds_classic(
                     g.orgx_px = ox;
                     g.orgy_px = oy;
                     g.distance_mm = dist;
+                    // Detector X and Y axis rows follow ORGX ORGY F.
+                    for (int k = 0; k < 2 && i + 2 + k < rows.size(); ++k) {
+                        const auto& d = rows[i + 2 + static_cast<std::size_t>(k)];
+                        if (d.size() == 3) {
+                            double* dst = (k == 0) ? g.det_x : g.det_y;
+                            for (int c = 0; c < 3; ++c) {
+                                dst[c] = std::stod(d[static_cast<std::size_t>(c)]);
+                            }
+                        }
+                    }
                     break;
                 }
             } catch (...) {
             }
+        }
+    }
+
+    // Direct-beam pixel: intersect the incident beam with the detector plane
+    // (normal N = X × Y at distance F from the crystal).
+    {
+        const Eigen::Vector3d s0 =
+            Eigen::Vector3d(g.beam_dir[0], g.beam_dir[1], g.beam_dir[2]).normalized();
+        const Eigen::Vector3d dx(g.det_x[0], g.det_x[1], g.det_x[2]);
+        const Eigen::Vector3d dy(g.det_y[0], g.det_y[1], g.det_y[2]);
+        const Eigen::Vector3d n = dx.cross(dy).normalized();
+        const double cosn = s0.dot(n);
+        if (cosn > 0.5 && g.qx_mm > 0.0 && g.qy_mm > 0.0 && g.orgx_px > 0.0) {
+            const Eigen::Vector3d p = s0 * (g.distance_mm / cosn);
+            g.beam_fast_px = g.orgx_px + p.dot(dx) / g.qx_mm;
+            g.beam_slow_px = g.orgy_px + p.dot(dy) / g.qy_mm;
+            g.has_direct_beam = true;
         }
     }
 
@@ -417,7 +471,16 @@ void apply_xparm(
         line.clear();
         line << "PIXEL " << g.qx_mm << ' ' << g.qy_mm;
         session.parse_line(line.str());
-        if (g.orgx_px > 0.0 && g.orgy_px > 0.0) {
+        if (g.has_direct_beam) {
+            // Classic XDS: BEAM is where the beam meets the detector (fast,
+            // slow), not ORGX/ORGY (the foot of the detector normal).
+            line.str("");
+            line.clear();
+            line << "BEAM " << (g.beam_fast_px * g.qx_mm) << ' '
+                 << (g.beam_slow_px * g.qy_mm);
+            session.parse_line(line.str());
+        } else if (g.orgx_px > 0.0 && g.orgy_px > 0.0) {
+            // ProcessingLab bridge GXPARM stores its own BEAM as ORGX/ORGY.
             line.str("");
             line.clear();
             line << "BEAM " << (g.orgx_px * g.qx_mm) << ' '
@@ -426,6 +489,14 @@ void apply_xparm(
         }
     }
     if (g.has_amat) {
+        // The AMAT is built in the XDS lab frame (beam +z, axis +x), whose
+        // handedness matches ProcessingLab .spt indexing, not MOSFLM's.
+        session.parse_line("INVERTX OFF");
+        // Keep the XDS-refined detector and cell; refine the orientation
+        // only, as XDS INTEGRATE does. Distance and cell together are
+        // degenerate (both scale the pattern; 385 → 390 mm on 76c1b), and
+        // per-period cell refinement wandered b 185–189 Å late in that sweep.
+        session.parse_line("REFINE ORIENTATION");
         line.str("");
         line.clear();
         line << "MATRIX";

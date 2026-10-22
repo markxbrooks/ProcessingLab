@@ -29,6 +29,11 @@ struct PositionalObservation {
     /// slices. When finite, adds a φ residual and makes the rotation about
     /// the spindle observable. NaN → X/Y only.
     double phi_obs_deg{std::numeric_limits<double>::quiet_NaN()};
+    /// Expected error of ``phi_obs_deg`` (degrees). When finite, the φ
+    /// residual is ``Δφ / phi_sigma_deg`` (1σ counts as 1 px) instead of
+    /// ``phi_weight_px_per_deg · Δφ``: wide low-ζ reflections have much
+    /// less certain φ centroids and otherwise dominate the fit.
+    double phi_sigma_deg{std::numeric_limits<double>::quiet_NaN()};
 };
 
 /// Options for :class:`PositionalRefiner`.

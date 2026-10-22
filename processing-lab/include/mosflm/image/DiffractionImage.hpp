@@ -69,7 +69,9 @@ public:
 ///
 /// Enough for the CCP4 insulin example (``insulin_1_001.img``). Supports
 /// little-endian ``TYPE=unsigned_short`` with ``HEADER_BYTES`` / ``SIZE1`` /
-/// ``SIZE2``.
+/// ``SIZE2``. Pixels are stored transposed (``width = SIZE2``): the fast
+/// index runs along the file's slow axis, so (col, row) = MOSFLM
+/// (XDET, YDET) and the rotation axis (file fast axis) is along +slow.
 class SmvImageReader {
 public:
     [[nodiscard]] DiffractionImage read(const std::filesystem::path& path) const;

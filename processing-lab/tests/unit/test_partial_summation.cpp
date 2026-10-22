@@ -46,10 +46,60 @@ int main() {
     CHECK(close(r.fractioncalc, 1.0, 1e-6));  // 1.04 capped
     CHECK(r.mpart == 0);
     CHECK(r.flag == 0);
-    const double phi = (25 * 9.925 + 50 * 10.075 + 24 * 10.225) / 99.0;
+    // Re-centred with signed weights in the window: the −1 tail slice counts.
+    const double phi = (25 * 9.925 + 50 * 10.075 + 23 * 10.225) / 98.0;
     CHECK(close(r.phi_obs, phi, 1e-4));
     CHECK(close(r.xdet_obs, (25 * 166 + 50 * 167 + 24 * 168) / 99.0, 1e-3));
     CHECK(out[1].batch == 1266 && close(out[1].intensity, 7.0, 1e-6));
+
+    // φ spread uses signed weights: ± noise slices far out in the reach
+    // cancel instead of inflating it (clipped weights fed a MOSAIC runaway).
+    std::vector<MosflmReflection> rock{
+        slice(66, 0.25f, 25.0f, 9.925f, 0), slice(67, 0.5f, 50.0f, 10.075f, 0),
+        slice(68, 0.25f, 25.0f, 10.225f, 0),
+        slice(56, 0.0f, 6.0f, 8.425f, 0), slice(57, 0.0f, -6.0f, 8.575f, 0),
+        slice(78, 0.0f, 6.0f, 11.725f, 0), slice(77, 0.0f, -6.0f, 11.575f, 0),
+    };
+    const auto rs = sum_partial_slices(rock);
+    CHECK(rs.size() == 1u);
+    // Signed: (1.125 + 2·6·(1.65² − 1.5²)) / 100 → 0.261°; clipped
+    // weights would give √((1.125 + 12·1.65²) / 112) = 0.550°.
+    CHECK(close(rs[0].phi_obs_sd, 0.2608, 1e-3));
+
+    // Rocking-width fit: slices predicted at W = 0.5° (reach 4σ + 2 frames)
+    // of curves that are really W = 1.0° (ζ = 0.5) — the reach truncates
+    // them at ~2.5σ, which the fit models instead of reading as narrow.
+    {
+        using mosflm::diffraction::fit_rocking_width;
+        const double osc = 0.2, zeta = 0.5, w_now = 0.5, w_true = 1.0;
+        const double s_now = w_now / (2.355 * zeta);
+        const double s_true = w_true / (2.355 * zeta);
+        auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
+        std::vector<MosflmReflection> rows2;
+        for (int n = 0; n < 60; ++n) {
+            const double phic = 10.0 + 2.0 * n + 0.037 * n;  // off-grid φcalc
+            const double reach = 4.0 * s_now + 2.0 * osc;
+            for (int f = static_cast<int>(std::floor((phic - reach) / osc));
+                 f * osc <= phic + reach; ++f) {
+                const double f0 = f * osc - phic, f1 = f0 + osc;
+                auto r = slice(f, 0.0f, 0.0f, 0.0f, 0);
+                r.h = r.h0 = n;
+                r.rot = static_cast<float>(phic);
+                r.width = static_cast<float>(6.0 * s_now);
+                r.fractioncalc = static_cast<float>(cdf(f1 / s_now) - cdf(f0 / s_now));
+                r.intensity = static_cast<float>(
+                    2000.0 * (cdf(f1 / s_true) - cdf(f0 / s_true)) + ((f & 1) ? 1.5 : -1.5)
+                );
+                r.phi_obs = static_cast<float>(f * osc + 0.5 * osc);
+                rows2.push_back(r);
+            }
+        }
+        const auto fit = fit_rocking_width(rows2, w_now, osc);
+        CHECK(fit.has_value() && fit->n_reflections == 60u);
+        CHECK(fit.has_value() && close(fit->width_deg, w_true, 0.03));
+        // Too few strong reflections → no fit.
+        CHECK(!fit_rocking_width({rows2.begin(), rows2.begin() + 30}, w_now, osc).has_value());
+    }
 
     // Incomplete edge reflection stays partial.
     const auto edge = sum_partial_slices({slice(1, 0.3f, 30.0f, 0.075f, 0)});

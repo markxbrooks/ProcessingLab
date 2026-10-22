@@ -70,10 +70,10 @@ EOF
 
 ```commandline
 ./bin/ProcessingLab --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf hklout test.mtz <<'EOF'
-DIRECTORY test_xray_data_cbf
+DIRECTORY ../test_xray_data_cbf
 TEMPLATE 76c1b_0002212_1_####.cbf
 DMAX 320
-FINDSPOTS THRESHOLD 5.0 MAXSPOTS 1500 FIND 1 FILE /tmp/testdata.spt MULTIFRAME RANGE 1 50
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 20000 FIND 1 FILE /tmp/testdata.spt MULTIFRAME RANGE 1 50
 GO
 AUTOINDEX DPS THRESHOLD 15 SEPMIN 6 CLUSTER_RADIUS 2
 GO

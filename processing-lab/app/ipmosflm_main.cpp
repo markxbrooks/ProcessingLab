@@ -18,19 +18,150 @@
 #endif
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 namespace {
+
+/// Format the CONTROL input as a block at the top of the log.
+std::string control_input_block(const std::string& text) {
+    std::string out = "\n ***** CONTROL INPUT *****\n\n" + text;
+    if (!text.empty() && text.back() != '\n') {
+        out += '\n';
+    }
+    out += "\n ***** END OF CONTROL INPUT *****\n\n";
+    return out;
+}
+
+/// Copies everything written to stdout / stderr (C++ streams, C ``printf``
+/// from the DPS indexer, …) into a log file (default ``Process.Log``) while
+/// still showing it on the terminal.
+///
+/// Descriptors 1 and 2 are redirected into pipes; one thread per pipe copies
+/// to the original descriptor and to the log. ``close()`` restores them and
+/// drains the pipes; it also runs from ``atexit`` so output printed before an
+/// ``exit()`` reaches the terminal.
+class ProcessLog {
+public:
+    ProcessLog(const std::filesystem::path& path, const std::string& header) {
+        log_fd_ = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (log_fd_ < 0) {
+            throw std::runtime_error(
+                "cannot open log file '" + path.string() + "'"
+            );
+        }
+        write_all(log_fd_, header.data(), header.size());
+        std::cout.flush();
+        std::cerr.flush();
+        std::fflush(stdout);
+        std::fflush(stderr);
+        redirect(STDOUT_FILENO, out_);
+        redirect(STDERR_FILENO, err_);
+        // A pipe makes stdio fully buffered: keep stdout line-buffered so
+        // prompts and progress still appear promptly.
+        std::setvbuf(stdout, nullptr, _IOLBF, 0);
+        std::setvbuf(stderr, nullptr, _IONBF, 0);
+        active_ = this;
+        std::atexit([] {
+            if (active_ != nullptr) {
+                active_->close();
+            }
+        });
+    }
+
+    ProcessLog(const ProcessLog&) = delete;
+    ProcessLog& operator=(const ProcessLog&) = delete;
+
+    ~ProcessLog() { close(); }
+
+    /// Restore stdout / stderr, drain the pipes and close the log.
+    void close() {
+        if (log_fd_ < 0) {
+            return;
+        }
+        active_ = nullptr;
+        std::cout.flush();
+        std::cerr.flush();
+        std::fflush(stdout);
+        std::fflush(stderr);
+        restore(STDOUT_FILENO, out_);
+        restore(STDERR_FILENO, err_);
+        ::close(log_fd_);
+        log_fd_ = -1;
+    }
+
+private:
+    struct Channel {
+        int saved_fd{-1};
+        int read_fd{-1};
+        std::thread pump;
+    };
+
+    static void write_all(int fd, const char* p, std::size_t n) {
+        while (n > 0) {
+            const ssize_t w = ::write(fd, p, n);
+            if (w <= 0) {
+                return;
+            }
+            p += w;
+            n -= static_cast<std::size_t>(w);
+        }
+    }
+
+    void redirect(int fd, Channel& ch) {
+        int fds[2];
+        if (::pipe(fds) != 0) {
+            throw std::runtime_error("cannot create log pipe");
+        }
+        ch.saved_fd = ::dup(fd);
+        ch.read_fd = fds[0];
+        ::dup2(fds[1], fd);
+        ::close(fds[1]);
+        ch.pump = std::thread([this, &ch] {
+            char buf[8192];
+            ssize_t n = 0;
+            while ((n = ::read(ch.read_fd, buf, sizeof buf)) > 0) {
+                write_all(ch.saved_fd, buf, static_cast<std::size_t>(n));
+                const std::lock_guard<std::mutex> lock(log_mutex_);
+                write_all(log_fd_, buf, static_cast<std::size_t>(n));
+            }
+        });
+    }
+
+    static void restore(int fd, Channel& ch) {
+        if (ch.saved_fd < 0) {
+            return;
+        }
+        ::dup2(ch.saved_fd, fd);  // last write end closed → pump sees EOF
+        if (ch.pump.joinable()) {
+            ch.pump.join();
+        }
+        ::close(ch.read_fd);
+        ::close(ch.saved_fd);
+        ch.saved_fd = -1;
+    }
+
+    static inline ProcessLog* active_ = nullptr;
+    int log_fd_{-1};
+    std::mutex log_mutex_;
+    Channel out_;
+    Channel err_;
+};
 
 std::filesystem::path default_insulin_img() {
     if (const char* env = std::getenv("MOSFLM_IMAGE")) {
@@ -159,6 +290,7 @@ int main(int argc, char** argv) {
     std::optional<std::filesystem::path> xinfo_path;
     std::optional<std::filesystem::path> xds_inp_path;
     std::optional<std::filesystem::path> xparm_path;
+    std::optional<std::filesystem::path> log_path = "Process.Log";
     bool want_help = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -207,6 +339,18 @@ int main(int argc, char** argv) {
             hklout = argv[++i];
             continue;
         }
+        if (a == "--log") {
+            if (i + 1 >= argc) {
+                std::cerr << "ProcessingLab: --log needs a path\n";
+                return 2;
+            }
+            log_path = argv[++i];
+            continue;
+        }
+        if (a == "--no-log") {
+            log_path.reset();
+            continue;
+        }
         if (a == "version" || a == "--version") {
             print_banner();
             return 0;
@@ -223,12 +367,43 @@ int main(int argc, char** argv) {
         std::cerr
             << "Usage: ProcessingLab [HKLOUT out.mtz] [--image img]\n"
             << "         [--xinfo file.xinfo] [--xds-inp XDS.INP]\n"
-            << "         [--xparm XPARM.XDS] [script.in]\n"
+            << "         [--xparm XPARM.XDS] [--log Process.Log | --no-log]\n"
+            << "         [script.in]\n"
+            << "  Output is also written to Process.Log (--log path to rename,\n"
+            << "  --no-log to disable), including the CONTROL input.\n"
             << "  Reads CONTROL from script or stdin (GO/RUN → C++ science).\n"
             << "  --xds-inp then --xinfo then --xparm fill CONTROL before script.\n"
             << "  MOSFLM_IMAGE / CCP4 used when IMAGE/TEMPLATE unset.\n"
             << "  F77 ipmosflm oracle: make fortran-oracle\n";
         return 0;
+    }
+
+    // CONTROL input is read up front so the log can start with a copy of it.
+    const bool interactive = !script && ::isatty(STDIN_FILENO) != 0;
+    std::string control_text;
+    if (script) {
+        std::ifstream in(*script);
+        std::ostringstream text;
+        text << in.rdbuf();
+        control_text = text.str();
+    } else if (!interactive) {
+        std::ostringstream text;
+        text << std::cin.rdbuf();
+        control_text = text.str();
+    }
+
+    // Log file: everything on stdout/stderr is copied (Process.Log).
+    std::optional<ProcessLog> plog;
+    if (log_path) {
+        try {
+            plog.emplace(
+                *log_path,
+                interactive ? std::string() : control_input_block(control_text)
+            );
+        } catch (const std::exception& ex) {
+            std::cerr << "ProcessingLab: " << ex.what()
+                      << " (continuing without a log file)\n";
+        }
     }
 
     print_banner();
@@ -275,15 +450,18 @@ int main(int argc, char** argv) {
             runs = session.run_script(*script, img_override);
         } else {
             // Interactive terminal: say we are waiting and prompt per line.
-            const bool interactive = ::isatty(STDIN_FILENO) != 0;
             if (interactive) {
                 std::cout << "\n Reading CONTROL commands from the terminal."
                           << "\n Enter keywords (e.g. FINDSPOTS ..., AUTOINDEX"
                           << " ...), GO to run, EXIT or Ctrl-D to finish.\n\n";
             }
-            runs = session.run_stream(
-                std::cin, img_override, interactive ? " ProcessingLab> " : ""
-            );
+            if (interactive) {
+                runs = session.run_stream(std::cin, img_override, " ProcessingLab> ");
+            } else {
+                // Piped / here-doc input (already read for the log).
+                std::istringstream in(control_text);
+                runs = session.run_stream(in, img_override, "");
+            }
             if (interactive && !session.exit_requested()) {
                 std::cout << '\n';  // Ctrl-D leaves the cursor after the prompt.
             }

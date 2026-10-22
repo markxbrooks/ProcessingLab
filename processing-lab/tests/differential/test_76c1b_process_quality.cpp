@@ -78,12 +78,10 @@ int main() {
         ControlSession session;
         session.parse_line("DIRECTORY " + dir.string());
         session.parse_line("TEMPLATE 76c1b_0002212_1_####.cbf");
+        // Geometry from the XPARM alone (a hand-set BEAM was a workaround
+        // for the CBF orientation bug and now misplaces every spot); the
+        // rocking width comes from AUTOSIGMA (≈0.6–0.9° here, XDS ~1.0°).
         session.parse_line("XPARM " + xparm.string());
-        session.parse_line("DISTANCE 384.979");
-        session.parse_line("WAVELENGTH 0.979490");
-        session.parse_line("PIXEL 0.172 0.172");
-        session.parse_line("BEAM 210.2356 206.6442");
-        session.parse_line("MOSAIC 0.2");
         session.parse_line("PARTIALSCALE ON");
         session.parse_line("AUTOSIGMA ON");
         session.parse_line(
@@ -109,12 +107,10 @@ int main() {
         ControlSession session;
         session.parse_line("DIRECTORY " + dir.string());
         session.parse_line("TEMPLATE 76c1b_0002212_1_####.cbf");
+        // Geometry from the XPARM alone (a hand-set BEAM was a workaround
+        // for the CBF orientation bug and now misplaces every spot); the
+        // rocking width comes from AUTOSIGMA (≈0.6–0.9° here, XDS ~1.0°).
         session.parse_line("XPARM " + xparm.string());
-        session.parse_line("DISTANCE 384.979");
-        session.parse_line("WAVELENGTH 0.979490");
-        session.parse_line("PIXEL 0.172 0.172");
-        session.parse_line("BEAM 210.2356 206.6442");
-        session.parse_line("MOSAIC 0.2");
         session.parse_line("SYMMETRY 3");
         session.parse_line("PARTIALSCALE ON");
         session.parse_line("AUTOSIGMA ON");

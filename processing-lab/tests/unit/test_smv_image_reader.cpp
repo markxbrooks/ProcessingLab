@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <utility>
 #include <iostream>
 
 using mosflm::image::DiffractionImage;
@@ -61,6 +63,20 @@ int main() {
         static_cast<double>(sum) / static_cast<double>(image.pixels.size());
     CHECK(mean > 50.0);
 
+    // Stored transposed: pixel (col c, row r) is file pixel (fast r, slow c),
+    // so column = MOSFLM XDET (file slow axis), as ipmosflm reads ADSC.
+    {
+        std::ifstream f(path, std::ios::binary);
+        auto raw_at = [&](int fast, int slow) {
+            unsigned char b[2] = {0, 0};
+            f.seekg(512 + 2 * (static_cast<std::streamoff>(slow) * 2304 + fast));
+            f.read(reinterpret_cast<char*>(b), 2);
+            return static_cast<std::int32_t>(b[0] | (b[1] << 8));
+        };
+        for (const auto [c, r] : {std::pair{100, 1700}, std::pair{1234, 567}, std::pair{2000, 3}}) {
+            CHECK_EQ(image.pixels[static_cast<std::size_t>(r) * 2304 + c], raw_at(r, c));
+        }
+    }
     const auto det = image.metadata.to_detector_geometry();
     CHECK_EQ(det.nfast, 2304);
     CHECK_EQ(det.nslow, 2304);

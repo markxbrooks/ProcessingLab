@@ -136,8 +136,10 @@ DiffractionImage SmvImageReader::read(const std::filesystem::path& path) const {
     const bool little = order_lc.find("little") != std::string::npos;
 
     DiffractionImage image;
-    image.metadata.width = size1;
-    image.metadata.height = size2;
+    // Stored transposed (see below): ProcessingLab's fast index runs along
+    // the ADSC slow axis.
+    image.metadata.width = size2;
+    image.metadata.height = size1;
     image.metadata.pixel_size_x_mm = require_double(kv, "PIXEL_SIZE");
     image.metadata.pixel_size_y_mm = image.metadata.pixel_size_x_mm;
     image.metadata.detector_distance_mm = require_double(kv, "DISTANCE");
@@ -167,16 +169,26 @@ DiffractionImage SmvImageReader::read(const std::filesystem::path& path) const {
         );
     }
 
+    // MOSFLM reads ADSC with XDET along the file's slow axis and the
+    // rotation axis along its fast axis ("oscillation axis is parallel to
+    // the fast axis in the image"). Transpose so pixel (col, row) =
+    // (XDET, YDET) and omega 0 (axis along +slow) hold, as for the other
+    // readers; header BEAM_CENTER_X/Y are already MOSFLM X/Y. Untransposed,
+    // a MOSFLM MATRIX predicted the right XDET/YDET but integrated the
+    // mirror-image pixels (insulin: no correlation with ipmosflm).
     image.pixels.resize(npix);
     for (std::size_t i = 0; i < npix; ++i) {
-        const std::size_t o = i * 2U;
+        const std::size_t o = (i % static_cast<std::size_t>(size2)) *
+                                  static_cast<std::size_t>(size1) +
+                              i / static_cast<std::size_t>(size2);
+        const std::size_t ob = o * 2U;
         std::uint16_t v = 0;
         if (little) {
-            v = static_cast<std::uint16_t>(raw[o]) |
-                (static_cast<std::uint16_t>(raw[o + 1U]) << 8);
+            v = static_cast<std::uint16_t>(raw[ob]) |
+                (static_cast<std::uint16_t>(raw[ob + 1U]) << 8);
         } else {
-            v = static_cast<std::uint16_t>(raw[o + 1U]) |
-                (static_cast<std::uint16_t>(raw[o]) << 8);
+            v = static_cast<std::uint16_t>(raw[ob + 1U]) |
+                (static_cast<std::uint16_t>(raw[ob]) << 8);
         }
         image.pixels[i] = static_cast<std::int32_t>(v);
     }

@@ -8,7 +8,10 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <optional>
 #include <sstream>
+#include <stdexcept>
 
 using mosflm::control::ControlSession;
 
@@ -39,6 +42,38 @@ int main() {
     CHECK(session.state().has_matrix);
     CHECK(session.done_run());
     CHECK(std::fabs(session.state().cell.a - 78.19) < 2.0);
+
+    // MULTIFRAME follows a single --image file to each frame's sibling
+    // (it used to read image 1 for every frame), else TEMPLATE; HDF5
+    // masters are kept as given.
+    {
+        namespace fs = std::filesystem;
+        using mosflm::indexing::resolve_findspots_frame_path;
+        const fs::path dir = fs::temp_directory_path() / "pl_frame_path_test";
+        fs::create_directories(dir);
+        for (const char* n : {"x_1_0001.cbf", "x_1_0002.cbf", "x_1_0037.cbf"}) {
+            std::ofstream(dir / n) << "stub";
+        }
+        ControlSession s2;
+        const std::optional<fs::path> img = dir / "x_1_0001.cbf";
+        CHECK(resolve_findspots_frame_path(s2.state(), img, 37) == dir / "x_1_0037.cbf");
+        CHECK(resolve_findspots_frame_path(s2.state(), img, 1) == dir / "x_1_0001.cbf");
+        // Sibling missing and no TEMPLATE → error, not a silent repeat.
+        bool threw = false;
+        try {
+            (void)resolve_findspots_frame_path(s2.state(), img, 3);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        CHECK(threw);
+        s2.parse_line("DIRECTORY " + dir.string());
+        s2.parse_line("TEMPLATE x_1_####.cbf");
+        CHECK(resolve_findspots_frame_path(s2.state(), std::nullopt, 2) == dir / "x_1_0002.cbf");
+        const std::optional<fs::path> h5 = dir / "sweep_1_master.h5";
+        CHECK(resolve_findspots_frame_path(s2.state(), h5, 9) == *h5);
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
 
     return mosflm_test::finish("control_autoindex");
 }

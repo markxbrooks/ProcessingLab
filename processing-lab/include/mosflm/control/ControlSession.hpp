@@ -130,6 +130,13 @@ struct ControlState {
     /// Periodic post-refinement interval in frames (0 = only when
     /// ``POSTREFINE`` without PERIOD; CONTROL ``POSTREFINE PERIOD n``).
     int postrefine_period{25};
+    /// Parameters positional refinement may change (CONTROL ``REFINE``).
+    /// ``--xparm`` keeps the XDS-refined detector: ORIENTATION CELL only.
+    bool refine_orientation{true};
+    bool refine_cell{true};
+    bool refine_distance{true};
+    bool refine_beam{true};
+    bool refine_tilt_twist{true};
     /// OpenMP worker count for MULTIFRAME FINDSPOTS / PROCESS (CONTROL
     /// ``NPROC``). Default from ``PROCESSINGLAB_NPROC`` or hardware.
     int nproc{mosflm::util::default_nproc()};
