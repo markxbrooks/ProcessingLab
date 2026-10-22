@@ -281,41 +281,52 @@ void count_possible(
     }
 }
 
+/// ``# `` is two columns, matching the indent on each data row, so the
+/// labels share the field widths of :func:`print_shell_row`.
+void print_shell_header(std::ostream& os) {
+    os << "# " << std::setw(9) << "limit_A"
+       << ' ' << std::setw(8) << "observed"
+       << ' ' << std::setw(7) << "unique"
+       << ' ' << std::setw(8) << "possible"
+       << ' ' << std::setw(7) << "compl%"
+       << ' ' << std::setw(7) << "R_obs%"
+       << ' ' << std::setw(7) << "R_exp%"
+       << ' ' << std::setw(8) << "compared"
+       << ' ' << std::setw(7) << "I/sigma"
+       << ' ' << std::setw(7) << "Rmeas%"
+       << ' ' << std::setw(7) << "CC(1/2)"
+       << ' ' << std::setw(3) << "sig"
+       << ' ' << std::setw(6) << "Anomal"
+       << ' ' << std::setw(7) << "SigAno"
+       << ' ' << std::setw(6) << "Nano"
+       << '\n';
+}
+
 void print_shell_row(std::ostream& os, const ResolutionShellStats& s, bool total) {
-    os << std::fixed;
+    const double r_obs = s.compared > 0 ? s.r_obs_pct : -99.9;
+    const double r_exp = s.compared > 0 ? s.r_exp_pct : -99.9;
+    const double rmeas = s.compared > 0 ? s.rmeas_pct : -99.9;
+    os << std::fixed << "  ";
     if (total) {
-        os << "    total";
+        os << std::setw(9) << "total";
     } else {
         os << std::setw(9) << std::setprecision(2) << s.d_limit_A;
     }
-    os << ' ' << std::setw(11) << s.observed << ' ' << std::setw(7)
-       << s.unique << ' ' << std::setw(9) << s.possible << "      "
-       << std::setw(5) << std::setprecision(1) << s.completeness_pct
-       << '%';
-    if (s.compared > 0) {
-        os << "    " << std::setw(7) << std::setprecision(1) << s.r_obs_pct
-           << '%' << "  " << std::setw(7) << s.r_exp_pct << '%';
-    } else {
-        os << "    " << std::setw(7) << std::setprecision(1) << -99.9
-           << '%' << "  " << std::setw(7) << -99.9 << '%';
-    }
-    os << ' ' << std::setw(8) << s.compared << ' ' << std::setw(7)
-       << std::setprecision(2) << s.mean_isigma;
-    if (s.compared > 0) {
-        os << "   " << std::setw(6) << std::setprecision(1) << s.rmeas_pct
-           << '%';
-    } else {
-        os << "   " << std::setw(6) << std::setprecision(1) << -99.9 << '%';
-    }
-    os << ' ' << std::setw(7) << std::setprecision(1) << s.cc_half_pct;
-    if (s.cc_significant) {
-        os << '*';
-    } else {
-        os << ' ';
-    }
-    os << ' ' << std::setw(5) << std::setprecision(0) << s.anomal_corr_pct
-       << "  " << std::setw(6) << std::setprecision(3) << s.sigano << ' '
-       << std::setw(7) << s.nano << '\n';
+    os << ' ' << std::setw(8) << s.observed
+       << ' ' << std::setw(7) << s.unique
+       << ' ' << std::setw(8) << s.possible
+       << ' ' << std::setw(7) << std::setprecision(1) << s.completeness_pct
+       << ' ' << std::setw(7) << std::setprecision(1) << r_obs
+       << ' ' << std::setw(7) << std::setprecision(1) << r_exp
+       << ' ' << std::setw(8) << s.compared
+       << ' ' << std::setw(7) << std::setprecision(2) << s.mean_isigma
+       << ' ' << std::setw(7) << std::setprecision(1) << rmeas
+       << ' ' << std::setw(7) << std::setprecision(1) << s.cc_half_pct
+       << ' ' << std::setw(3) << (s.cc_significant ? 1 : 0)
+       << ' ' << std::setw(6) << std::setprecision(0) << s.anomal_corr_pct
+       << ' ' << std::setw(7) << std::setprecision(3) << s.sigano
+       << ' ' << std::setw(6) << s.nano
+       << '\n';
 }
 
 }  // namespace
@@ -508,7 +519,7 @@ void write_data_quality_table(
           " 269-275.\n\n"
        << " CC(1/2)  = percentage of correlation between intensities from\n"
        << "            random half-datasets. Correlation significant at\n"
-       << "            the 0.1% level is marked by an asterisk.\n"
+       << "            the 0.1% level has sig=1 in the table.\n"
        << "            Karplus & Diederichs (2012), Science 336, 1030-33\n"
        << " Anomal   = percentage of correlation between random half-sets\n"
        << "  Corr      of anomalous intensity differences. Correlation\n"
@@ -522,16 +533,20 @@ void write_data_quality_table(
        << "            for each (+ and -) parity are required.\n\n\n"
        << " SUBSET OF INTENSITY DATA WITH SIGNAL/NOISE >= -3.0 AS FUNCTION"
           " OF RESOLUTION (UNSCALED)\n"
-       << " RESOLUTION     NUMBER OF REFLECTIONS    COMPLETENESS R-FACTOR"
-          "  R-FACTOR COMPARED I/SIGMA   R-meas  CC(1/2)  Anomal  SigAno"
-          "   Nano\n"
-       << "   LIMIT     OBSERVED  UNIQUE  POSSIBLE     OF DATA   observed"
-          "  expected                                      Corr\n\n";
-
+       << "RESOLUTION_BINS nshells=" << report.shells.size()
+       << " columns=d_limit_A,observed,unique,possible,completeness_pct,"
+          "r_obs_pct,r_exp_pct,compared,mean_isigma,rmeas_pct,cc_half_pct,"
+          "cc_sig,anomal_corr_pct,sigano,nano\n"
+       << "# d_limit_A is the high-resolution edge (Å). The last row is"
+          " the whole range (total).\n"
+       << "# R_obs, R_exp, and Rmeas are -99.9 when compared is 0."
+          " Percent columns are already in percent.\n";
+    print_shell_header(os);
     for (const auto& shell : report.shells) {
         print_shell_row(os, shell, /*total=*/false);
     }
     print_shell_row(os, report.total, /*total=*/true);
+    os << "RESOLUTION_BINS_END\n";
 
     os << "\n\n"
        << " NUMBER OF REFLECTIONS IN SELECTED SUBSET OF IMAGES "

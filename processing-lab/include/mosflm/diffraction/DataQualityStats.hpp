@@ -57,6 +57,13 @@ struct DataQualityReport {
 
 /// Print the XDS ``COMPLETENESS AND QUALITY OF DATA SET`` block (legend +
 /// resolution table + observation counts).
+///
+/// The numeric table sits between ``RESOLUTION_BINS`` and
+/// ``RESOLUTION_BINS_END``. The marker line names the columns. ``#`` lines
+/// are the aligned header and notes. Each data line is one shell, then a
+/// ``total`` line. Fields are space-separated and carry no ``%`` or ``*``;
+/// ``cc_sig`` is 1 when CC(1/2) is significant at the 0.1% level, and
+/// R-factors are −99.9 when ``compared`` is 0.
 void write_data_quality_table(
     std::ostream& os,
     const DataQualityReport& report
