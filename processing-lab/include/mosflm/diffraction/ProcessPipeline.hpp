@@ -87,6 +87,8 @@ struct ProcessResult {
     std::vector<IntegratedReflection> integrated;
     std::vector<MeasObservation> meas_observations;
     std::vector<ProfileObservation> profile_observations;
+    /// This frame's standard-profile learners (for pooling across frames).
+    ProfileAccumulator profile_learned;
     /// Simple H/K/L/I/SIGI view (always filled from ``mosflm_reflections``).
     std::vector<crystal::SimpleReflection> mtz_reflections;
     /// Full MOSFLM PROCESS rows (FLAG / XDET / FRACTIONCALC / …).

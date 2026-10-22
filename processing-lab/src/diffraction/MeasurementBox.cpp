@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <vector>
 
@@ -346,17 +347,29 @@ BackgroundPlane fit_background_plane(
     return plane;
 }
 
-std::optional<SpotExtent> estimate_spot_extent(
+SpotExtentEstimator::SpotExtentEstimator(
+    int window_half, double min_snr, double threshold_frac, std::size_t min_spots
+)
+    : R_(std::max(window_half, 3)),
+      min_snr_(min_snr),
+      threshold_frac_(threshold_frac),
+      min_spots_(min_spots) {
+    const auto cells = static_cast<std::size_t>((2 * R_ + 1) * (2 * R_ + 1));
+    all_.avg.assign(cells, 0.0);
+    all_.cnt.assign(cells, 0.0);
+}
+
+void SpotExtentEstimator::add(
     const image::DiffractionImage& image,
     const std::vector<std::pair<double, double>>& centres_px,
-    int window_half,
-    double min_snr,
-    double threshold_frac,
-    std::size_t min_spots
+    const std::vector<std::pair<double, double>>* others
 ) {
+    if (centres_px.empty()) {
+        return;
+    }
     const int w = image.metadata.width;
     const int h = image.metadata.height;
-    const int R = std::max(window_half, 3);
+    const int R = R_;
     const int side = 2 * R + 1;
     const auto at = [&](int c, int r) {
         return image.pixels[static_cast<std::size_t>(r) * static_cast<std::size_t>(w) +
@@ -371,16 +384,33 @@ std::optional<SpotExtent> estimate_spot_extent(
         }
         return t;
     };
-    std::vector<double> avg(static_cast<std::size_t>(side * side), 0.0);
+    // Voronoi mask: a window pixel belongs to this spot only if no other
+    // predicted spot is nearer, so neighbours (insulin ~24 px apart) cannot
+    // grow the enclosed-flux curve. Hash all centres on a grid of side.
+    std::vector<std::pair<double, double>> all_c(centres_px);
+    if (others != nullptr) {
+        all_c.insert(all_c.end(), others->begin(), others->end());
+    }
+    const int gcell = side;
+    const int gw = w / gcell + 1;
+    const int gh = h / gcell + 1;
+    std::vector<std::vector<int>> grid(static_cast<std::size_t>(gw * gh));
+    for (int k = 0; k < static_cast<int>(all_c.size()); ++k) {
+        const int gx = std::clamp(static_cast<int>(all_c[static_cast<std::size_t>(k)].first) / gcell, 0, gw - 1);
+        const int gy = std::clamp(static_cast<int>(all_c[static_cast<std::size_t>(k)].second) / gcell, 0, gh - 1);
+        grid[static_cast<std::size_t>(gy * gw + gx)].push_back(k);
+    }
+    std::vector<char> own(static_cast<std::size_t>(side * side), 1);
+    std::vector<int> near;
     std::vector<double> win;
-    std::size_t n = 0;
+    std::vector<double> sorted;
     for (const auto& [col, row] : centres_px) {
         const int c0 = static_cast<int>(std::lround(col));
         const int r0 = static_cast<int>(std::lround(row));
-        // Re-centre on the 3×3 maximum within ±3 px of the prediction.
         if (c0 - R - 4 < 0 || r0 - R - 4 < 0 || c0 + R + 4 >= w || r0 + R + 4 >= h) {
             continue;
         }
+        // Re-centre on the 3×3 maximum within ±3 px of the prediction.
         int pc = c0;
         int pr = r0;
         double best = -1.0;
@@ -406,29 +436,111 @@ std::optional<SpotExtent> estimate_spot_extent(
         if (masked) {
             continue;
         }
-        std::vector<double> sorted(win);
+        near.clear();
+        {
+            const int gx = std::clamp(static_cast<int>(col) / gcell, 0, gw - 1);
+            const int gy = std::clamp(static_cast<int>(row) / gcell, 0, gh - 1);
+            for (int yy = std::max(gy - 1, 0); yy <= std::min(gy + 1, gh - 1); ++yy) {
+                for (int xx = std::max(gx - 1, 0); xx <= std::min(gx + 1, gw - 1); ++xx) {
+                    for (int k : grid[static_cast<std::size_t>(yy * gw + xx)]) {
+                        const auto& o = all_c[static_cast<std::size_t>(k)];
+                        if (std::hypot(o.first - col, o.second - row) > 1e-6) {
+                            near.push_back(k);
+                        }
+                    }
+                }
+            }
+        }
+        for (int dr = -R; dr <= R; ++dr) {
+            for (int dc = -R; dc <= R; ++dc) {
+                const double x = pc + dc;
+                const double y = pr + dr;
+                const double d_own = std::hypot(x - col, y - row);
+                bool mine = true;
+                for (int k : near) {
+                    const auto& o = all_c[static_cast<std::size_t>(k)];
+                    if (std::hypot(x - o.first, y - o.second) < d_own) {
+                        mine = false;
+                        break;
+                    }
+                }
+                own[static_cast<std::size_t>((dr + R) * side + (dc + R))] = mine ? 1 : 0;
+            }
+        }
+        // Background: the window median, robust to neighbours and spot
+        // pixels; on sparse photon-counting frames (median < 10 counts,
+        // mostly 0s) the median sits below the mean and left a pedestal
+        // that grew the box with its area, so there use the outer ring's
+        // mean (≥ R−2 from the centre) with one Poisson-limit clip.
+        sorted = win;
         auto mid = sorted.begin() + static_cast<std::ptrdiff_t>(sorted.size() / 2);
         std::nth_element(sorted.begin(), mid, sorted.end());
-        const double bg = *mid;
+        double bg = *mid;
+        if (bg < 10.0) {
+        double bsum = 0.0;
+        int bn = 0;
+        for (int dr = -R; dr <= R; ++dr) {
+            for (int dc = -R; dc <= R; ++dc) {
+                if (std::max(std::abs(dc), std::abs(dr)) >= R - 2) {
+                    bsum += win[static_cast<std::size_t>((dr + R) * side + (dc + R))];
+                    ++bn;
+                }
+            }
+        }
+        bg = bn > 0 ? bsum / bn : 0.0;
+        const double clip = poisson_upper_limit(bg, 3.0);
+        bsum = 0.0;
+        bn = 0;
+        for (int dr = -R; dr <= R; ++dr) {
+            for (int dc = -R; dc <= R; ++dc) {
+                const double v = win[static_cast<std::size_t>((dr + R) * side + (dc + R))];
+                if (std::max(std::abs(dc), std::abs(dr)) >= R - 2 && v <= clip) {
+                    bsum += v;
+                    ++bn;
+                }
+            }
+        }
+        if (bn > 0) {
+            bg = bsum / bn;
+        }
+        }
         const double signal = best - 9.0 * bg;
-        if (!(signal >= min_snr * std::sqrt(9.0 * std::max(bg, 1.0)))) {
-            continue;
+        const double snr = signal / std::sqrt(9.0 * std::max(bg, 1.0));
+        const auto deposit = [&](Acc& acc) {
+            for (std::size_t k = 0; k < win.size(); ++k) {
+                if (own[k]) {
+                    acc.avg[k] += (win[k] - bg) / signal;
+                    acc.cnt[k] += 1.0;
+                }
+            }
+            ++acc.n;
+        };
+        if (snr >= min_snr_) {
+            deposit(all_);
         }
-        for (std::size_t k = 0; k < win.size(); ++k) {
-            avg[k] += (win[k] - bg) / signal;
-        }
-        ++n;
     }
-    if (n < min_spots) {
+}
+
+std::optional<SpotExtent> SpotExtentEstimator::extent_of(
+    const Acc& acc_in, std::size_t min_spots
+) const {
+    if (acc_in.n < min_spots || acc_in.n == 0) {
         return std::nullopt;
     }
+    // Per-cell mean over the spots that own the cell (Voronoi mask).
+    Acc acc = acc_in;
+    for (std::size_t k = 0; k < acc.avg.size(); ++k) {
+        acc.avg[k] = acc.cnt[k] > 0.0 ? acc.avg[k] / acc.cnt[k] : 0.0;
+    }
+    const int R = R_;
+    const int side = 2 * R + 1;
     const auto centre = static_cast<std::size_t>(R * side + R);
-    const double cut = threshold_frac * avg[centre];
-    std::vector<char> in(avg.size(), 0);
+    const double cut = threshold_frac_ * acc.avg[centre];
+    std::vector<char> in(acc.avg.size(), 0);
     std::vector<int> stack{static_cast<int>(centre)};
     in[centre] = 1;
     SpotExtent out;
-    out.n_spots = n;
+    out.n_spots = acc.n;
     double sw = 0.0, sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0;
     while (!stack.empty()) {
         const int k = stack.back();
@@ -437,7 +549,7 @@ std::optional<SpotExtent> estimate_spot_extent(
         const int dr = k / side - R;
         out.half_x = std::max(out.half_x, std::abs(dc));
         out.half_y = std::max(out.half_y, std::abs(dr));
-        const double v = avg[static_cast<std::size_t>(k)];
+        const double v = acc.avg[static_cast<std::size_t>(k)];
         sw += v;
         sx += v * dc;
         sy += v * dr;
@@ -451,7 +563,7 @@ std::optional<SpotExtent> estimate_spot_extent(
                 continue;
             }
             const auto q = static_cast<std::size_t>((r + R) * side + (c + R));
-            if (!in[q] && avg[q] >= cut) {
+            if (!in[q] && acc.avg[q] >= cut) {
                 in[q] = 1;
                 stack.push_back(static_cast<int>(q));
             }
@@ -463,7 +575,34 @@ std::optional<SpotExtent> estimate_spot_extent(
         out.sigma_x = std::sqrt(std::max(sxx / sw - mx * mx, 0.0));
         out.sigma_y = std::sqrt(std::max(syy / sw - my * my, 0.0));
     }
+    // Integration box from the spot σ (MOSFLM / XDS size the box from the
+    // spot): ±(2σ̄ + 1 px), σ̄ the mean of the two axes, the extra pixel for
+    // spots that grow away from the beam. Threshold and enclosed-flux rules
+    // were each thrown off by a background pedestal on one detector (Eiger
+    // sparse counts, Pilatus integer medians); the strong-spot σ is stable.
+    // The square box follows the mean σ, not the larger: 76c1b's spots are
+    // 0.7 × 1.6 px and an 11×11 box cost CC½ 4 points against 7×7.
+    // Thaumatin 7×7, insulin 13×13, 76c1b 9×9.
+    out.half_box =
+        static_cast<int>(std::ceil(2.0 * 0.5 * (out.sigma_x + out.sigma_y))) + 1;
     return out;
+}
+
+std::optional<SpotExtent> SpotExtentEstimator::result() const {
+    return extent_of(all_, min_spots_);
+}
+
+std::optional<SpotExtent> estimate_spot_extent(
+    const image::DiffractionImage& image,
+    const std::vector<std::pair<double, double>>& centres_px,
+    int window_half,
+    double min_snr,
+    double threshold_frac,
+    std::size_t min_spots
+) {
+    SpotExtentEstimator est(window_half, min_snr, threshold_frac, min_spots);
+    est.add(image, centres_px);
+    return est.result();
 }
 
 std::vector<MeasObservation> MeasIntegrator::integrate(

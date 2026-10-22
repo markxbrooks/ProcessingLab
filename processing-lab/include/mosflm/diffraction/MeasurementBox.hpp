@@ -124,6 +124,8 @@ struct SpotExtent {
     double sigma_x{0.0};  ///< Second-moment σ of the average spot (px).
     double sigma_y{0.0};
     std::size_t n_spots{0};
+    /// Peak-box half-width to integrate with: ⌈2·mean(σ)⌉ + 1 px.
+    int half_box{0};
 };
 
 /**
@@ -137,7 +139,9 @@ struct SpotExtent {
  * around the centre where that average is ≥ ``threshold_frac`` of its peak
  * (20% ≈ 1.8σ for a Gaussian; on CCP4 insulin this gave ipmosflm's peak
  * size and the best agreement with it, where 3% added background noise);
- * its extent gives ``half_x``/``half_y``.
+ * its extent gives ``half_x``/``half_y`` and its second moments
+ * ``sigma_x``/``sigma_y``; ``half_box`` = ⌈2·mean(σ)⌉ + 1 px is the box to
+ * integrate with. Pixels nearer another predicted spot are masked out.
  * Neighbours sit at varying offsets, so they blur into the average's
  * background rather than joining the region.
  *
@@ -157,6 +161,42 @@ struct SpotExtent {
     double threshold_frac = 0.2,
     std::size_t min_spots = 20
 );
+
+/// :func:`estimate_spot_extent` over several frames, one at a time (one
+/// 0.15° Eiger frame has too few strong spots away from the beam, and
+/// holding many frames costs ~70 MB each).
+class SpotExtentEstimator {
+public:
+    explicit SpotExtentEstimator(
+        int window_half = 15,
+        double min_snr = 10.0,
+        double threshold_frac = 0.2,
+        std::size_t min_spots = 20
+    );
+    /// Add one frame's strong spots near ``centres_px`` (column, row). Pixels nearer another predicted
+    /// spot (in ``centres_px`` or ``others``) are left out of a spot's
+    /// average, so neighbours cannot inflate the box.
+    void add(
+        const image::DiffractionImage& image,
+        const std::vector<std::pair<double, double>>& centres_px,
+        const std::vector<std::pair<double, double>>* others = nullptr
+    );
+    /// Extent so far, or ``std::nullopt`` if too few strong spots.
+    [[nodiscard]] std::optional<SpotExtent> result() const;
+
+private:
+    struct Acc {
+        std::vector<double> avg;  ///< Σ normalised values per cell.
+        std::vector<double> cnt;  ///< Spots that owned each cell.
+        std::size_t n{0};
+    };
+    [[nodiscard]] std::optional<SpotExtent> extent_of(const Acc& acc, std::size_t min_spots) const;
+    int R_;
+    double min_snr_;
+    double threshold_frac_;
+    std::size_t min_spots_;
+    Acc all_;
+};
 
 /// Random-access measurement boxes (MEAS science contract without the
 /// Fortran stripe I/O buffer). Feeds PROCESS-style summation / profiles.

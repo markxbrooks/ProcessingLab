@@ -3,6 +3,7 @@
 #include "mosflm/diffraction/MeasurementBox.hpp"
 #include "mosflm/diffraction/SummationIntegrator.hpp"
 
+#include <memory>
 #include <vector>
 
 namespace mosflm::diffraction {
@@ -21,6 +22,31 @@ struct ProfileObservation : MeasObservation {
     bool profile_ok{false};
     /// Detector-region index ``iy * n_bins_x + ix`` (0 if global-only).
     int profile_region{0};
+};
+
+/// Learned standard-profile sums: unit-volume learner profiles, sampled by
+/// each pixel centre's offset from the predicted spot centre on an
+/// oversampled grid, summed per detector region and over all regions, with
+/// counts. Additive, so several frames' learners can be pooled into the
+/// profiles for the next block.
+struct ProfileAccumulator {
+    int half{-1};  ///< Peak half-width the profiles were learned at.
+    int oversample{1};  ///< Profile cells per pixel (each axis).
+    int n_bins_x{0};
+    int n_bins_y{0};
+    /// [slot][cell] bilinear-splatted learner values and their weights; the
+    /// profile is ``sum / w`` per cell. Slots are the ``n_bins_x × n_bins_y`` tiles,
+    /// then six 8°-wide rings of 2θ (a tile's fallback).
+    std::vector<double> region_sum;
+    std::vector<double> region_w;
+    std::vector<int> region_n;
+    std::vector<double> global_sum;
+    std::vector<double> global_w;
+    int global_n{0};
+
+    /// Add ``other``; ignored if its peak size or tiling differs.
+    void add(const ProfileAccumulator& other);
+    [[nodiscard]] bool empty() const { return global_n == 0; }
 };
 
 /// Options for building / applying detector-region standard profiles.
@@ -42,6 +68,15 @@ struct StandardProfileSettings {
     /// Defaults ``1×1`` (single global profile). PROCESS uses ``5×5`` (25).
     int n_bins_x{1};
     int n_bins_y{1};
+    /// Learners pooled from earlier frames, added to this frame's before
+    /// profiles are formed (MOSFLM / XDS average profiles over a block of
+    /// images; one 0.15° Eiger frame left 15 of 25 regions short of
+    /// learners, so 60% of spots were fitted with the global profile).
+    std::shared_ptr<const ProfileAccumulator> prior{};
+    /// Profile cells per pixel (each axis). Spots are learned and fitted at
+    /// their predicted sub-pixel positions (XDS reflection frame); 1 is the
+    /// old integer-pixel profile.
+    int oversample{4};
 };
 
 /// Learn peak-shaped standard profiles per detector region, then fit spots.
@@ -55,6 +90,14 @@ public:
     [[nodiscard]] std::vector<ProfileObservation> fit(
         const IntegrationRequest& request,
         const StandardProfileSettings& settings
+    ) const;
+
+    /// As above; also returns this frame's own learners (without the
+    /// prior) in ``learned`` so callers can pool them.
+    [[nodiscard]] std::vector<ProfileObservation> fit(
+        const IntegrationRequest& request,
+        const StandardProfileSettings& settings,
+        ProfileAccumulator* learned
     ) const;
 };
 

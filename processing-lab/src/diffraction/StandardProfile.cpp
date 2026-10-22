@@ -54,6 +54,75 @@ void to_pixel(
     SummationIntegrator::mm_to_image_pixel(detector, x_mm, y_mm, col, row);
 }
 
+/// Predicted spot centre in fractional image pixels (column, row).
+void to_pixel_f(
+    const DetectorGeometry& detector,
+    const IntegrationSettings& settings,
+    double x_mm,
+    double y_mm,
+    double& col,
+    double& row
+) {
+    if (settings.mosflm_detector_axes) {
+        mosflm::cpp_mm_to_mosflm_xdet_yscale(
+            x_mm, y_mm, settings.image_beam_x_mm, settings.image_beam_y_mm,
+            detector.pixel_size_x_mm, detector.pixel_size_y_mm, detector.yscale,
+            col, row
+        );
+        return;
+    }
+    double xf = 0.0;
+    double yf = 0.0;
+    detector.mm_to_pixel(x_mm, y_mm, xf, yf);
+    col = xf + 0.5 * detector.nfast;
+    row = yf + 0.5 * detector.nslow;
+}
+
+/// Oversampled profile: value of a pixel (fraction of the spot volume) as a
+/// function of that pixel centre's offset (px) from the predicted centre,
+/// on a grid of ``s`` cells per pixel spanning ±(half + 0.5) px.
+struct FineGrid {
+    int half{0};
+    int s{1};
+    int side{1};  ///< Cells per row: (2·half + 1)·s.
+
+    FineGrid(int h, int over) : half(h), s(std::max(over, 1)), side((2 * h + 1) * std::max(over, 1)) {}
+
+    [[nodiscard]] std::size_t size() const {
+        return static_cast<std::size_t>(side) * static_cast<std::size_t>(side);
+    }
+    /// Continuous cell coordinate of offset ``x`` (px).
+    [[nodiscard]] double cell(double x) const {
+        return (x + half + 0.5) * s - 0.5;
+    }
+    /// Bilinear sample of the profile (sum/w) at offset (x, y), skipping
+    /// empty cells; negatives clipped (learned tails dip below 0).
+    [[nodiscard]] double sample(const double* sum, const double* w, double x, double y) const {
+        const double u = cell(x);
+        const double t = cell(y);
+        const int i0 = static_cast<int>(std::floor(u));
+        const int j0 = static_cast<int>(std::floor(t));
+        const double fu = u - i0;
+        const double ft = t - j0;
+        double acc = 0.0;
+        double wsum = 0.0;
+        for (int dj = 0; dj <= 1; ++dj) {
+            for (int di = 0; di <= 1; ++di) {
+                const int i = std::clamp(i0 + di, 0, side - 1);
+                const int j = std::clamp(j0 + dj, 0, side - 1);
+                const auto k = static_cast<std::size_t>(j * side + i);
+                if (!(w[k] > 0.0)) {
+                    continue;
+                }
+                const double wt = (di ? fu : 1.0 - fu) * (dj ? ft : 1.0 - ft);
+                acc += wt * sum[k] / w[k];
+                wsum += wt;
+            }
+        }
+        return wsum > 0.0 ? std::max(acc / wsum, 0.0) : 0.0;
+    }
+};
+
 int derive_peak_half(
     const DetectorGeometry& detector,
     const MeasurementBoxSettings& box
@@ -66,70 +135,6 @@ int derive_peak_half(
     const int hx = static_cast<int>(std::lround(0.5 * box.separation_x_mm / px));
     const int hy = static_cast<int>(std::lround(0.5 * box.separation_y_mm / py));
     return std::max(2, std::min(hx, hy));
-}
-
-std::vector<double> make_gaussian_profile(int half, double sigma_px) {
-    const int n = 2 * half + 1;
-    std::vector<double> p(static_cast<std::size_t>(n * n), 0.0);
-    const double inv = 1.0 / (2.0 * sigma_px * sigma_px);
-    double sum = 0.0;
-    for (int dr = -half; dr <= half; ++dr) {
-        for (int dc = -half; dc <= half; ++dc) {
-            const double w =
-                std::exp(-static_cast<double>(dc * dc + dr * dr) * inv);
-            p[static_cast<std::size_t>((dr + half) * n + (dc + half))] = w;
-            sum += w;
-        }
-    }
-    if (sum > 0.0) {
-        for (double& v : p) {
-            v /= sum;
-        }
-    }
-    return p;
-}
-
-void normalize_profile(std::vector<double>& profile) {
-    // Learned averages of signed pixels can dip just below 0 in the tails.
-    double sum = 0.0;
-    for (double& v : profile) {
-        v = std::max(v, 0.0);
-        sum += v;
-    }
-    if (sum > 0.0) {
-        for (double& v : profile) {
-            v /= sum;
-        }
-    }
-}
-
-struct ProfileMoments {
-    double pr1{0.0};
-    double pr2{0.0};
-    double pr3{0.0};
-    double pr4{0.0};
-};
-
-ProfileMoments moments_of(
-    const std::vector<double>& profile,
-    int peak_half,
-    int side
-) {
-    ProfileMoments m;
-    for (int dr = -peak_half; dr <= peak_half; ++dr) {
-        for (int dc = -peak_half; dc <= peak_half; ++dc) {
-            const double P = profile[static_cast<std::size_t>(
-                (dr + peak_half) * side + (dc + peak_half)
-            )];
-            const double p = static_cast<double>(dc);
-            const double q = static_cast<double>(dr);
-            m.pr1 += p * P;
-            m.pr2 += q * P;
-            m.pr3 += P;
-            m.pr4 += P * P;
-        }
-    }
-    return m;
 }
 
 int region_index(
@@ -163,9 +168,45 @@ int region_index(
 
 }  // namespace
 
+void ProfileAccumulator::add(const ProfileAccumulator& other) {
+    if (other.empty()) {
+        return;
+    }
+    if (empty() && region_sum.empty()) {
+        *this = other;
+        return;
+    }
+    if (other.half != half || other.oversample != oversample ||
+        other.n_bins_x != n_bins_x || other.n_bins_y != n_bins_y ||
+        other.region_sum.size() != region_sum.size() ||
+        other.global_sum.size() != global_sum.size()) {
+        return;
+    }
+    for (std::size_t k = 0; k < region_sum.size(); ++k) {
+        region_sum[k] += other.region_sum[k];
+        region_w[k] += other.region_w[k];
+    }
+    for (std::size_t r = 0; r < region_n.size(); ++r) {
+        region_n[r] += other.region_n[r];
+    }
+    for (std::size_t k = 0; k < global_sum.size(); ++k) {
+        global_sum[k] += other.global_sum[k];
+        global_w[k] += other.global_w[k];
+    }
+    global_n += other.global_n;
+}
+
 std::vector<ProfileObservation> StandardProfileFitter::fit(
     const IntegrationRequest& request,
     const StandardProfileSettings& settings
+) const {
+    return fit(request, settings, nullptr);
+}
+
+std::vector<ProfileObservation> StandardProfileFitter::fit(
+    const IntegrationRequest& request,
+    const StandardProfileSettings& settings,
+    ProfileAccumulator* learned
 ) const {
     IntegrationSettings iset_no_lp = request.settings;
     iset_no_lp.apply_lp = false;
@@ -195,30 +236,42 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
     const int n_bins_y = std::max(1, settings.n_bins_y);
     const int n_regions = n_bins_x * n_bins_y;
 
+    // XDS-style: every spot is learned and fitted at its predicted
+    // sub-pixel position (no per-spot re-centring), so positional scatter
+    // blurs learners and fitted spots alike; the oversampled profile keeps
+    // sharp spots from being fitted with a sub-pixel-averaged (broader)
+    // shape. Integer centring read thaumatin's ~1 px Eiger spots 15% high
+    // at low resolution and its weak high-resolution spots ~45% low.
+    const int S = std::max(1, settings.oversample);
+    const FineGrid grid(peak_half, S);
+    const std::size_t nf = grid.size();
+
     std::vector<int> col(static_cast<std::size_t>(n));
     std::vector<int> row(static_cast<std::size_t>(n));
+    std::vector<double> fx(static_cast<std::size_t>(n));
+    std::vector<double> fy(static_cast<std::size_t>(n));
     std::vector<int> region(static_cast<std::size_t>(n));
+    // Rings of 2θ (8° wide) after the tiles: spot size varies mainly with
+    // radius, so a tile short of learners falls back to its ring before the
+    // global profile (dominated by sharp low-angle spots).
+    constexpr int kRings = 6;
+    std::vector<int> ring(static_cast<std::size_t>(n));
+    const int n_slots = n_regions + kRings;
     for (int i = 0; i < n; ++i) {
-        to_pixel(
-            detector, iset, predictions[static_cast<std::size_t>(i)].x_mm,
-            predictions[static_cast<std::size_t>(i)].y_mm,
-            col[static_cast<std::size_t>(i)], row[static_cast<std::size_t>(i)]
+        const auto ui = static_cast<std::size_t>(i);
+        double xc = 0.0;
+        double yc = 0.0;
+        to_pixel_f(detector, iset, predictions[ui].x_mm, predictions[ui].y_mm, xc, yc);
+        col[ui] = static_cast<int>(std::lround(xc));
+        row[ui] = static_cast<int>(std::lround(yc));
+        fx[ui] = xc - col[ui];
+        fy[ui] = yc - row[ui];
+        region[ui] = region_index(
+            col[ui], row[ui], image.metadata.width, image.metadata.height,
+            n_bins_x, n_bins_y
         );
-        if (settings.box.refine_centroid) {
-            refine_centroid_com(
-                image, col[static_cast<std::size_t>(i)],
-                row[static_cast<std::size_t>(i)], settings.box.centroid_half_px,
-                settings.box.centroid_max_shift_px
-            );
-        }
-        region[static_cast<std::size_t>(i)] = region_index(
-            col[static_cast<std::size_t>(i)],
-            row[static_cast<std::size_t>(i)],
-            image.metadata.width,
-            image.metadata.height,
-            n_bins_x,
-            n_bins_y
-        );
+        const double tth = detector.two_theta_deg(predictions[ui].x_mm, predictions[ui].y_mm);
+        ring[ui] = n_regions + std::clamp(static_cast<int>(tth / 8.0), 0, kRings - 1);
     }
 
     const double sep_x_px =
@@ -242,18 +295,34 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             }
         }
     }
+    const auto* tmask =
+        settings.box.trusted_mask.empty() ? nullptr : &settings.box.trusted_mask;
+    const auto background = [&](int i) {
+        std::vector<int> nc;
+        std::vector<int> nr;
+        for (int j : neighbours[static_cast<std::size_t>(i)]) {
+            nc.push_back(col[static_cast<std::size_t>(j)]);
+            nr.push_back(row[static_cast<std::size_t>(j)]);
+        }
+        return fit_background_plane(
+            image, col[static_cast<std::size_t>(i)], row[static_cast<std::size_t>(i)],
+            peak_half, outer, nc, nr, settings.box.bg_reject_nsigma, tmask,
+            settings.box.trusted_width
+        );
+    };
 
-    // Accumulate per-region + global learned profiles.
-    std::vector<std::vector<double>> region_acc(
-        static_cast<std::size_t>(n_regions),
-        std::vector<double>(static_cast<std::size_t>(np), 0.0)
-    );
-    std::vector<int> region_nlearn(static_cast<std::size_t>(n_regions), 0);
-    std::vector<double> global_acc(static_cast<std::size_t>(np), 0.0);
+    // Accumulate per-region + global oversampled profiles.
+    std::vector<double> region_sum(static_cast<std::size_t>(n_slots) * nf, 0.0);
+    std::vector<double> region_w(static_cast<std::size_t>(n_slots) * nf, 0.0);
+    std::vector<int> region_nlearn(static_cast<std::size_t>(n_slots), 0);
+    std::vector<double> global_sum(nf, 0.0);
+    std::vector<double> global_w(nf, 0.0);
     int global_nlearn = 0;
 
+    std::vector<double> local(static_cast<std::size_t>(np), 0.0);
     for (int i = 0; i < n; ++i) {
-        const auto& m = meas[static_cast<std::size_t>(i)];
+        const auto ui = static_cast<std::size_t>(i);
+        const auto& m = meas[ui];
         // Overloaded spots have clipped peaks: never learn shapes from them.
         if (!m.ok || m.sigma <= 0.0 || m.n_overload > 0) {
             continue;
@@ -261,21 +330,7 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         if (m.intensity / m.sigma < settings.learn_min_isigi) {
             continue;
         }
-        const int c0 = col[static_cast<std::size_t>(i)];
-        const int r0 = row[static_cast<std::size_t>(i)];
-        const int reg = region[static_cast<std::size_t>(i)];
-        std::vector<int> nc, nr;
-        for (int j : neighbours[static_cast<std::size_t>(i)]) {
-            nc.push_back(col[static_cast<std::size_t>(j)]);
-            nr.push_back(row[static_cast<std::size_t>(j)]);
-        }
-        const auto* tmask =
-            settings.box.trusted_mask.empty() ? nullptr
-                                              : &settings.box.trusted_mask;
-        const BackgroundPlane bg = fit_background_plane(
-            image, c0, r0, peak_half, outer, nc, nr,
-            settings.box.bg_reject_nsigma, tmask, settings.box.trusted_width
-        );
+        const BackgroundPlane bg = background(i);
         if (!bg.ok) {
             continue;
         }
@@ -284,97 +339,156 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         // pedestal over-reads sharp spots by ~1/(1 − pedestal fraction).
         // Each learner is normalised to unit volume (not its noisy maximum).
         double volume = 0.0;
-        std::vector<double> local(static_cast<std::size_t>(np), 0.0);
         for (int dr = -peak_half; dr <= peak_half; ++dr) {
             for (int dc = -peak_half; dc <= peak_half; ++dc) {
-                const int c = c0 + dc;
-                const int r = r0 + dr;
-                const double od = static_cast<double>(pixel_at(image, c, r));
-                const double b = bg.at(
-                    static_cast<double>(dc), static_cast<double>(dr)
-                );
-                const double v = od - b;
-                const std::size_t idx = static_cast<std::size_t>(
-                    (dr + peak_half) * side + (dc + peak_half)
-                );
-                local[idx] = v;
+                const double od = static_cast<double>(pixel_at(image, col[ui] + dc, row[ui] + dr));
+                const double v = od - bg.at(static_cast<double>(dc), static_cast<double>(dr));
+                local[static_cast<std::size_t>((dr + peak_half) * side + (dc + peak_half))] = v;
                 volume += v;
             }
         }
         if (volume < 1.0) {
             continue;
         }
-        for (int k = 0; k < np; ++k) {
-            const double contrib =
-                local[static_cast<std::size_t>(k)] / volume;
-            region_acc[static_cast<std::size_t>(reg)]
-                      [static_cast<std::size_t>(k)] += contrib;
-            global_acc[static_cast<std::size_t>(k)] += contrib;
+        const std::size_t base = static_cast<std::size_t>(region[ui]) * nf;
+        const std::size_t rbase = static_cast<std::size_t>(ring[ui]) * nf;
+        for (int dr = -peak_half; dr <= peak_half; ++dr) {
+            for (int dc = -peak_half; dc <= peak_half; ++dc) {
+                const double v =
+                    local[static_cast<std::size_t>((dr + peak_half) * side + (dc + peak_half))] /
+                    volume;
+                const double x = dc - fx[ui];
+                const double y = dr - fy[ui];
+                // Region and global grids share the splat weights.
+                const double u = grid.cell(x);
+                const double t = grid.cell(y);
+                const int i0 = static_cast<int>(std::floor(u));
+                const int j0 = static_cast<int>(std::floor(t));
+                for (int dj = 0; dj <= 1; ++dj) {
+                    for (int di = 0; di <= 1; ++di) {
+                        const int ci = i0 + di;
+                        const int cj = j0 + dj;
+                        if (ci < 0 || cj < 0 || ci >= grid.side || cj >= grid.side) {
+                            continue;
+                        }
+                        const double wt = (di ? u - i0 : 1.0 - (u - i0)) *
+                                          (dj ? t - j0 : 1.0 - (t - j0));
+                        const auto k = static_cast<std::size_t>(cj * grid.side + ci);
+                        region_sum[base + k] += wt * v;
+                        region_w[base + k] += wt;
+                        region_sum[rbase + k] += wt * v;
+                        region_w[rbase + k] += wt;
+                        global_sum[k] += wt * v;
+                        global_w[k] += wt;
+                    }
+                }
+            }
         }
-        ++region_nlearn[static_cast<std::size_t>(reg)];
+        ++region_nlearn[static_cast<std::size_t>(region[ui])];
+        ++region_nlearn[static_cast<std::size_t>(ring[ui])];
         ++global_nlearn;
     }
 
-    std::vector<double> global_profile;
-    if (global_nlearn >= settings.min_learners) {
-        global_profile = global_acc;
-        normalize_profile(global_profile);
-    } else {
-        global_profile =
-            make_gaussian_profile(peak_half, settings.fallback_sigma_px);
+    if (learned != nullptr) {
+        learned->half = peak_half;
+        learned->oversample = S;
+        learned->n_bins_x = n_bins_x;
+        learned->n_bins_y = n_bins_y;
+        learned->region_sum = region_sum;
+        learned->region_w = region_w;
+        learned->region_n = region_nlearn;
+        learned->global_sum = global_sum;
+        learned->global_w = global_w;
+        learned->global_n = global_nlearn;
+    }
+    // Pool learners from earlier frames (same peak size, sampling, tiling).
+    if (const auto& prior = settings.prior;
+        prior && !prior->empty() && prior->half == peak_half && prior->oversample == S &&
+        prior->n_bins_x == n_bins_x && prior->n_bins_y == n_bins_y &&
+        prior->region_sum.size() == region_sum.size()) {
+        for (std::size_t k = 0; k < region_sum.size(); ++k) {
+            region_sum[k] += prior->region_sum[k];
+            region_w[k] += prior->region_w[k];
+        }
+        for (int r = 0; r < n_slots; ++r) {
+            region_nlearn[static_cast<std::size_t>(r)] += prior->region_n[static_cast<std::size_t>(r)];
+        }
+        for (std::size_t k = 0; k < nf; ++k) {
+            global_sum[k] += prior->global_sum[k];
+            global_w[k] += prior->global_w[k];
+        }
+        global_nlearn += prior->global_n;
     }
 
-    std::vector<std::vector<double>> profiles(
-        static_cast<std::size_t>(n_regions)
-    );
-    std::vector<ProfileMoments> moms(static_cast<std::size_t>(n_regions));
-    for (int r = 0; r < n_regions; ++r) {
-        if (region_nlearn[static_cast<std::size_t>(r)] >= settings.min_learners) {
-            profiles[static_cast<std::size_t>(r)] =
-                region_acc[static_cast<std::size_t>(r)];
-            normalize_profile(profiles[static_cast<std::size_t>(r)]);
-        } else {
-            profiles[static_cast<std::size_t>(r)] = global_profile;
+    // Oversampling needs ~S² more learners than an integer-pixel profile to
+    // fill every cell; regions short of that use the global profile, and a
+    // Gaussian seed stands in until enough learners exist at all.
+    const int min_fine = std::max(settings.min_learners, settings.min_learners * S * S / 4);
+    std::vector<double> seed_sum;
+    std::vector<double> seed_w;
+    if (global_nlearn < min_fine) {
+        seed_sum.assign(nf, 0.0);
+        seed_w.assign(nf, 1.0);
+        const double sg = std::max(settings.fallback_sigma_px, 0.3);
+        for (int j = 0; j < grid.side; ++j) {
+            for (int ci = 0; ci < grid.side; ++ci) {
+                const double x = (ci + 0.5) / S - peak_half - 0.5;
+                const double y = (j + 0.5) / S - peak_half - 0.5;
+                seed_sum[static_cast<std::size_t>(j * grid.side + ci)] =
+                    std::exp(-(x * x + y * y) / (2.0 * sg * sg)) / (2.0 * 3.14159265358979323846 * sg * sg);
+            }
         }
-        moms[static_cast<std::size_t>(r)] =
-            moments_of(profiles[static_cast<std::size_t>(r)], peak_half, side);
     }
+    std::vector<double> P(static_cast<std::size_t>(np));
 
     for (int i = 0; i < n; ++i) {
+        const auto ui = static_cast<std::size_t>(i);
         ProfileObservation obs;
-        static_cast<MeasObservation&>(obs) = meas[static_cast<std::size_t>(i)];
+        static_cast<MeasObservation&>(obs) = meas[ui];
         obs.summation_intensity = obs.intensity;
         obs.summation_sigma = obs.sigma;
-        obs.profile_region = region[static_cast<std::size_t>(i)];
+        obs.profile_region = region[ui];
 
         if (!obs.ok) {
             out.push_back(obs);
             continue;
         }
-
-        const int c0 = col[static_cast<std::size_t>(i)];
-        const int r0 = row[static_cast<std::size_t>(i)];
-        const int reg = region[static_cast<std::size_t>(i)];
-        const auto& profile = profiles[static_cast<std::size_t>(reg)];
-        const auto& pr = moms[static_cast<std::size_t>(reg)];
-
-        std::vector<int> nc, nr;
-        for (int j : neighbours[static_cast<std::size_t>(i)]) {
-            nc.push_back(col[static_cast<std::size_t>(j)]);
-            nr.push_back(row[static_cast<std::size_t>(j)]);
+        const int c0 = col[ui];
+        const int r0 = row[ui];
+        const int reg = region[ui];
+        const std::vector<double>* psum = &global_sum;
+        const std::vector<double>* pw = &global_w;
+        std::size_t off = 0;
+        if (global_nlearn < min_fine) {
+            psum = &seed_sum;
+            pw = &seed_w;
+        } else if (region_nlearn[static_cast<std::size_t>(reg)] >= min_fine) {
+            psum = &region_sum;
+            pw = &region_w;
+            off = static_cast<std::size_t>(reg) * nf;
+        } else if (region_nlearn[static_cast<std::size_t>(ring[ui])] >= min_fine) {
+            psum = &region_sum;
+            pw = &region_w;
+            off = static_cast<std::size_t>(ring[ui]) * nf;
         }
-        const auto* tmask2 =
-            settings.box.trusted_mask.empty() ? nullptr
-                                              : &settings.box.trusted_mask;
-        const BackgroundPlane bg = fit_background_plane(
-            image, c0, r0, peak_half, outer, nc, nr,
-            settings.box.bg_reject_nsigma, tmask2, settings.box.trusted_width
-        );
+        const double* rs = psum->data() + off;
+        const double* rw = pw->data() + off;
+        double pr3 = 0.0;
+        double pr4 = 0.0;
+        for (int dr = -peak_half; dr <= peak_half; ++dr) {
+            for (int dc = -peak_half; dc <= peak_half; ++dc) {
+                const double v = grid.sample(rs, rw, dc - fx[ui], dr - fy[ui]);
+                P[static_cast<std::size_t>((dr + peak_half) * side + (dc + peak_half))] = v;
+                pr3 += v;
+                pr4 += v * v;
+            }
+        }
+
+        const BackgroundPlane bg = background(i);
         obs.bg_a = bg.a;
         obs.bg_b = bg.b;
         obs.bg_c = bg.c;
-
-        if (!bg.ok || pr.pr4 < 1e-18) {
+        if (!bg.ok || pr4 < 1e-18) {
             obs.profile_ok = false;
             out.push_back(obs);
             continue;
@@ -392,9 +506,7 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         int n_peak = 0;
         for (int dr = -peak_half; dr <= peak_half; ++dr) {
             for (int dc = -peak_half; dc <= peak_half; ++dc) {
-                const int c = c0 + dc;
-                const int rr = r0 + dr;
-                const std::int32_t raw = pixel_at(image, c, rr);
+                const std::int32_t raw = pixel_at(image, c0 + dc, r0 + dr);
                 const double b = bg.a * static_cast<double>(dc) +
                                  bg.b * static_cast<double>(dr) + bg.c;
                 // Background plane under the peak (for Poisson σ model).
@@ -403,14 +515,12 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
                 if (raw < 0) {
                     continue;
                 }
-                const double P = profile[static_cast<std::size_t>(
-                    (dr + peak_half) * side + (dc + peak_half)
-                )];
-                numer += P * (static_cast<double>(raw) - b);
-                pr4_valid += P * P;
-                p_valid += P;
-                p2b_valid += P * P * std::max(b, 0.0);
-                p3_valid += P * P * P;
+                const double Pk = P[static_cast<std::size_t>((dr + peak_half) * side + (dc + peak_half))];
+                numer += Pk * (static_cast<double>(raw) - b);
+                pr4_valid += Pk * Pk;
+                p_valid += Pk;
+                p2b_valid += Pk * Pk * std::max(b, 0.0);
+                p3_valid += Pk * Pk * Pk;
             }
         }
         if (pr4_valid < 1e-18) {
@@ -418,7 +528,9 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             out.push_back(obs);
             continue;
         }
-        const double iprf = numer * pr.pr3 / pr4_valid;
+        // I = k·ΣP: the volume inside the box of a profile normalised to the
+        // whole spot (≈1 unless the box truncates it at this offset).
+        const double iprf = numer * pr3 / pr4_valid;
         obs.profile_intensity = iprf;
         // Poisson variance of the weighted LS fit (model pixel b + k·P):
         //   var(k) = Σ P² (b + k P) / (Σ P²)²,   I = k · ΣP_all
@@ -436,7 +548,7 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         const double dk_db = p_valid / pr4_valid;
         const double var_k_bg =
             dk_db * dk_db * std::fabs(bg_mean) / static_cast<double>(n_bg);
-        double var = pr.pr3 * pr.pr3 * (var_k_peak + var_k_bg);
+        double var = pr3 * pr3 * (var_k_peak + var_k_bg);
         // No unit floor: a sparse Eiger slice can have var < 1, and partial
         // slices are summed (≈7 per reflection), so a floor of 1 per slice
         // inflates σ of weak reflections. Keep σ > 0 only.
@@ -446,7 +558,6 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
             std::fabs(obs.summation_intensity - iprf) /
             std::max(std::fabs(iprf), 1.0);
         obs.profile_ok = true;
-
         if (settings.prefer_profile &&
             obs.pkratio <= settings.max_pkratio_for_profile) {
             obs.intensity = obs.profile_intensity;

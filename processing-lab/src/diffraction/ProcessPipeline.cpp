@@ -324,7 +324,8 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
     if (request.use_profile) {
         StandardProfileSettings ps = request.profile;
         ps.box = request.measurement;
-        out.profile_observations = StandardProfileFitter{}.fit(ireq, ps);
+        out.profile_observations =
+            StandardProfileFitter{}.fit(ireq, ps, &out.profile_learned);
         out.integrated.reserve(out.profile_observations.size());
         out.meas_observations.reserve(out.profile_observations.size());
         for (const auto& p : out.profile_observations) {

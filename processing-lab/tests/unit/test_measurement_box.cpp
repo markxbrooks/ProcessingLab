@@ -186,6 +186,11 @@ int main() {
             CHECK_EQ(ext->half_x, 3);
             CHECK_EQ(ext->half_y, 3);
             CHECK(ext->n_spots >= 100u);
+            // σ = 2 px, measured over the ≥20% core (truncation gives 1.54):
+            // box ±(⌈2σ̄⌉ + 1) = ±4–5. Neighbours 12 px away are masked out
+            // (Voronoi) so they cannot widen the average.
+            CHECK(ext->sigma_x > 1.4 && ext->sigma_x < 1.7);
+            CHECK(ext->half_box >= 4 && ext->half_box <= 5);
         }
         const std::vector<std::pair<double, double>> few(centres.begin(), centres.begin() + 5);
         CHECK(!mosflm::diffraction::estimate_spot_extent(img, few, 12).has_value());

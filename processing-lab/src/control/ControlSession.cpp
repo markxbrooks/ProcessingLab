@@ -2366,6 +2366,22 @@ ControlGoResult ControlSession::go(
         bool ok{false};
     };
 
+    // Standard-profile learners pooled from the previous block (read-only
+    // inside the OpenMP region), so each frame's profiles average ~25
+    // frames of strong spots as MOSFLM / XDS do, not one frame's.
+    std::shared_ptr<const diffraction::ProfileAccumulator> profile_prior;
+    const auto pool_profiles = [&](const auto& outs) {
+        auto acc = std::make_shared<diffraction::ProfileAccumulator>();
+        for (const auto& o : outs) {
+            if (o.ok) {
+                acc->add(o.result.profile_learned);
+            }
+        }
+        if (!acc->empty()) {
+            profile_prior = std::move(acc);
+        }
+    };
+
     // Integrate frames [chunk0, chunk1] in parallel with frozen geometry
     // (state_ must not mutate inside the OpenMP region).
     const auto integrate_frames = [&](int chunk0, int chunk1, double chunk_sigmab,
@@ -2390,6 +2406,7 @@ ControlGoResult ControlSession::go(
                         ? image0
                         : image::read_diffraction_image(img_path, frame);
                 auto req = make_process_request(image, frame);
+                req.profile.prior = profile_prior;
                 outc.crystal = req.crystal;
                 diffraction::ProcessPipeline local_pipe;
                 auto one = local_pipe.run(req);
@@ -2416,27 +2433,40 @@ ControlGoResult ControlSession::go(
     constexpr int k_window_margin = 40;
 
     // Measurement box from the spots (MOSFLM raster / XDS spot size) unless
-    // PEAKHALF is set: integrate the first frame with the provisional box
-    // and size the peak region from the average strong-spot profile.
+    // PEAKHALF is set: integrate the first frames with the provisional box
+    // and size the peak region from the average strong-spot profile, pooled
+    // over up to 10 frames so spots far from the beam are represented.
     if (state_.peak_half_px < 1 && state_.spot_peak_half_px < 1) {
-        const auto probe = integrate_frames(first, first, sigmab, sigmar);
-        if (!probe.empty() && probe.front().ok) {
+        const int probe_last = std::min(first + 9, last);
+        const auto probe = integrate_frames(first, probe_last, sigmab, sigmar);
+        diffraction::SpotExtentEstimator est;
+        for (std::size_t k = 0; k < probe.size(); ++k) {
+            if (!probe[k].ok) {
+                continue;
+            }
             std::vector<std::pair<double, double>> centres;
-            for (const auto& r : probe.front().result.mosflm_reflections) {
-                if (r.fractioncalc >= 0.5f) {
-                    centres.emplace_back(r.xdet, r.ydet);
-                }
+            std::vector<std::pair<double, double>> others;
+            for (const auto& r : probe[k].result.mosflm_reflections) {
+                (r.fractioncalc >= 0.5f ? centres : others).emplace_back(r.xdet, r.ydet);
             }
-            if (const auto ext = diffraction::estimate_spot_extent(image0, centres)) {
-                const int half = std::clamp(std::max(ext->half_x, ext->half_y), 2, 14);
-                state_.spot_peak_half_px = half;
-                std::cout << std::fixed << std::setprecision(2)
-                          << "  MEASUREMENT BOX: average of " << ext->n_spots
-                          << " strong spots, sigma " << ext->sigma_x << " x "
-                          << ext->sigma_y << " px, extent ±" << ext->half_x
-                          << " x ±" << ext->half_y << " px → peak " << 2 * half + 1
-                          << "x" << 2 * half + 1 << '\n';
+            const int frame = first + static_cast<int>(k);
+            if (frame == first) {
+                est.add(image0, centres, &others);
+            } else {
+                est.add(
+                    image::read_diffraction_image(resolve_image_path(image_override, frame), frame),
+                    centres, &others
+                );
             }
+        }
+        if (const auto ext = est.result()) {
+            const int half = std::clamp(ext->half_box, 2, 14);
+            state_.spot_peak_half_px = half;
+            std::cout << std::fixed << std::setprecision(2)
+                      << "  MEASUREMENT BOX: " << ext->n_spots << " strong spots on "
+                      << probe.size() << " frame(s), sigma " << ext->sigma_x << " x "
+                      << ext->sigma_y << " px → peak ±(2σ̄ + 1) = " << 2 * half + 1
+                      << "x" << 2 * half + 1 << '\n';
         }
     }
 
@@ -2447,6 +2477,7 @@ ControlGoResult ControlSession::go(
         const int pre1 = std::min(first + chunk_size - 1, last);
         for (int cycle = 1; cycle <= 2; ++cycle) {
             auto pre = integrate_frames(first, pre1, sigmab, sigmar);
+            pool_profiles(pre);
             std::vector<refinement::PositionalObservation> obs;
             std::vector<crystal::MosflmReflection> slices;
             const FrameOutcome* any = nullptr;
@@ -2489,6 +2520,7 @@ ControlGoResult ControlSession::go(
                       << " (nproc=" << nproc << ") …" << std::flush;
         }
         auto outcomes = integrate_frames(chunk0, chunk1, sigmab, sigmar);
+        pool_profiles(outcomes);
         if (multi && n_chunk > 1) {
             std::cout << " done\n";
         }
