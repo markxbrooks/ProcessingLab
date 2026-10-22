@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 using mosflm::DetectorGeometry;
@@ -149,6 +150,46 @@ int main() {
         "sparse plane c " + mosflm_test::fmt(sp_plane.c)
     );
     CHECK_EQ(sp_plane.n_rejected, 0);
+
+    // Spot extent from the image: a lattice of σ = 2 px Gaussian spots
+    // 12 px apart (neighbours inside the averaging window) on flat
+    // background. At 20% of the
+    // peak the region reaches ±3 px (exp(−9/8) = 0.32, exp(−16/8) = 0.14);
+    // neighbours must not join it. Too few strong spots → no estimate.
+    {
+        DiffractionImage img;
+        img.metadata.width = 200;
+        img.metadata.height = 200;
+        img.pixels.assign(200 * 200, 0);
+        std::vector<std::pair<double, double>> centres;
+        for (int gy = 20; gy < 180; gy += 12) {
+            for (int gx = 20; gx < 180; gx += 12) {
+                centres.emplace_back(gx + 0.3, gy - 0.2);
+            }
+        }
+        for (int r = 0; r < 200; ++r) {
+            for (int c = 0; c < 200; ++c) {
+                double v = 50.0;
+                for (const auto& [x, y] : centres) {
+                    const double d2 = (c - x) * (c - x) + (r - y) * (r - y);
+                    if (d2 < 100.0) {
+                        v += 2000.0 * std::exp(-d2 / 8.0);
+                    }
+                }
+                img.pixels[static_cast<std::size_t>(r) * 200 + c] =
+                    static_cast<std::int32_t>(std::lround(v));
+            }
+        }
+        const auto ext = mosflm::diffraction::estimate_spot_extent(img, centres, 12);
+        CHECK(ext.has_value());
+        if (ext) {
+            CHECK_EQ(ext->half_x, 3);
+            CHECK_EQ(ext->half_y, 3);
+            CHECK(ext->n_spots >= 100u);
+        }
+        const std::vector<std::pair<double, double>> few(centres.begin(), centres.begin() + 5);
+        CHECK(!mosflm::diffraction::estimate_spot_extent(img, few, 12).has_value());
+    }
 
     return mosflm_test::finish("measurement_box");
 }

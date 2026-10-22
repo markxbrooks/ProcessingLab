@@ -19,3 +19,10 @@ build/
 _build/GXPARM.XDS
 XPARM.XDS
 test*cbf
+ANOMPLOT
+SCALES
+ROGUES
+*.log
+*.Log
+*spt
+*.cbf

@@ -174,6 +174,36 @@ else()
         "(macOS: brew install libomp)")
 endif()
 
+# Optional FFTW for the indexing Patterson FFT. The built-in radix-2
+# transform remains the fallback when the library is absent.
+find_package(PkgConfig QUIET)
+set(MOSFLM_HAS_FFTW OFF)
+if(PkgConfig_FOUND)
+    pkg_check_modules(FFTW3 QUIET IMPORTED_TARGET fftw3)
+endif()
+if(NOT TARGET PkgConfig::FFTW3)
+    find_path(FFTW3_INCLUDE_DIR fftw3.h
+        HINTS
+            "$ENV{HOMEBREW_PREFIX}/include"
+            /opt/homebrew/include
+            /usr/local/include
+    )
+    find_library(FFTW3_LIBRARY NAMES fftw3
+        HINTS
+            "$ENV{HOMEBREW_PREFIX}/lib"
+            /opt/homebrew/lib
+            /usr/local/lib
+    )
+endif()
+if(TARGET PkgConfig::FFTW3 OR (FFTW3_INCLUDE_DIR AND FFTW3_LIBRARY))
+    set(MOSFLM_HAS_FFTW ON)
+    message(STATUS "FFTW found — indexing uses fftw_plan_dft_3d")
+else()
+    message(STATUS
+        "FFTW not found — indexing uses the built-in radix-2 FFT "
+        "(macOS: brew install fftw)")
+endif()
+
 set(MOSFLM_GEOMETRY_SOURCES
     src/geometry/UnitCell.cpp
     src/geometry/CellFix.cpp
@@ -327,6 +357,16 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
         PRIVATE
             m
     )
+    if(MOSFLM_HAS_FFTW)
+        if(TARGET PkgConfig::FFTW3)
+            target_link_libraries(mosflm_indexing PRIVATE PkgConfig::FFTW3)
+        else()
+            target_include_directories(mosflm_indexing PRIVATE
+                ${FFTW3_INCLUDE_DIR})
+            target_link_libraries(mosflm_indexing PRIVATE ${FFTW3_LIBRARY})
+        endif()
+        target_compile_definitions(mosflm_indexing PRIVATE MOSFLM_HAS_FFTW=1)
+    endif()
     # findlen.f is required by ind_gen_direct but not in libdps_index.a.
     set(MOSFLM_FINDLEN_F "${MOSFLM_IPMOSFLM_ROOT}/src/dps/index/findlen.f")
     # Order matters for single-pass ld; consumers use RESCAN (Linux) or

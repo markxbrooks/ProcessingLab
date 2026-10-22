@@ -170,6 +170,9 @@ struct ControlState {
     double phi_offset_deg{0.0};
     /// If >= 0, overrides MEAS/profile peak half-width (CONTROL ``PEAKHALF``).
     int peak_half_px{-1};
+    /// Peak half-width (px) measured from the strong spots at the start of
+    /// PROCESS (MOSFLM/XDS-style); used when PEAKHALF is not set. 0 = none.
+    int spot_peak_half_px{0};
 
     /// Standard-profile detector tiling (MOSFLM NMASKS / XLINES×YLINES).
     int nmasks_x{5};

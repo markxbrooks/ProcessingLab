@@ -2054,11 +2054,18 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         const int max_half = std::max(
             1, static_cast<int>(std::floor(half_sep_px + 1e-9))
         );
-        int ph = state_.peak_half_px >= 1 ? state_.peak_half_px : -1;
-        if (ph < 0) {
-            ph = std::min(5, max_half);
+        // PEAKHALF wins; else the size measured from the spots (MOSFLM /
+        // XDS measurement box); SEPARATION then only marks overlaps. The
+        // half-separation cap is the fallback before spots are measured:
+        // on CCP4 insulin it kept 7×7 boxes round ~11 px spots (38% of
+        // the flux).
+        if (state_.peak_half_px >= 1) {
+            measurement.peak_half_px = state_.peak_half_px;
+        } else if (state_.spot_peak_half_px >= 1) {
+            measurement.peak_half_px = state_.spot_peak_half_px;
+        } else {
+            measurement.peak_half_px = std::min(5, max_half);
         }
-        measurement.peak_half_px = std::min(ph, max_half);
     }
     // Eiger: modest rim (4); oversized rims dilute SNR without helping CC.
     measurement.bg_rim_px = (px_mm > 0.0 && px_mm <= 0.08) ? 4 : 3;
@@ -2407,6 +2414,31 @@ ControlGoResult ControlSession::go(
     // the margin keeps reflections that straddle a period boundary.
     std::vector<crystal::MosflmReflection> window_rows;
     constexpr int k_window_margin = 40;
+
+    // Measurement box from the spots (MOSFLM raster / XDS spot size) unless
+    // PEAKHALF is set: integrate the first frame with the provisional box
+    // and size the peak region from the average strong-spot profile.
+    if (state_.peak_half_px < 1 && state_.spot_peak_half_px < 1) {
+        const auto probe = integrate_frames(first, first, sigmab, sigmar);
+        if (!probe.empty() && probe.front().ok) {
+            std::vector<std::pair<double, double>> centres;
+            for (const auto& r : probe.front().result.mosflm_reflections) {
+                if (r.fractioncalc >= 0.5f) {
+                    centres.emplace_back(r.xdet, r.ydet);
+                }
+            }
+            if (const auto ext = diffraction::estimate_spot_extent(image0, centres)) {
+                const int half = std::clamp(std::max(ext->half_x, ext->half_y), 2, 14);
+                state_.spot_peak_half_px = half;
+                std::cout << std::fixed << std::setprecision(2)
+                          << "  MEASUREMENT BOX: average of " << ext->n_spots
+                          << " strong spots, sigma " << ext->sigma_x << " x "
+                          << ext->sigma_y << " px, extent ±" << ext->half_x
+                          << " x ±" << ext->half_y << " px → peak " << 2 * half + 1
+                          << "x" << 2 * half + 1 << '\n';
+            }
+        }
+    }
 
     // MOSFLM-style pre-refinement: refine geometry on the first block (two
     // cycles) before any frame is kept, so early batches are not integrated

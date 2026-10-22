@@ -4,6 +4,8 @@
 #include "mosflm/image/DiffractionImage.hpp"
 
 #include <limits>
+#include <optional>
+#include <utility>
 #include <cstdint>
 #include <vector>
 
@@ -113,6 +115,47 @@ void refine_centroid_com(
     int& row,
     int half,
     double max_shift_px
+);
+
+/// Spot extent from :func:`estimate_spot_extent`.
+struct SpotExtent {
+    int half_x{0};       ///< Peak-region half-width along columns (px).
+    int half_y{0};       ///< Peak-region half-width along rows (px).
+    double sigma_x{0.0};  ///< Second-moment σ of the average spot (px).
+    double sigma_y{0.0};
+    std::size_t n_spots{0};
+};
+
+/**
+ * Peak-region size from the image, as MOSFLM (measurement-box / raster
+ * optimisation from the average strong-spot profile) and XDS (spot size
+ * from strong reflections) do, instead of from SEPARATION.
+ *
+ * Strong spots near ``centres_px`` (column, row) are re-centred on their
+ * 3×3 maximum, background-subtracted (window median), normalised and
+ * averaged over ±``window_half``. The peak region is the 4-connected area
+ * around the centre where that average is ≥ ``threshold_frac`` of its peak
+ * (20% ≈ 1.8σ for a Gaussian; on CCP4 insulin this gave ipmosflm's peak
+ * size and the best agreement with it, where 3% added background noise);
+ * its extent gives ``half_x``/``half_y``.
+ * Neighbours sit at varying offsets, so they blur into the average's
+ * background rather than joining the region.
+ *
+ * :param image: Frame to measure.
+ * :param centres_px: Predicted spot centres (column, row).
+ * :param window_half: Half-size of the averaging window (px).
+ * :param min_snr: 3×3 peak signal / noise needed to use a spot.
+ * :param threshold_frac: Peak-region threshold as a fraction of the peak.
+ * :param min_spots: Fewer strong spots → no estimate.
+ * :return: The extent, or ``std::nullopt``.
+ */
+[[nodiscard]] std::optional<SpotExtent> estimate_spot_extent(
+    const image::DiffractionImage& image,
+    const std::vector<std::pair<double, double>>& centres_px,
+    int window_half = 15,
+    double min_snr = 10.0,
+    double threshold_frac = 0.2,
+    std::size_t min_spots = 20
 );
 
 /// Random-access measurement boxes (MEAS science contract without the

@@ -346,6 +346,126 @@ BackgroundPlane fit_background_plane(
     return plane;
 }
 
+std::optional<SpotExtent> estimate_spot_extent(
+    const image::DiffractionImage& image,
+    const std::vector<std::pair<double, double>>& centres_px,
+    int window_half,
+    double min_snr,
+    double threshold_frac,
+    std::size_t min_spots
+) {
+    const int w = image.metadata.width;
+    const int h = image.metadata.height;
+    const int R = std::max(window_half, 3);
+    const int side = 2 * R + 1;
+    const auto at = [&](int c, int r) {
+        return image.pixels[static_cast<std::size_t>(r) * static_cast<std::size_t>(w) +
+                            static_cast<std::size_t>(c)];
+    };
+    const auto sum3 = [&](int c, int r) {
+        double t = 0.0;
+        for (int k = -1; k <= 1; ++k) {
+            for (int m = -1; m <= 1; ++m) {
+                t += static_cast<double>(std::max<std::int32_t>(at(c + m, r + k), 0));
+            }
+        }
+        return t;
+    };
+    std::vector<double> avg(static_cast<std::size_t>(side * side), 0.0);
+    std::vector<double> win;
+    std::size_t n = 0;
+    for (const auto& [col, row] : centres_px) {
+        const int c0 = static_cast<int>(std::lround(col));
+        const int r0 = static_cast<int>(std::lround(row));
+        // Re-centre on the 3×3 maximum within ±3 px of the prediction.
+        if (c0 - R - 4 < 0 || r0 - R - 4 < 0 || c0 + R + 4 >= w || r0 + R + 4 >= h) {
+            continue;
+        }
+        int pc = c0;
+        int pr = r0;
+        double best = -1.0;
+        for (int dr = -3; dr <= 3; ++dr) {
+            for (int dc = -3; dc <= 3; ++dc) {
+                const double t = sum3(c0 + dc, r0 + dr);
+                if (t > best) {
+                    best = t;
+                    pc = c0 + dc;
+                    pr = r0 + dr;
+                }
+            }
+        }
+        win.clear();
+        bool masked = false;
+        for (int r = pr - R; r <= pr + R; ++r) {
+            for (int c = pc - R; c <= pc + R; ++c) {
+                const std::int32_t v = at(c, r);
+                masked |= v < 0 && std::abs(c - pc) <= 3 && std::abs(r - pr) <= 3;
+                win.push_back(static_cast<double>(std::max<std::int32_t>(v, 0)));
+            }
+        }
+        if (masked) {
+            continue;
+        }
+        std::vector<double> sorted(win);
+        auto mid = sorted.begin() + static_cast<std::ptrdiff_t>(sorted.size() / 2);
+        std::nth_element(sorted.begin(), mid, sorted.end());
+        const double bg = *mid;
+        const double signal = best - 9.0 * bg;
+        if (!(signal >= min_snr * std::sqrt(9.0 * std::max(bg, 1.0)))) {
+            continue;
+        }
+        for (std::size_t k = 0; k < win.size(); ++k) {
+            avg[k] += (win[k] - bg) / signal;
+        }
+        ++n;
+    }
+    if (n < min_spots) {
+        return std::nullopt;
+    }
+    const auto centre = static_cast<std::size_t>(R * side + R);
+    const double cut = threshold_frac * avg[centre];
+    std::vector<char> in(avg.size(), 0);
+    std::vector<int> stack{static_cast<int>(centre)};
+    in[centre] = 1;
+    SpotExtent out;
+    out.n_spots = n;
+    double sw = 0.0, sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0;
+    while (!stack.empty()) {
+        const int k = stack.back();
+        stack.pop_back();
+        const int dc = k % side - R;
+        const int dr = k / side - R;
+        out.half_x = std::max(out.half_x, std::abs(dc));
+        out.half_y = std::max(out.half_y, std::abs(dr));
+        const double v = avg[static_cast<std::size_t>(k)];
+        sw += v;
+        sx += v * dc;
+        sy += v * dr;
+        sxx += v * dc * dc;
+        syy += v * dr * dr;
+        const int nb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (const auto& d : nb) {
+            const int c = dc + d[0];
+            const int r = dr + d[1];
+            if (std::abs(c) > R || std::abs(r) > R) {
+                continue;
+            }
+            const auto q = static_cast<std::size_t>((r + R) * side + (c + R));
+            if (!in[q] && avg[q] >= cut) {
+                in[q] = 1;
+                stack.push_back(static_cast<int>(q));
+            }
+        }
+    }
+    if (sw > 0.0) {
+        const double mx = sx / sw;
+        const double my = sy / sw;
+        out.sigma_x = std::sqrt(std::max(sxx / sw - mx * mx, 0.0));
+        out.sigma_y = std::sqrt(std::max(syy / sw - my * my, 0.0));
+    }
+    return out;
+}
+
 std::vector<MeasObservation> MeasIntegrator::integrate(
     const IntegrationRequest& request,
     const MeasurementBoxSettings& box

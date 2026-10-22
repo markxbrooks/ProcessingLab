@@ -9,6 +9,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(MOSFLM_HAS_FFTW)
+#include <fftw3.h>
+
+#include <mutex>
+#endif
+
 namespace mosflm::indexing {
 namespace {
 
@@ -76,6 +82,45 @@ int next_pow2_clamp(int n, int lo, int hi) {
     }
     return std::max(lo, std::min(p, hi));
 }
+
+#if defined(MOSFLM_HAS_FFTW)
+
+/// In-place 3D DFT. Layout is x + n*(y + n*z), which is FFTW C order.
+/// Forward matches the old radix-2 sign (unnormalized). An inverse divides
+/// by n^3, the product of the three per-axis 1/n factors.
+void fft3d(std::vector<Cplx>& data, int n, bool inverse) {
+    if (n <= 1) {
+        return;
+    }
+    // Planner calls are not thread-safe. libfftw3 does not export
+    // fftw_make_planner_thread_safe; that symbol is in libfftw3_threads.
+    static std::mutex planner_mu;
+    auto* buf = reinterpret_cast<fftw_complex*>(data.data());
+    const int sign = inverse ? FFTW_BACKWARD : FFTW_FORWARD;
+    fftw_plan plan = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(planner_mu);
+        plan = fftw_plan_dft_3d(n, n, n, buf, buf, sign, FFTW_ESTIMATE);
+    }
+    if (plan == nullptr) {
+        return;
+    }
+    fftw_execute(plan);
+    {
+        std::lock_guard<std::mutex> lock(planner_mu);
+        fftw_destroy_plan(plan);
+    }
+    if (inverse) {
+        const double inv_n = 1.0 / (static_cast<double>(n) *
+                                     static_cast<double>(n) *
+                                     static_cast<double>(n));
+        for (auto& z : data) {
+            z *= inv_n;
+        }
+    }
+}
+
+#else
 
 void fft1d(std::vector<Cplx>& a, bool inverse) {
     const int n = static_cast<int>(a.size());
@@ -159,6 +204,8 @@ void fft3d(std::vector<Cplx>& data, int n, bool inverse) {
         }
     }
 }
+
+#endif
 
 struct Peak {
     Eigen::Vector3d r{Eigen::Vector3d::Zero()};
