@@ -96,7 +96,7 @@ bool contains(const std::string& text, const std::string& what) {
 /// (``run --from``) there is no ``XPARM.XDS`` or ``index.log``.
 void check_outputs(const fs::path& dir, const std::string& spots, const std::string& label,
                    bool autoindexed = true) {
-    std::vector<std::string> files{"process.log", "process.mtz", "GXPARM.XDS", spots,
+    std::vector<std::string> files{"process.log", "process.mtz", "XDS.INP", "GXPARM.XDS", spots,
                                    "input.json", "process.json", "process.md"};
     if (autoindexed) {
         files.insert(files.end(), {"XPARM.XDS", "index.log"});

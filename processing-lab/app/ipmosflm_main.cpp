@@ -387,7 +387,9 @@ void print_run_usage() {
         << "               processing_YYYYMMDD_HHMMSS in the current directory.\n"
         << "               Holds input.json (resolved inputs and provenance),\n"
         << "               process.json (stage status and results), process.md,\n"
-        << "               process.log, process.mtz, XPARM.XDS and GXPARM.XDS.\n"
+        << "               process.log, process.mtz, XDS.INP (written at the\n"
+        << "               start from the resolved options), XPARM.XDS and\n"
+        << "               GXPARM.XDS.\n"
         << "  --sweep      Which .xinfo sweep, if it has several.\n"
         << "  --xparm      XPARM.XDS / GXPARM.XDS: cell, space group, geometry\n"
         << "               and orientation. With an orientation, autoindexing is\n"
@@ -578,10 +580,12 @@ int run_command(int argc, char** argv) {
         header << "\n Run mode:        " << mosflm::io::run_mode_name(run_mode) << "  (parameters from "
                << mosflm::io::run_mode_parameter_source(run_mode) << ")\n";
         m.write_summary(header);
+        header << "  XDS.INP:       " << (dir / "XDS.INP").string() << '\n';
         header << "  Output:        " << dir.string() << '\n';
 
         std::optional<mosflm::io::ProcessRecord> record;
         try {
+            mosflm::io::write_xds_inp(dir / "XDS.INP", m);
             ProcessLog plog(dir / "process.log", control_input_block(control.str()));
             print_banner();
             std::cout << header.str();
@@ -604,6 +608,7 @@ int run_command(int argc, char** argv) {
             std::istringstream in(control.str());
             const auto runs = session.run_stream(in, img_override, "");
             report_runs(session, runs, dir / "process.mtz");
+            record->add_output(dir / "XDS.INP", "xds_inp");
             record->add_output(dir / "process.mtz", "mtz");
             record->add_output(dir / "index.log", "index_summary");
             record->add_output(dir / "process.log", "log");
@@ -747,7 +752,8 @@ int main(int argc, char** argv) {
             << "  A CONTROL script run is RunMode.MOSFLM (parameters from MOSFLM\n"
             << "  keywords); --run-mode mosflm states it explicitly.\n"
             << "  --output-dir: new directory (must not exist) for the log, MTZ,\n"
-            << "  spot list, XPARM.XDS, GXPARM.XDS and the run records input.json,\n"
+            << "  spot list, XDS.INP (written at the start from the resolved\n"
+            << "  options), XPARM.XDS, GXPARM.XDS and the run records input.json,\n"
             << "  process.json and process.md; script paths stay relative to the\n"
             << "  current directory.\n"
             << "  Output is also written to process.log (--log path to rename,\n"
@@ -890,8 +896,11 @@ int main(int argc, char** argv) {
                 }
                 const mosflm::io::RunContext ctx{"script", run_mode, cl, text, xds_inp_path, xinfo_path,
                                                  xparm_path, std::nullopt};
+                mosflm::io::write_xds_inp(*output_dir / "XDS.INP", model);
+                std::cout << "  Wrote XDS.INP: " << (*output_dir / "XDS.INP").string() << '\n';
                 record.emplace(*output_dir, mosflm::io::input_record(model, dry.state(), ctx),
                                mosflm::io::planned_stages(text));
+                record->add_output(*output_dir / "XDS.INP", "xds_inp");
                 observe(session, *record);
             } catch (const std::exception& ex) {
                 std::cerr << " *** WARNING **   input.json / process.json not written: " << ex.what() << '\n';

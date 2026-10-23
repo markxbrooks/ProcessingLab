@@ -132,6 +132,17 @@ void apply_control_state(
 ///     sweep is ambiguous or missing, or the image cannot be read.
 [[nodiscard]] ExperimentModel resolve_experiment(const ExperimentInputs& inputs);
 
+/// Write ``path`` as an XDS ``XDS.INP`` of the resolved options, at the
+/// start of a run. Only fields that are set are written, so a later
+/// ``--xds-inp`` of this file reproduces them. CBF/SMV ``#`` placeholders
+/// become ``?``. An HDF5 master is named as ``NAME_TEMPLATE_OF_DATA_FRAMES``.
+/// Orientation is omitted (that belongs in ``XPARM.XDS``).
+///
+/// :param path: Destination, usually ``<output>/XDS.INP``.
+/// :param model: The experiment after every source has been merged.
+/// :raises std::runtime_error: If the file cannot be written.
+void write_xds_inp(const std::filesystem::path& path, const ExperimentModel& model);
+
 /// Create a fresh output directory and return it.
 ///
 /// With ``requested`` it must not exist yet (no silent reuse). Otherwise

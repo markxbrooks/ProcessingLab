@@ -3,6 +3,7 @@
  */
 
 #include "mosflm/control/ControlSession.hpp"
+#include "mosflm/io/ExperimentModel.hpp"
 #include "mosflm/io/ImportedSweepGeometry.hpp"
 #include "mosflm/io/XdsInpImporter.hpp"
 #include "mosflm/io/XinfoImporter.hpp"
@@ -14,9 +15,12 @@
 
 using mosflm::control::ControlSession;
 using mosflm::io::ImportedSweepGeometry;
+using mosflm::io::ExperimentModel;
+using mosflm::io::MetadataSource;
 using mosflm::io::XdsInpImporter;
 using mosflm::io::XinfoImporter;
 using mosflm::io::apply_imported_geometry;
+using mosflm::io::write_xds_inp;
 using mosflm::io::template_from_image_name;
 using mosflm::io::xds_question_marks_to_hash;
 
@@ -162,6 +166,45 @@ int main() {
             }
         }
         CHECK(saw_image);
+    }
+
+    {
+        // Resolved options written at the start of a run, readable again as
+        // XDS.INP. ``#`` in the template is stored as ``?``.
+        ExperimentModel m;
+        m.directory = "/data/sweep";
+        m.image_template = "insulin_1_###.img";
+        m.frame_range.assign({1, 10}, MetadataSource::CommandLine);
+        m.wavelength_A.assign(0.979, MetadataSource::ImageHeader);
+        m.distance_mm.assign(160.0, MetadataSource::ImageHeader);
+        m.pixel_mm.assign({0.0816, 0.0816}, MetadataSource::ImageHeader);
+        m.beam_mm.assign({100.0, 50.0}, MetadataSource::XdsInp);
+        m.oscillation_deg.assign(1.0, MetadataSource::ImageHeader);
+        m.cell.assign({78.19, 78.19, 78.19, 90.0, 90.0, 90.0}, MetadataSource::XdsInp);
+        m.symmetry.assign(197, MetadataSource::XdsInp);
+        const auto path = mosflm_test::output_dir("xds_inp_write") / "XDS.INP";
+        write_xds_inp(path, m);
+        const auto g = XdsInpImporter::parse_file(path);
+        CHECK(g.has_template);
+        CHECK(g.image_template == "insulin_1_###.img");
+        CHECK(g.directory.string() == "/data/sweep");
+        CHECK(g.has_process_range);
+        CHECK_EQ(g.process_first, 1);
+        CHECK_EQ(g.process_last, 10);
+        CHECK(g.has_wavelength);
+        CHECK(std::fabs(g.wavelength_A - 0.979) < 1e-6);
+        CHECK(g.has_distance);
+        CHECK(std::fabs(g.distance_mm - 160.0) < 1e-6);
+        CHECK(g.has_pixel);
+        CHECK(g.has_beam);
+        CHECK(std::fabs(g.beam_x_mm - 100.0) < 1e-2);
+        CHECK(std::fabs(g.beam_y_mm - 50.0) < 1e-2);
+        CHECK(g.has_oscillation);
+        CHECK(std::fabs(g.oscillation_deg - 1.0) < 1e-6);
+        CHECK(g.has_cell);
+        CHECK(std::fabs(g.cell_a - 78.19) < 1e-6);
+        CHECK(g.has_symmetry);
+        CHECK_EQ(g.symmetry_number, 197);
     }
 
     return mosflm_test::finish("xinfo_xds_import");

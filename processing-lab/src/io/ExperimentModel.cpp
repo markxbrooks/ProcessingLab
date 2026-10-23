@@ -348,6 +348,62 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
     return m;
 }
 
+void write_xds_inp(const std::filesystem::path& path, const ExperimentModel& model) {
+    std::ostringstream out;
+    out << "! XDS.INP written by ProcessingLab from the resolved run options.\n";
+    if (model.hdf5) {
+        if (model.image.set()) {
+            out << "NAME_TEMPLATE_OF_DATA_FRAMES=" << model.image.value.string() << '\n';
+        }
+    } else if (!model.image_template.empty()) {
+        std::string tmpl = model.image_template;
+        for (char& c : tmpl) {
+            if (c == '#') {
+                c = '?';
+            }
+        }
+        const std::filesystem::path full =
+            model.directory.empty() ? std::filesystem::path(tmpl) : model.directory / tmpl;
+        out << "NAME_TEMPLATE_OF_DATA_FRAMES=" << full.string() << '\n';
+    } else if (model.image.set()) {
+        out << "NAME_TEMPLATE_OF_DATA_FRAMES=" << model.image.value.string() << '\n';
+    }
+    if (model.frame_range.set()) {
+        out << "DATA_RANGE=" << model.frame_range.value.first << ' '
+            << model.frame_range.value.second << '\n';
+    }
+    if (model.wavelength_A.set()) {
+        out << "X-RAY_WAVELENGTH=" << fmt(model.wavelength_A.value, 6) << '\n';
+    }
+    if (model.distance_mm.set()) {
+        out << "DETECTOR_DISTANCE=" << fmt(model.distance_mm.value, 3) << '\n';
+    }
+    if (model.pixel_mm.set()) {
+        out << "QX=" << fmt(model.pixel_mm.value.first, 6)
+            << " QY=" << fmt(model.pixel_mm.value.second, 6) << '\n';
+    }
+    if (model.beam_mm.set() && model.pixel_mm.set() &&
+        model.pixel_mm.value.first > 0.0 && model.pixel_mm.value.second > 0.0) {
+        const double orgx = model.beam_mm.value.first / model.pixel_mm.value.first;
+        const double orgy = model.beam_mm.value.second / model.pixel_mm.value.second;
+        out << "ORGX=" << fmt(orgx, 4) << " ORGY=" << fmt(orgy, 4) << '\n';
+    }
+    if (model.oscillation_deg.set()) {
+        out << "OSCILLATION_RANGE=" << fmt(model.oscillation_deg.value, 4) << '\n';
+    }
+    if (model.cell.set()) {
+        out << "UNIT_CELL_CONSTANTS=";
+        for (double v : model.cell.value) {
+            out << ' ' << fmt(v, 2);
+        }
+        out << '\n';
+    }
+    if (model.symmetry.set()) {
+        out << "SPACE_GROUP_NUMBER=" << model.symmetry.value << '\n';
+    }
+    write_file_atomic(path, out.str());
+}
+
 std::vector<std::string> ExperimentModel::control_lines() const {
     std::vector<std::string> lines;
     if (!hdf5) {
