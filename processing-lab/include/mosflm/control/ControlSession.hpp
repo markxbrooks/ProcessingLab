@@ -151,6 +151,10 @@ struct ControlState {
     Eigen::Matrix3d amat{Eigen::Matrix3d::Identity()};
 
     std::filesystem::path directory{"."};
+    /// Where relative output paths go (spot list, XPARM.XDS, GXPARM.XDS);
+    /// empty = ``directory``, as MOSFLM does. ``ProcessingLab run`` sets it
+    /// so nothing is written next to the images.
+    std::filesystem::path output_directory;
     std::string image_template;  ///< e.g. ``insulin_1_###.img``
     std::filesystem::path image_path;  ///< ``IMAGE`` keyword if set
     /// Output MTZ path (``HKLOUT`` keyword or CLI override).
@@ -220,6 +224,17 @@ struct ControlState {
     bool exit_requested{false};
 };
 
+/// ``name`` resolved for writing: as is if absolute, else under
+/// ``output_directory`` (or ``directory`` when that is empty).
+[[nodiscard]] inline std::filesystem::path output_path(
+    const ControlState& state, const std::filesystem::path& name
+) {
+    if (name.is_absolute()) {
+        return name;
+    }
+    return (state.output_directory.empty() ? state.directory : state.output_directory) / name;
+}
+
 /// Outcome of one ``GO`` / ``RUN``.
 struct ControlGoResult {
     bool ran_process{false};
@@ -288,6 +303,8 @@ public:
     ) const;
 
     [[nodiscard]] const ControlState& state() const { return state_; }
+    /// Set :member:`ControlState::output_directory`.
+    void set_output_directory(const std::filesystem::path& dir) { state_.output_directory = dir; }
     [[nodiscard]] bool exit_requested() const { return state_.exit_requested; }
     [[nodiscard]] bool done_run() const { return state_.done_run; }
     [[nodiscard]] bool strategy_done() const { return state_.strategy_done; }

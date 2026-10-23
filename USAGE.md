@@ -13,12 +13,58 @@ Build the binary with `make cpp`. The install path is `bin/ProcessingLab`.
 ./bin/ProcessingLab --help
 ```
 
+## Quick start: `ProcessingLab run`
+
+```bash
+ProcessingLab run --image /data/sweep_master.h5                 # whole sweep
+ProcessingLab run --image /data/sweep_0001.cbf --range 1:180 \
+    --xds-inp /data/XDS.INP --output-dir results/lysozyme
+```
+
+`run` finds spots, autoindexes and integrates each sweep without a CONTROL
+script. The image headers supply the experiment metadata; XDS.INP and
+`.xinfo` override or add to it.
+
+| Option | Role |
+| ------ | ---- |
+| `--image PATH` | HDF5/NeXus master, or one frame of a CBF/SMV sweep (its numbered siblings are the sweep). Repeatable: each image is one sweep, processed in turn into `sweep_1/`, `sweep_2/`, … Optional if `--xinfo` / `--xds-inp` names the images. |
+| `--range FIRST:LAST` | Inclusive frame range. Default: every frame found. |
+| `--output-dir DIR` | Directory for all outputs. It must not exist yet; runs never reuse one. Default: a new `processing_YYYYMMDD_HHMMSS` (with `_2`, `_3`, … if taken) in the current directory. |
+| `--xds-inp PATH` | Import XDS.INP. |
+| `--xinfo PATH` | Import Xia2 `.xinfo`. |
+| `--sweep NAME` | Which `.xinfo` sweep, when it has several (required then). |
+| `--help`, `--version` | Usage, build version. |
+
+**Metadata precedence**, per field, lowest to highest: image header, XDS.INP,
+`.xinfo`, command line. A source only overrides the fields it sets (an
+`.xinfo` without detector geometry keeps the header's). `Process.Log` starts
+with the resolved values and their sources, and warns when sources disagree
+on a value (the higher-priority one is used):
+
+```text
+ Experiment metadata
+  Image source:  /data/sweep_0001.cbf  [CLI]
+  Wavelength:    0.97949 Å  [XDS.INP]
+  Distance:      384.99 mm  [XDS.INP]
+  Beam:          214.28 207.96 mm  [image header]
+  Frame range:   1–180  [CLI]  (900 on disk)
+  *** WARNING: Distance: XDS.INP 384.99 mm overrides image header 395.00 mm
+```
+
+Every output goes in the output directory: `Process.Log`, `process.mtz`,
+`spots.spt`, `XPARM.XDS`, `GXPARM.XDS`, `integrationlab_index.txt`. Spots
+for indexing come from the first 50 frames of the range. With a known cell
+(from XDS.INP), `DMAX` is set to 1.7× its longest edge so a long axis is not
+lost in autoindexing. For anything else (fixed matrix, resolution limits,
+`NPROC`, …) use a CONTROL script as below.
+
 ## Invocation
 
 ```text
+ProcessingLab run [options]          (see above)
 ProcessingLab [HKLOUT out.mtz] [--image img]
               [--xinfo file.xinfo] [--xds-inp XDS.INP]
-              [--xparm XPARM.XDS] [script.in]
+              [--xparm XPARM.XDS] [--output-dir DIR] [script.in]
 ```
 
 CONTROL is read from `script.in` if given, otherwise from stdin. `GO` / `RUN`
@@ -30,8 +76,9 @@ the session.
 | `HKLOUT path` | Unmerged MTZ path. Same as the CONTROL keyword. Default `process.mtz`. |
 | `--image path` | Single image or HDF5/NeXus master. Overrides `IMAGE` unless `TEMPLATE` is set for multi-frame CBF/SMV. |
 | `--xds-inp path` | Parse `XDS.INP` into CONTROL (see below). |
-| `--xinfo path` | Parse Xia2 `.xinfo` into CONTROL (first wavelength + first sweep). |
+| `--xinfo path` | Parse Xia2 `.xinfo` into CONTROL (first sweep and the wavelength it names). `run --sweep` selects another. |
 | `--xparm path` | Parse `XPARM.XDS` / `GXPARM.XDS` into `CELL`, `SYMMETRY`, geometry, and `MATRIX`. Alias `--gxparm`. |
+| `--output-dir DIR` | New directory (must not exist) for `Process.Log`, the MTZ, spot lists, `XPARM.XDS` and `GXPARM.XDS`. Relative paths in the script (`DIRECTORY`, `IMAGE`) still resolve against the current directory. |
 | `script.in` | CONTROL file. Lines starting with `!` are comments. |
 
 Apply order before the script: **`--xds-inp`, then `--xinfo`, then `--xparm`**.

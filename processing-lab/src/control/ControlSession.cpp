@@ -1452,13 +1452,14 @@ void print_process_integrate_header(
 void print_process_batch_banner(
     int batch_first,
     int batch_last,
-    bool print_symbols
+    bool print_symbols,
+    int processors
 ) {
     std::cout << "\n ******************************************************************************\n";
     std::cout << "                     PROCESSING OF IMAGES " << std::setw(7)
               << batch_first << " ... " << std::setw(7) << batch_last << "\n";
     std::cout << " ******************************************************************************\n\n";
-    std::cout << " USING   1 PROCESSORS\n\n";
+    std::cout << " USING " << std::setw(3) << processors << " PROCESSORS\n\n";
     if (print_symbols) {
         // Column meanings follow XDS INTEGRATE; MEANIS is ProcessingLab-only.
         std::cout << " *** DEFINITION OF SYMBOLS ***\n";
@@ -1626,7 +1627,8 @@ void run_process_profile_3d(
     std::map<std::tuple<int, int, int>, Seed> seeds;
     diffraction::ReflectionPredictor predictor;
 
-    print_process_batch_banner(first, last, true);
+    // PROFILE 3D integrates frames serially.
+    print_process_batch_banner(first, last, true, 1);
     std::size_t batch_integrated = 0;
     auto tmpl = session.make_process_request(image0, first);
     crystal = tmpl.crystal;
@@ -2185,8 +2187,8 @@ ControlGoResult ControlSession::go(
         out.message = "AUTOINDEX complete";
         // IDXREF analogue: write XPARM.XDS after successful index.
         if (state_.has_matrix && state_.has_cell) {
-            std::filesystem::path out_xparm =
-                state_.directory / "XPARM.XDS";
+            const std::filesystem::path out_xparm =
+                output_path(state_, "XPARM.XDS");
             try {
                 const auto g = io::xparm_from_control(*this);
                 io::write_xparm(out_xparm, g);
@@ -2556,7 +2558,8 @@ ControlGoResult ControlSession::go(
                     std::min(batch_first + k_log_batch - 1, last);
                 print_process_batch_banner(
                     batch_first, batch_last,
-                    /*print_symbols=*/!batch_header_printed
+                    /*print_symbols=*/!batch_header_printed,
+                    util::openmp_enabled() ? nproc : 1
                 );
                 batch_header_printed = true;
             }
@@ -2687,9 +2690,7 @@ ControlGoResult ControlSession::go(
         if (out_xparm.empty()) {
             out_xparm = "GXPARM.XDS";
         }
-        if (!out_xparm.is_absolute()) {
-            out_xparm = state_.directory / out_xparm;
-        }
+        out_xparm = output_path(state_, out_xparm);
         try {
             const auto g = io::xparm_from_control(*this);
             io::write_xparm(out_xparm, g);

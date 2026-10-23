@@ -246,6 +246,7 @@ set(MOSFLM_GEOMETRY_SOURCES
     src/control/ControlSession.cpp
     src/io/ImportedSweepGeometry.cpp
     src/io/XinfoImporter.cpp
+    src/io/ExperimentModel.cpp
     src/io/XdsInpImporter.cpp
     src/io/XparmIO.cpp
     ${gemmi_SOURCE_DIR}/src/mtz.cpp
@@ -629,6 +630,16 @@ if(BUILD_TESTING)
     add_test(
         NAME xinfo_xds_import
         COMMAND test_xinfo_xds_import
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_executable(test_experiment_model
+        tests/unit/test_experiment_model.cpp
+    )
+    target_link_libraries(test_experiment_model PRIVATE mosflm_geometry)
+    add_test(
+        NAME experiment_model
+        COMMAND test_experiment_model
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 

@@ -8,6 +8,7 @@
 
 #include "mosflm/control/ControlSession.hpp"
 #include "mosflm/diffraction/ProcessPipeline.hpp"
+#include "mosflm/io/ExperimentModel.hpp"
 #include "mosflm/io/ImportedSweepGeometry.hpp"
 #include "mosflm/io/XdsInpImporter.hpp"
 #include "mosflm/io/XinfoImporter.hpp"
@@ -17,7 +18,9 @@
 #include "mosflm/indexing/ControlAutoIndex.hpp"
 #endif
 
+#include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -240,9 +243,13 @@ void emit_autoindex_dump(const mosflm::control::ControlState& state) {
                   << '\n';
     }
 
-    // Sidecar next to cwd for tools that prefer files over stdout.
+    // Sidecar (output directory, else cwd) for tools that prefer files.
     try {
-        std::ofstream out("integrationlab_index.txt");
+        std::ofstream out(
+            state.output_directory.empty()
+                ? std::filesystem::path("ProcessingLabIndex.txt")
+                : state.output_directory / "ProcessingLabIndex.txt"
+        );
         if (out) {
             out << std::setprecision(10);
             out << "CELL " << c.a << " " << c.b << " " << c.c << " "
@@ -277,12 +284,231 @@ void emit_autoindex_dump(const mosflm::control::ControlState& state) {
     }
 }
 
+/// Write MTZ for each PROCESS and report every GO (FINDSPOTS, AUTOINDEX, …).
+void report_runs(
+    const mosflm::control::ControlSession& session,
+    const std::vector<mosflm::control::ControlGoResult>& runs,
+    const std::filesystem::path& out_mtz
+) {
+    for (const auto& r : runs) {
+        if (r.ran_findspots) {
+            std::cout << "  FINDSPOTS: " << r.message << '\n';
+            continue;
+        }
+        if (r.ran_autoindex) {
+            std::cout << "  AUTOINDEX: " << r.message << '\n';
+            emit_autoindex_dump(session.state());
+            continue;
+        }
+        if (r.ran_strategy) {
+            std::cout << "  STRATEGY: " << r.message << '\n';
+            continue;
+        }
+        if (!r.ran_process) {
+            continue;
+        }
+        mosflm::diffraction::ProcessPipeline::write_mtz(
+            out_mtz,
+            r.crystal,
+            r.process,
+            session.state().wavelength_A
+        );
+        std::cout << "  PROCESS: image=" << r.image_used;
+        if (r.process_last > r.process_first) {
+            std::cout << " frames=" << r.process_first << "-"
+                      << r.process_last;
+        } else if (r.process_first > 0) {
+            std::cout << " frame=" << r.process_first;
+        }
+        std::cout << " preds=" << r.process.predictions.size()
+                  << " integrated=" << r.process.mtz_reflections.size()
+                  << " → " << out_mtz << '\n';
+        if (!session.state().extra_lattices.empty()) {
+            std::cout << "  MULTILATTICE: "
+                      << session.state().extra_lattices.size()
+                      << " extra lattice(s) stored\n";
+        }
+    }
+}
+
+void print_run_usage() {
+    std::cout
+        << "Usage: ProcessingLab run --image PATH [--image PATH ...]\n"
+        << "         [--range FIRST:LAST] [--output-dir DIR]\n"
+        << "         [--xds-inp XDS.INP] [--xinfo FILE.xinfo [--sweep NAME]]\n"
+        << "         [--help] [--version]\n"
+        << "\n"
+        << "  Finds spots, autoindexes and integrates each sweep. Metadata comes\n"
+        << "  from the image headers; XDS.INP, then .xinfo, then the command line\n"
+        << "  override it field by field, and the log shows each value's source.\n"
+        << "  --image      HDF5/NeXus master, or one frame of a CBF/SMV sweep\n"
+        << "               (repeatable: one sweep per image, processed in turn).\n"
+        << "               Optional when --xinfo or --xds-inp names the images.\n"
+        << "  --range      Inclusive frame range (default: every frame).\n"
+        << "  --output-dir New directory for all outputs (must not exist). Default:\n"
+        << "               processing_YYYYMMDD_HHMMSS in the current directory.\n"
+        << "  --sweep      Which .xinfo sweep, if it has several.\n";
+}
+
+/// ``ProcessingLab run``: image-first processing into a fresh directory.
+int run_command(int argc, char** argv) {
+    namespace fs = std::filesystem;
+    mosflm::io::ExperimentInputs base;
+    std::vector<fs::path> images;
+    std::optional<fs::path> output_dir;
+    const auto need = [&](int& i, std::string_view opt) -> const char* {
+        if (i + 1 >= argc) {
+            throw std::invalid_argument(std::string(opt) + " needs a value");
+        }
+        return argv[++i];
+    };
+    try {
+        for (int i = 0; i < argc; ++i) {
+            const std::string_view a = argv[i];
+            if (a == "-h" || a == "--help") {
+                print_run_usage();
+                return 0;
+            }
+            if (a == "--version") {
+                print_banner();
+                return 0;
+            }
+            if (a == "--image") {
+                images.emplace_back(need(i, a));
+            } else if (a == "--range") {
+                const std::string v = need(i, a);
+                const auto colon = v.find(':');
+                std::size_t used = 0;
+                int first = 0;
+                int last = 0;
+                try {
+                    first = std::stoi(v.substr(0, colon), &used);
+                    if (used != colon) {
+                        throw std::invalid_argument(v);
+                    }
+                    const std::string tail = v.substr(colon + 1);
+                    last = std::stoi(tail, &used);
+                    if (colon == std::string::npos || used != tail.size()) {
+                        throw std::invalid_argument(v);
+                    }
+                } catch (const std::exception&) {
+                    throw std::invalid_argument("--range needs FIRST:LAST, got '" + v + "'");
+                }
+                if (first < 1 || last < first) {
+                    throw std::invalid_argument("--range needs 1 <= FIRST <= LAST, got '" + v + "'");
+                }
+                base.range = std::pair{first, last};
+            } else if (a == "--output-dir") {
+                output_dir = need(i, a);
+            } else if (a == "--xds-inp") {
+                base.xds_inp = fs::absolute(need(i, a));
+            } else if (a == "--xinfo") {
+                base.xinfo = fs::absolute(need(i, a));
+            } else if (a == "--sweep") {
+                base.sweep = need(i, a);
+            } else {
+                throw std::invalid_argument("unexpected argument '" + std::string(a) + "' (see run --help)");
+            }
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "ProcessingLab run: " << ex.what() << '\n';
+        return 2;
+    }
+
+    // Resolve every sweep before creating anything, so a bad input fails
+    // without leaving an empty output directory.
+    std::vector<mosflm::io::ExperimentModel> models;
+    try {
+        if (images.empty()) {
+            models.push_back(mosflm::io::resolve_experiment(base));
+        }
+        for (const auto& img : images) {
+            auto in = base;
+            in.image = fs::absolute(img);
+            models.push_back(mosflm::io::resolve_experiment(in));
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "ProcessingLab run: " << ex.what() << '\n';
+        return 2;
+    }
+
+    fs::path out_root;
+    try {
+        out_root = mosflm::io::create_output_directory(output_dir, fs::current_path(), std::time(nullptr));
+    } catch (const std::exception& ex) {
+        std::cerr << "ProcessingLab run: " << ex.what() << '\n';
+        return 2;
+    }
+
+    int status = 0;
+    for (std::size_t k = 0; k < models.size(); ++k) {
+        const auto& m = models[k];
+        // One sweep per directory: the run directory itself, or sweep_N in it.
+        fs::path dir = out_root;
+        if (models.size() > 1) {
+            dir = out_root / ("sweep_" + std::to_string(k + 1));
+            fs::create_directory(dir);
+        }
+        const auto [f0, f1] = m.frame_range.value;
+        std::ostringstream control;
+        for (const auto& line : m.control_lines()) {
+            control << line << '\n';
+        }
+        if (m.cell.set()) {
+            // DMAX also bounds the autoindexing search: the 200 Å default lost
+            // 76c1b's 187 Å axis, while 320 Å skewed thaumatin's cell. With a
+            // known cell, allow 1.7× its longest edge.
+            const double edge = std::max({m.cell.value[0], m.cell.value[1], m.cell.value[2]});
+            control << "DMAX " << std::max(200.0, std::ceil(1.7 * edge)) << '\n';
+        }
+        control << "HKLOUT " << (dir / "process.mtz").string() << '\n'
+                << "FINDSPOTS THRESHOLD 5.0 MAXSPOTS 1500 FIND " << f0
+                << " FILE spots.spt MULTIFRAME RANGE " << f0 << ' ' << std::min(f0 + 49, f1) << '\n'
+                << "GO\n"
+                << "AUTOINDEX DPS THRESHOLD 15\n"
+                << "GO\n"
+                << "PROCESS " << f0 << " TO " << f1;
+        if (m.oscillation_deg.set() && m.oscillation_deg.source != mosflm::io::MetadataSource::ImageHeader) {
+            control << " ANGLE " << m.oscillation_deg.value;
+        }
+        control << "\nGO\nEXIT\n";
+
+        std::ostringstream header;
+        m.write_summary(header);
+        header << "  Output:        " << dir.string() << '\n';
+
+        try {
+            ProcessLog plog(dir / "Process.Log", control_input_block(control.str()));
+            print_banner();
+            std::cout << header.str();
+            mosflm::control::ControlSession session;
+            session.set_output_directory(dir);
+            std::optional<fs::path> img_override;
+            if (m.hdf5) {
+                img_override = m.image.value;
+            }
+            std::istringstream in(control.str());
+            const auto runs = session.run_stream(in, img_override, "");
+            report_runs(session, runs, dir / "process.mtz");
+            print_end();
+        } catch (const std::exception& ex) {
+            std::cerr << "ProcessingLab run: " << ex.what() << '\n';
+            status = 1;
+        }
+    }
+    std::cout << "\n Output directory: " << out_root.string() << '\n';
+    return status;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
 #if defined(MOSFLM_HAS_INDEXING)
     mosflm::indexing::register_control_autoindex();
 #endif
+    if (argc > 1 && std::string_view(argv[1]) == "run") {
+        return run_command(argc - 2, argv + 2);
+    }
 
     std::optional<std::filesystem::path> image;
     std::optional<std::filesystem::path> hklout;
@@ -291,6 +517,7 @@ int main(int argc, char** argv) {
     std::optional<std::filesystem::path> xds_inp_path;
     std::optional<std::filesystem::path> xparm_path;
     std::optional<std::filesystem::path> log_path = "Process.Log";
+    std::optional<std::filesystem::path> output_dir;
     bool want_help = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -351,6 +578,14 @@ int main(int argc, char** argv) {
             log_path.reset();
             continue;
         }
+        if (a == "--output-dir") {
+            if (i + 1 >= argc) {
+                std::cerr << "ProcessingLab: --output-dir needs a path\n";
+                return 2;
+            }
+            output_dir = argv[++i];
+            continue;
+        }
         if (a == "version" || a == "--version") {
             print_banner();
             return 0;
@@ -365,10 +600,14 @@ int main(int argc, char** argv) {
 
     if (want_help) {
         std::cerr
-            << "Usage: ProcessingLab [HKLOUT out.mtz] [--image img]\n"
+            << "Usage: ProcessingLab run --image PATH ...   (see run --help)\n"
+            << "       ProcessingLab [HKLOUT out.mtz] [--image img]\n"
             << "         [--xinfo file.xinfo] [--xds-inp XDS.INP]\n"
             << "         [--xparm XPARM.XDS] [--log Process.Log | --no-log]\n"
-            << "         [script.in]\n"
+            << "         [--output-dir DIR] [script.in]\n"
+            << "  --output-dir: new directory (must not exist) for the log, MTZ,\n"
+            << "  spot list, XPARM.XDS and GXPARM.XDS; script paths stay relative\n"
+            << "  to the current directory.\n"
             << "  Output is also written to Process.Log (--log path to rename,\n"
             << "  --no-log to disable), including the CONTROL input.\n"
             << "  Reads CONTROL from script or stdin (GO/RUN → C++ science).\n"
@@ -392,6 +631,21 @@ int main(int argc, char** argv) {
         control_text = text.str();
     }
 
+    // --output-dir: a fresh directory for every output, as for ``run``.
+    if (output_dir) {
+        try {
+            output_dir = mosflm::io::create_output_directory(
+                output_dir, std::filesystem::current_path(), std::time(nullptr)
+            );
+        } catch (const std::exception& ex) {
+            std::cerr << "ProcessingLab: " << ex.what() << '\n';
+            return 2;
+        }
+        if (log_path && log_path->is_relative()) {
+            log_path = *output_dir / *log_path;
+        }
+    }
+
     // Log file: everything on stdout/stderr is copied (Process.Log).
     std::optional<ProcessLog> plog;
     if (log_path) {
@@ -410,6 +664,9 @@ int main(int argc, char** argv) {
 
     try {
         mosflm::control::ControlSession session;
+        if (output_dir) {
+            session.set_output_directory(*output_dir);
+        }
         if (hklout) {
             session.parse_line(std::string("HKLOUT ") + hklout->string());
         }
@@ -467,47 +724,13 @@ int main(int argc, char** argv) {
             }
         }
 
-        const auto out_mtz = hklout ? *hklout : session.state().hklout;
-        std::size_t n_proc = 0;
-        for (const auto& r : runs) {
-            if (r.ran_findspots) {
-                std::cout << "  FINDSPOTS: " << r.message << '\n';
-                continue;
-            }
-            if (r.ran_autoindex) {
-                std::cout << "  AUTOINDEX: " << r.message << '\n';
-                emit_autoindex_dump(session.state());
-                continue;
-            }
-            if (r.ran_strategy) {
-                std::cout << "  STRATEGY: " << r.message << '\n';
-                continue;
-            }
-            if (!r.ran_process) {
-                continue;
-            }
-            ++n_proc;
-            mosflm::diffraction::ProcessPipeline::write_mtz(
-                out_mtz,
-                r.crystal,
-                r.process,
-                session.state().wavelength_A
-            );
-            std::cout << "  PROCESS: image=" << r.image_used;
-            if (r.process_last > r.process_first) {
-                std::cout << " frames=" << r.process_first << "-"
-                          << r.process_last;
-            } else if (r.process_first > 0) {
-                std::cout << " frame=" << r.process_first;
-            }
-            std::cout << " preds=" << r.process.predictions.size()
-                      << " integrated=" << r.process.mtz_reflections.size()
-                      << " → " << out_mtz << '\n';
-            if (!session.state().extra_lattices.empty()) {
-                std::cout << "  MULTILATTICE: "
-                          << session.state().extra_lattices.size()
-                          << " extra lattice(s) stored\n";
-            }
+        std::filesystem::path out_mtz = hklout ? *hklout : session.state().hklout;
+        if (output_dir && out_mtz.is_relative()) {
+            out_mtz = *output_dir / out_mtz;
+        }
+        report_runs(session, runs, out_mtz);
+        if (output_dir) {
+            std::cout << "  Output directory: " << output_dir->string() << '\n';
         }
 
         if (session.needs_no_run_warning()) {

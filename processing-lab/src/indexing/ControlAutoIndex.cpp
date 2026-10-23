@@ -59,9 +59,9 @@ void run_autoindex(
             "CONTROL AUTOINDEX: FILE spot-list path is required"
         );
     }
-    if (!spt.is_absolute()) {
-        spt = state.directory / spt;
-    }
+    // Written by FINDSPOTS to the output directory (``DIRECTORY`` unless
+    // ``ProcessingLab run`` set one).
+    spt = control::output_path(state, spt);
     const SpotList spots = SpotList::read_spt(spt);
 
     AutoIndexGeometry geo;

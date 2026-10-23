@@ -223,9 +223,7 @@ void run_findspots(
         out = "spots.spt";
         state.findspots.spot_file = out;
     }
-    if (!out.is_absolute()) {
-        out = state.directory / out;
-    }
+    out = control::output_path(state, out);
     if (out.extension().empty()) {
         out.replace_extension(".spt");
         state.findspots.spot_file = out.filename();
