@@ -20,11 +20,13 @@
  * nothing is written into ``testdata/run_modes`` or next to the image.
  * Soft-skips if the insulin image is missing.
  */
+#include "mosflm/io/Json.hpp"
 #include "test_util.hpp"
 
 #include <gemmi/mtz.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -286,8 +288,9 @@ int main() {
     {
         const auto integrated = [&](const fs::path& dir) {
             const std::string pj = slurp(dir / "process.json");
-            const auto at = pj.find("\"reflections\": ");
-            return at == std::string::npos ? std::string() : pj.substr(at, pj.find(',', at) - at);
+            const auto doc = mosflm::io::Json::parse(pj);
+            const auto* c = doc.find("integration")->find("counts");
+            return c == nullptr ? std::string() : c->find("integrated_reflections")->dump();
         };
         const std::string want = integrated(work / "xds");
         CHECK(!want.empty());
@@ -305,6 +308,27 @@ int main() {
         CHECK(contains(slurp(work / "rep_xia2" / "process.log"), "Space group:   197  [.xinfo]"));
         // mosflm.in leaves HKLOUT to the new run's --output-dir.
         CHECK(!contains(slurp(work / "xds" / "mosflm" / "mosflm.in"), "HKLOUT"));
+        // Version 2 counts: the quality filters add up to the integrated
+        // reflections; outputs are relative to the run directory.
+        {
+            const auto doc = mosflm::io::Json::parse(slurp(work / "xds" / "process.json"));
+            const auto& qc = *doc.find("quality")->find("counts");
+            double sum = 0.0;
+            for (const char* k : {"rejected_misfit_observations", "invalid_sigma_observations",
+                                  "systematic_absence_observations", "below_min_i_over_sigma_observations",
+                                  "outside_resolution_observations", "accepted_observations"}) {
+                sum += qc.find(k)->number();
+            }
+            CHECK_EQ(sum, qc.find("integrated_reflections")->number());
+            CHECK(qc.find("integrated_reflections")->number() ==
+                  doc.find("integration")->find("counts")->find("integrated_reflections")->number());
+            for (const auto& o : doc.find("outputs")->items()) {
+                CHECK_MSG(!fs::path(o.find("path")->string()).is_absolute(), o.find("path")->string());
+            }
+            const std::string ij = slurp(work / "xds" / "input.json");
+            CHECK(contains(ij, "\"length_unit\": \"angstrom\""));
+            CHECK(!contains(ij, "angstrom/deg"));
+        }
         // process.md lists them relative to the run directory.
         CHECK(contains(slurp(work / "xds" / "process.md"), "- xds_inp: `xds/XDS.INP`"));
         CHECK(fs::exists(work / "rep_mosflm" / "process.mtz"));
@@ -328,6 +352,55 @@ int main() {
         CHECK(contains(slurp(work / "sg_bad.out"), "unknown space group 'P99999'"));
         CHECK_EQ(run(work, "run --from xds --cell 78 78 --output-dir cell_refused", "cell_short.out"), 2);
         CHECK(!fs::exists(work / "cell_refused"));
+    }
+
+    // 14. Refinement hand-off: --from carries the final model (schema 2)
+    //     with an explicit policy; --refine changes it; the policy is
+    //     recorded in input.json and what was done in process.json.
+    {
+        const auto record = [&](const fs::path& dir, const char* name) {
+            return mosflm::io::Json::parse(slurp(dir / name));
+        };
+        // Default: orientation refined, mosaicity re-estimated, the rest
+        // fixed; the source run is reproduced.
+        const auto src = record(work / "xds", "process.json");
+        const auto dflt = record(work / "from_xds", "process.json");
+        CHECK(dflt.find("integration")->find("counts")->find("integrated_reflections")->number() ==
+              src.find("integration")->find("counts")->find("integrated_reflections")->number());
+        const auto& params = *dflt.find("refinement")->find("parameters");
+        CHECK(params.find("orientation")->string() == "refined");
+        CHECK(params.find("unit_cell")->string() == "fixed");
+        CHECK(params.find("mosaicity")->string() == "estimated");
+        CHECK(contains(slurp(work / "from_xds" / "process.log"),
+                       "Refine:        orientation, mosaicity; fixed: cell, distance, beam, tilt_twist"));
+        // The final model's matrix belongs to its cell.
+        const auto& x = *src.find("experiment");
+        CHECK(std::fabs(x.find("orientation")->find("unit_cell")->find("a")->number() -
+                        x.find("crystal")->find("unit_cell")->find("a")->number()) < 1e-3);
+
+        // --refine orientation: the mosaicity is held at the previous value.
+        CHECK_EQ(run(work, "run --from xds --refine orientation --output-dir fix_mosaic", "fix_mosaic.out"), 0);
+        const std::string script = slurp(work / "fix_mosaic" / "mosflm" / "mosflm.in");
+        CHECK(contains(script, "REFINE ORIENTATION\n"));
+        CHECK(contains(script, "MOSAIC 0.15"));
+        CHECK(record(work / "fix_mosaic", "process.json").find("refinement")->find("parameters")
+                  ->find("mosaicity")->string() == "fixed");
+        CHECK(record(work / "fix_mosaic", "input.json").find("experiment")->find("refinement_policy")
+                  ->find("mosaicity")->string() == "fixed");
+
+        // --refine orientation,cell refines the cell as well.
+        CHECK_EQ(run(work, "run --from xds --refine orientation,cell --output-dir refine_cell", "refine_cell.out"), 0);
+        CHECK(contains(slurp(work / "refine_cell" / "mosflm" / "mosflm.in"), "REFINE ORIENTATION CELL\n"));
+        CHECK(record(work / "refine_cell", "process.json").find("refinement")->find("parameters")
+                  ->find("unit_cell")->string() == "refined");
+
+        // Refused: a fixed mosaicity with nothing to fix it to; unknown names.
+        CHECK_EQ(run(work, "run --image " + img + " --refine orientation --output-dir refine_refused",
+                     "refine_nomosaic.out"), 2);
+        CHECK(contains(slurp(work / "refine_nomosaic.out"), "needs a known mosaicity (--from)"));
+        CHECK_EQ(run(work, "run --from xds --refine twist,shape --output-dir refine_refused", "refine_bad.out"), 2);
+        CHECK(contains(slurp(work / "refine_bad.out"), "unknown parameter 'shape'"));
+        CHECK(!fs::exists(work / "refine_refused"));
     }
 
     // Nothing written into the fixtures or next to the image.

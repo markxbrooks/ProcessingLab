@@ -347,6 +347,9 @@ DataQualityReport compute_data_quality(
         dmax_A = 200.0;
         dmin_A = 1.45;
     }
+    report.dmax_A = dmax_A;
+    report.dmin_A = dmin_A;
+    report.min_isigma = min_isigma;
 
     report.shells.resize(static_cast<std::size_t>(n_shells));
     for (int i = 0; i < n_shells; ++i) {
@@ -387,6 +390,7 @@ DataQualityReport compute_data_quality(
         }
         if (!(row.sigma > 0.0f) || !std::isfinite(row.intensity) ||
             !std::isfinite(row.sigma)) {
+            ++report.n_invalid_sigma;
             continue;
         }
         int h = row.h;
@@ -408,10 +412,12 @@ DataQualityReport compute_data_quality(
         const double isigi =
             static_cast<double>(row.intensity / row.sigma);
         if (isigi < min_isigma) {
+            ++report.n_below_min_isigma;
             continue;
         }
         const double d = crystal.cell.calculate_d(m);
         if (!(d >= dmin_A) || !(d <= dmax_A)) {
+            ++report.n_outside_resolution;
             continue;
         }
         Obs o;

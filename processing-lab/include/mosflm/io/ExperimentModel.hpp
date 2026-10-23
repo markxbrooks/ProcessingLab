@@ -51,6 +51,29 @@ struct Sourced {
     }
 };
 
+/// The final model of an earlier run (``process.json`` ``experiment``), as
+/// ``run --from`` carries it forward. Lengths in Å / mm, angles in degrees.
+struct PreviousModel {
+    std::array<double, 6> cell{};
+    int space_group{1};
+    double wavelength_A{0.0};
+    double distance_mm{0.0};
+    std::pair<double, double> beam_mm{};
+    std::pair<double, double> pixel_mm{};
+    std::pair<double, double> tilt_twist_mrad{};
+    double mosaicity_deg{0.0};
+    /// MOSFLM [A] (row-major; rows lab X, Y, Z; columns a*, b*, c*), scaled
+    /// by ``matrix_wavelength_A`` (A = λ·UB).
+    std::array<double, 9> matrix{};
+    double matrix_wavelength_A{0.0};
+    /// Detector handedness the matrix was derived in (CONTROL ``INVERTX``).
+    bool invertx{false};
+};
+
+/// Parameters ``--refine`` names (and ``all`` / ``none``).
+inline constexpr const char* kRefinableParameters[] = {
+    "orientation", "cell", "distance", "beam", "tilt_twist", "mosaicity"};
+
 /// Inputs for one sweep of ``ProcessingLab run``.
 struct ExperimentInputs {
     /// ``--image``: an HDF5/NeXus master, or one frame of a CBF/SMV sweep.
@@ -74,6 +97,14 @@ struct ExperimentInputs {
     /// for this cell (same crystal orientation).
     std::optional<std::array<double, 6>> cell;
     std::optional<int> symmetry;
+    /// ``--from`` (schema 2): the earlier run's final model, over the
+    /// imports and below the command line. Version 1 runs use ``xparm``.
+    std::optional<PreviousModel> previous;
+    /// ``--refine``: the parameters PROCESS may refine (from
+    /// ``kRefinableParameters``); the rest are held fixed. Without it, a
+    /// known orientation refines ``orientation`` and re-estimates
+    /// ``mosaicity``; otherwise everything is refined.
+    std::optional<std::vector<std::string>> refine;
 };
 
 /// The experiment once every source is merged, with per-field provenance.
@@ -99,6 +130,11 @@ struct ExperimentModel {
     Sourced<std::array<double, 9>> orientation;
     /// Detector tilt / twist (mrad), when an earlier run refined them.
     Sourced<std::pair<double, double>> tilt_twist_mrad;
+    /// Mosaicity (°) carried from ``--from``; fixed or re-estimated as the
+    /// refinement policy says.
+    Sourced<double> mosaicity_deg;
+    /// The parameters PROCESS refines (``kRefinableParameters`` names).
+    std::vector<std::string> refine;
     int frames_available{0};  ///< Frames found on disk / in the master.
     int first_frame{1};       ///< First frame number on disk (CBF/SMV).
     /// First frame's header, for XDS.INP: detector size (px), detector id,
@@ -119,6 +155,8 @@ struct ExperimentModel {
     /// CONTROL lines that set ``orientation`` (``INVERTX``, ``REFINE``,
     /// ``MATRIX``), after the imported geometry.
     std::vector<std::string> orientation_control;
+    /// CONTROL lines for the refinement policy (``REFINE …``, ``MOSAIC``).
+    std::vector<std::string> refinement_control;
 
     /// CONTROL lines: DIRECTORY/TEMPLATE for CBF/SMV, then imported geometry.
     [[nodiscard]] std::vector<std::string> control_lines() const;
@@ -128,6 +166,12 @@ struct ExperimentModel {
     /// ``{value, unit, source, overrides: [{value, source}, …]}``.
     [[nodiscard]] Json to_json() const;
 };
+
+/// Refuse a cell that the space group's crystal system does not allow
+/// (e.g. a ≠ b for a tetragonal group).
+///
+/// :raises std::runtime_error: With the rule the cell breaks.
+void check_cell_fits_spacegroup(const std::array<double, 6>& cell, int space_group);
 
 /// Script mode: geometry set in a parsed (not run) CONTROL ``state`` that
 /// differs from ``model`` — from ``--xparm`` or the script's keywords —

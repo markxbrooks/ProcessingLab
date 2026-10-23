@@ -3,6 +3,8 @@
  * CONTROL, and the process.json lifecycle (running → completed / failed /
  * skipped) with process.md rendered from the records.
  */
+#include "mosflm/geometry/LabFrame.hpp"
+#include "mosflm/geometry/OrientationMatrix.hpp"
 #include "mosflm/io/Json.hpp"
 #include "mosflm/io/RunRecord.hpp"
 #include "test_util.hpp"
@@ -10,6 +12,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -106,6 +109,23 @@ int main() {
         CHECK(contains(pj, "\"status\": \"running\""));
         CHECK(contains(pj, "\"status\": \"pending\""));
         CHECK(contains(pj, "Distance: XDS.INP 165"));  // input warnings carried over
+        // Version 2: every stage key present from the start; validation is
+        // separate from completion; the run directory is recorded.
+        CHECK(contains(pj, "\"schema_version\": 2"));
+        CHECK(contains(pj, "\"started_at\": \"20"));
+        CHECK(contains(pj, "\"validation\": {\n    \"status\": \"not_assessed\""));
+        CHECK(contains(pj, "\"run_directory\": \"" + fs::absolute(dir).lexically_normal().string() + "\""));
+        {
+            const Json doc = Json::parse(pj);
+            const Json& first = doc.find("stages")->items()[0];
+            for (const char* key : {"name", "status", "started_at", "finished_at", "duration_s", "message",
+                                    "results", "error"}) {
+                CHECK_MSG(first.find(key) != nullptr, std::string("stage key ") + key);
+            }
+            // RFC 3339: the offset has a colon (…-07:00 or …+00:00).
+            const std::string at = doc.find("started_at")->string();
+            CHECK_MSG(at.size() == 25 && at[22] == ':', "RFC 3339 offset: " + at);
+        }
 
         mosflm::control::ControlState st;
         st.findspots_pending = true;
@@ -119,6 +139,7 @@ int main() {
         pj = slurp(dir / "process.json");
         CHECK(contains(pj, "\"name\": \"findspots\",\n      \"status\": \"completed\""));
         CHECK(contains(pj, "\"spots\": 42"));
+        CHECK(Json::parse(pj).find("stages")->items()[0].find("duration_s")->is_number());
 
         st.autoindex_pending = true;
         rec.begin_stage(st);
@@ -172,7 +193,75 @@ int main() {
         CHECK(pr.image == fs::path("/data/x_0001.cbf"));
         CHECK(pr.frame_range == std::pair(2, 90));
         CHECK(pr.gxparm == pr.directory / "GXPARM.XDS");
-        CHECK(pr.tilt_twist_mrad == std::pair(9.4, -8.4));
+        CHECK(pr.tilt_twist_mrad == std::pair(9.4, -8.4));  // version 1 layout
+
+        // Version 2 layout; a newer schema is refused.
+        mosflm::io::write_file_atomic(prev / "process.json",
+                                      R"({"schema_version": 2, "status": "completed",
+  "refinement": {"detector_tilt_twist_mrad": {"tilt": 1.5, "twist": -2.5}},
+  "outputs": [{"kind": "gxparm", "path": "GXPARM.XDS"}]})");
+        CHECK(read_previous_run(prev).tilt_twist_mrad == std::pair(1.5, -2.5));
+        mosflm::io::write_file_atomic(prev / "process.json", R"({"schema_version": 3, "status": "completed"})");
+        CHECK(refused(prev, "schema_version 3 is newer"));
+
+        // Schema 2 final model: carried forward only if it is complete and
+        // self-consistent (matrix ↔ cell, cell ↔ space group, λ / pixel ↔
+        // input.json).
+        const mosflm::UnitCell tet{57.938, 57.938, 150.244, 90.0, 90.0, 90.0};
+        const double lam = 0.9795;
+        const Eigen::Matrix3d rot =
+            Eigen::AngleAxisd(0.7, Eigen::Vector3d(0.3, -0.5, 0.8).normalized()).toRotationMatrix();
+        const auto amat_for = [&](const mosflm::UnitCell& c) {
+            return mosflm::cpp_ub_to_mosflm_amat(mosflm::OrientationMatrix::from_cell_and_rotation(c, rot).ub(), lam);
+        };
+        const auto model_json = [&](const Eigen::Matrix3d& a, double wavelength, const char* convention,
+                                    int sg, double b_axis) {
+            std::ostringstream s;
+            s << std::setprecision(12) << R"({"schema_version": 2, "status": "completed",
+  "refinement": {"stage": "process"},
+  "experiment": {"crystal": {"unit_cell": {"a": 57.938, "b": )" << b_axis << R"(, "c": 150.244,
+      "alpha": 90, "beta": 90, "gamma": 90}, "space_group": {"number": )" << sg << R"(}},
+    "wavelength_angstrom": )" << wavelength << R"(,
+    "detector": {"distance_mm": 199.98, "beam_centre_mm": {"x": 166.12, "y": 172.93},
+      "pixel_size_mm": {"x": 0.075, "y": 0.075}, "tilt_twist_mrad": {"tilt": 9.39, "twist": -8.43}},
+    "mosaicity_deg": 0.101,
+    "orientation": {"convention": ")" << convention << R"(", "wavelength_angstrom": )" << lam
+              << R"(, "invertx": false, "matrix": [)";
+            for (int r = 0; r < 3; ++r) {
+                s << (r ? ", " : "") << '[' << a(r, 0) << ", " << a(r, 1) << ", " << a(r, 2) << ']';
+            }
+            s << "]}}}";
+            return s.str();
+        };
+        mosflm::io::write_file_atomic(prev / "input.json", R"({"inputs": {"images": [{"path": "/data/t_master.h5"}]},
+  "experiment": {"frame_range": {"value": {"first": 1, "last": 100}},
+    "wavelength": {"value": 0.9795}, "pixel_size": {"value": [0.075, 0.075]}}})");
+        fs::remove(prev / "GXPARM.XDS");  // not needed with a final model
+        mosflm::io::write_file_atomic(prev / "process.json", model_json(amat_for(tet), lam, "mosflm_amat", 75, 57.938));
+        const auto good = read_previous_run(prev);
+        CHECK(good.model.has_value());
+        CHECK(good.model->space_group == 75);
+        CHECK(std::fabs(good.model->cell[2] - 150.244) < 1e-9);
+        CHECK(good.model->tilt_twist_mrad == std::pair(9.39, -8.43));
+        CHECK(std::fabs(good.model->mosaicity_deg - 0.101) < 1e-12);
+        CHECK(!good.model->invertx);
+        CHECK(std::fabs(good.model->matrix_wavelength_A - lam) < 1e-12);
+        // A matrix built for another cell (the indexing estimate) is refused.
+        const mosflm::UnitCell indexing{57.94, 58.24, 150.33, 90.45, 90.18, 90.02};
+        mosflm::io::write_file_atomic(prev / "process.json",
+                                      model_json(amat_for(indexing), lam, "mosflm_amat", 75, 57.938));
+        CHECK(refused(prev, "the orientation matrix implies cell"));
+        // λ disagreeing with input.json, a cell the space group forbids, an
+        // unknown convention, and missing geometry are refused too.
+        mosflm::io::write_file_atomic(prev / "process.json", model_json(amat_for(tet), 1.0, "mosflm_amat", 75, 57.938));
+        CHECK(refused(prev, "final wavelength 1.000000 differs from 0.979500"));
+        mosflm::io::write_file_atomic(prev / "process.json", model_json(amat_for(tet), lam, "mosflm_amat", 75, 58.5));
+        CHECK(refused(prev, "does not fit space group 75"));
+        mosflm::io::write_file_atomic(prev / "process.json", model_json(amat_for(tet), lam, "xds", 75, 57.938));
+        CHECK(refused(prev, "orientation convention 'xds' is not mosflm_amat"));
+        mosflm::io::write_file_atomic(prev / "process.json", R"({"schema_version": 2, "status": "completed",
+  "refinement": {}, "experiment": {"crystal": {}}})");
+        CHECK(refused(prev, "experiment.unit_cell is missing"));
 
         // A multi-sweep run names its sweep directories.
         const fs::path multi = mosflm_test::output_dir("run_record_multi");

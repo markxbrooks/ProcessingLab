@@ -388,6 +388,7 @@ void print_run_usage() {
         << "         [--xds-inp XDS.INP] [--xinfo FILE.xinfo [--sweep NAME]]\n"
         << "         [--xparm GXPARM.XDS | --from RUN_DIR|process.json]\n"
         << "         [--cell A B C ALPHA BETA GAMMA] [--spacegroup N|SYMBOL]\n"
+        << "         [--refine PARAM,... | all | none]\n"
         << "         [--run-mode processinglab|xds|xia2] [--help] [--version]\n"
         << "\n"
         << "  Finds spots, autoindexes and integrates each sweep. Metadata comes\n"
@@ -418,6 +419,10 @@ void print_run_usage() {
         << "               known orientation the matrix is rebuilt for it.\n"
         << "  --spacegroup Space group number or symbol (92, P41212), likewise.\n"
         << "               The cell must fit its crystal system.\n"
+        << "  --refine     What PROCESS refines: orientation, cell, distance, beam,\n"
+        << "               tilt_twist, mosaicity (re-estimated), or all / none; the\n"
+        << "               rest are held fixed. Default: orientation,mosaicity with\n"
+        << "               --from / --xparm, else all. A fixed mosaicity needs --from.\n"
         << "  --run-mode   Where the parameters come from (recorded in the log and\n"
         << "               input.json):\n"
         << "                 processinglab  image headers, overridden by any imports\n"
@@ -516,6 +521,35 @@ int run_command(int argc, char** argv) {
                     throw std::invalid_argument("--cell needs 6 values, got '" + v + "'");
                 }
                 base.cell = c;
+            } else if (a == "--refine") {
+                std::string v = need(i, a);
+                std::replace(v.begin(), v.end(), ',', ' ');
+                std::istringstream s(v);
+                std::vector<std::string> names;
+                for (std::string w; s >> w;) {
+                    std::transform(w.begin(), w.end(), w.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (w == "tilt" || w == "twist") {
+                        w = "tilt_twist";
+                    }
+                    if (w == "all") {
+                        names.assign(std::begin(mosflm::io::kRefinableParameters),
+                                     std::end(mosflm::io::kRefinableParameters));
+                    } else if (w != "none") {
+                        if (std::find_if(std::begin(mosflm::io::kRefinableParameters),
+                                         std::end(mosflm::io::kRefinableParameters),
+                                         [&](const char* n) { return w == n; }) ==
+                            std::end(mosflm::io::kRefinableParameters)) {
+                            throw std::invalid_argument("--refine: unknown parameter '" + w +
+                                                        "' (orientation, cell, distance, beam, tilt_twist, "
+                                                        "mosaicity, all, none)");
+                        }
+                        if (std::find(names.begin(), names.end(), w) == names.end()) {
+                            names.push_back(w);
+                        }
+                    }
+                }
+                base.refine = names;
             } else if (a == "--spacegroup" || a == "--symmetry") {
                 const std::string v = need(i, a);
                 const gemmi::SpaceGroup* sg = nullptr;
@@ -552,9 +586,14 @@ int run_command(int argc, char** argv) {
             // the command line names others.
             const auto prev = mosflm::io::read_previous_run(*from);
             from = prev.directory;
-            base.xparm = prev.gxparm;
-            base.xparm_source = mosflm::io::MetadataSource::PreviousRun;
-            base.tilt_twist_mrad = prev.tilt_twist_mrad;
+            if (prev.model) {
+                base.previous = prev.model;  // the validated final model
+            } else {
+                // Version 1 run: refined GXPARM.XDS plus the tilt / twist.
+                base.xparm = prev.gxparm;
+                base.xparm_source = mosflm::io::MetadataSource::PreviousRun;
+                base.tilt_twist_mrad = prev.tilt_twist_mrad;
+            }
             if (images.empty() && !base.xds_inp && !base.xinfo) {
                 images.push_back(prev.image);
             }

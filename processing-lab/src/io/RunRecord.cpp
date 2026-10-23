@@ -1,9 +1,12 @@
 #include "mosflm/io/RunRecord.hpp"
 
+#include "mosflm/crystal/SpaceGroupInfo.hpp"
 #include "mosflm/diffraction/DataQualityStats.hpp"
+#include "mosflm/geometry/OrientationMatrix.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -15,13 +18,37 @@
 namespace mosflm::io {
 namespace {
 
-std::string now_iso8601() {
+/// RFC 3339 local time with offset, e.g. ``2026-10-23T09:36:59-07:00``.
+std::string now_rfc3339() {
     const std::time_t t = std::time(nullptr);
     std::tm tm{};
     localtime_r(&t, &tm);
     char buf[40];
     std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%S%z", &tm);
-    return buf;
+    std::string s = buf;
+    if (s.size() >= 5) {
+        s.insert(s.size() - 2, ":");  // %z gives -0700
+    }
+    return s;
+}
+
+/// Wall-clock seconds since ``start`` (steady clock), to the millisecond.
+double seconds_since(std::chrono::steady_clock::time_point start) {
+    const auto d = std::chrono::steady_clock::now() - start;
+    return std::round(std::chrono::duration<double>(d).count() * 1000.0) / 1000.0;
+}
+
+/// A stage object: every key present, optional ones null until set.
+Json stage_json(const std::string& name) {
+    return Json(Json::Object{{"name", name},           {"status", "pending"},
+                             {"started_at", Json()},   {"finished_at", Json()},
+                             {"duration_s", Json()},   {"message", Json()},
+                             {"results", Json()},      {"error", Json()}});
+}
+
+Json space_group_json(int number) {
+    const auto* sg = crystal::SpaceGroupInfo::find_by_number(number);
+    return Json(Json::Object{{"number", number}, {"symbol", sg != nullptr ? Json(sg->hm) : Json()}});
 }
 
 std::string upper_first_token(const std::string& line) {
@@ -43,7 +70,8 @@ Json cell_json(const UnitCell& c) {
     j["alpha"] = c.alpha_deg;
     j["beta"] = c.beta_deg;
     j["gamma"] = c.gamma_deg;
-    j["unit"] = "angstrom/deg";
+    j["length_unit"] = "angstrom";
+    j["angle_unit"] = "degree";
     return j;
 }
 
@@ -67,6 +95,77 @@ Json shell_json(const diffraction::ResolutionShellStats& s) {
     j["cc_half_pct"] = s.compared > 0 ? Json(s.cc_half_pct) : Json();
     j["compared"] = s.compared;
     return j;
+}
+
+/// A resolved ``input.json`` experiment value, or nullptr.
+const Json* input_value(const Json& input, const char* key) {
+    const Json* e = input.find("experiment");
+    const Json* f = e != nullptr ? e->find(key) : nullptr;
+    const Json* v = f != nullptr ? f->find("value") : nullptr;
+    return v != nullptr && !v->is_null() ? v : nullptr;
+}
+
+/// The run's final experiment model: refined values from ``st`` where
+/// CONTROL holds them, the resolved inputs otherwise (CONTROL defaults are
+/// not authoritative). The orientation carries the cell its matrix implies.
+Json final_experiment(const Json& input, const control::ControlState& st, int first, int last) {
+    const auto pick = [&](bool held, double state_value, const char* key, std::size_t k) {
+        if (held) {
+            return state_value;
+        }
+        const Json* v = input_value(input, key);
+        if (v == nullptr) {
+            return state_value;
+        }
+        return v->is_array() ? v->items()[k].number() : v->number();
+    };
+    const double lam = pick(st.has_wavelength, st.wavelength_A, "wavelength", 0);
+    Json x = Json::object();
+    x["crystal"] = Json(Json::Object{{"unit_cell", cell_json(st.cell)},
+                                     {"space_group", st.has_symmetry ? space_group_json(st.symmetry_number) : Json()}});
+    x["wavelength_angstrom"] = lam;
+    Json d = Json::object();
+    d["distance_mm"] = pick(st.has_distance, st.distance_mm, "detector_distance", 0);
+    d["beam_centre_mm"] = Json(Json::Object{{"x", pick(st.has_beam, st.beam_x_mm, "beam_centre", 0)},
+                                            {"y", pick(st.has_beam, st.beam_y_mm, "beam_centre", 1)}});
+    d["pixel_size_mm"] = Json(Json::Object{{"x", pick(st.has_pixel, st.pixel_x_mm, "pixel_size", 0)},
+                                           {"y", pick(st.has_pixel, st.pixel_y_mm, "pixel_size", 1)}});
+    d["tilt_twist_mrad"] = Json(Json::Object{{"tilt", st.tilt_mrad}, {"twist", st.twist_mrad}});
+    if (const Json* e = input.find("experiment"); e != nullptr && e->find("detector_size_px") != nullptr) {
+        d["size_px"] = *e->find("detector_size_px");
+    }
+    x["detector"] = std::move(d);
+    Json scan = Json::object();
+    scan["frames"] = Json(Json::Object{{"first", first}, {"last", last}});
+    const Json* osc = input_value(input, "oscillation_width");
+    scan["oscillation_deg"] = osc != nullptr ? *osc : Json();
+    x["scan"] = std::move(scan);
+    x["mosaicity_deg"] = st.mosaic_deg;
+    if (st.has_matrix) {
+        Json rows = Json::array();
+        for (int i = 0; i < 3; ++i) {
+            rows.push_back(Json(Json::Array{Json(st.amat(i, 0)), Json(st.amat(i, 1)), Json(st.amat(i, 2))}));
+        }
+        const UnitCell implied = OrientationMatrix::from_mosflm_orientation_matrix(st.amat, lam).cell();
+        Json o = Json::object();
+        o["convention"] = "mosflm_amat";
+        o["matrix"] = std::move(rows);
+        o["wavelength_angstrom"] = lam;
+        o["invertx"] = st.spt_invertx;
+        o["unit_cell"] = cell_json(implied);
+        x["orientation"] = std::move(o);
+    } else {
+        x["orientation"] = Json();
+    }
+    x["conventions"] = Json(Json::Object{
+        {"orientation", "mosflm_amat: MOSFLM [A] = λ·U·B; rows are the MOSFLM lab axes X (along the beam), Y, "
+                        "Z (spindle); columns are a*, b*, c*; scaled by orientation.wavelength_angstrom. "
+                        "invertx is the detector handedness it was derived in (CONTROL INVERTX). "
+                        "orientation.unit_cell is the cell the matrix implies."},
+        {"beam_centre", "x, y in mm along ProcessingLab's detector axes: header pixel coordinates × pixel size "
+                        "(CBF/HDF5: image fast, slow; ADSC SMV: stored transposed, as MOSFLM reads it). "
+                        "XDS.INP ORGX×QX, ORGY×QY and CONTROL BEAM use the same frame."}});
+    return x;
 }
 
 std::string fmt(double v, int prec) {
@@ -214,7 +313,7 @@ Json input_record(
     j["mode"] = ctx.mode;
     j["run_mode"] = run_mode_name(ctx.run_mode);
     j["parameter_source"] = run_mode_parameter_source(ctx.run_mode);
-    j["created"] = now_iso8601();
+    j["created_at"] = now_rfc3339();
     Json cl = Json::array();
     for (const auto& a : ctx.command_line) {
         cl.push_back(a);
@@ -255,13 +354,18 @@ ProcessRecord::ProcessRecord(
     : dir_(std::move(dir)), input_(std::move(input)) {
     doc_["schema_version"] = kRunRecordSchemaVersion;
     doc_["status"] = "running";
-    doc_["started"] = now_iso8601();
-    doc_["finished"] = Json();
+    doc_["started_at"] = now_rfc3339();
+    doc_["finished_at"] = Json();
+    doc_["duration_s"] = Json();
+    doc_["run_directory"] = std::filesystem::absolute(dir_).lexically_normal().string();
+    // Operational completion is not scientific validation; no checks run yet.
+    doc_["validation"] = Json(Json::Object{{"status", "not_assessed"}, {"checks", Json::array()}});
     Json st = Json::array();
     for (const auto& name : stages) {
-        st.push_back(Json(Json::Object{{"name", name}, {"status", "pending"}}));
+        st.push_back(stage_json(name));
     }
     doc_["stages"] = std::move(st);
+    doc_["experiment"] = Json();
     doc_["indexing"] = Json();
     doc_["refinement"] = Json();
     doc_["integration"] = Json();
@@ -286,7 +390,7 @@ Json& ProcessRecord::stage(const std::string& name) {
             return s;
         }
     }
-    arr.push_back(Json(Json::Object{{"name", name}, {"status", "pending"}}));
+    arr.push_back(stage_json(name));
     return arr.back();
 }
 
@@ -294,14 +398,16 @@ void ProcessRecord::begin_stage(const control::ControlState& state) {
     running_ = pending_stage(state);
     Json& s = stage(running_);
     s["status"] = "running";
-    s["started"] = now_iso8601();
+    s["started_at"] = now_rfc3339();
+    stage_start_ = std::chrono::steady_clock::now();
     write();
 }
 
 void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::ControlState& st) {
     Json& s = stage(running_);
     s["status"] = "completed";
-    s["finished"] = now_iso8601();
+    s["finished_at"] = now_rfc3339();
+    s["duration_s"] = seconds_since(stage_start_);
     if (!r.message.empty()) {
         s["message"] = r.message;
     }
@@ -312,10 +418,14 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
         add_output(control::output_path(st, st.findspots.spot_file), "spot_list");
     }
     if (r.ran_autoindex) {
+        // Stage summary; the full solution is in ``indexing``.
+        s["results"] = Json(Json::Object{{"lattice", st.autoindex_system},
+                                         {"indexed_fraction", st.autoindex_indexed_frac},
+                                         {"rmsd_hkl", st.autoindex_rmsd_hkl}});
         Json ix = Json::object();
         ix["lattice"] = st.autoindex_system;
         ix["lattice_character"] = st.autoindex_character;
-        ix["space_group_number"] = st.has_symmetry ? Json(st.symmetry_number) : Json();
+        ix["space_group"] = st.has_symmetry ? space_group_json(st.symmetry_number) : Json();
         ix["unit_cell"] = st.has_cell ? cell_json(st.cell) : Json();
         Json mat = Json::array();
         for (int i = 0; i < 3; ++i) {
@@ -330,42 +440,69 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
         add_output(control::output_path(st, "index.log"), "index_summary");
     }
     if (r.ran_process) {
+        // The final model, after the last periodic refinement of PROCESS.
+        doc_["experiment"] = final_experiment(input_, st, r.process_first, r.process_last);
+        // What PROCESS did to each parameter (the policy it ran with).
         Json ref = Json::object();
-        ref["scope"] = "after PROCESS (final periodic refinement)";
-        ref["unit_cell"] = cell_json(st.cell);
-        ref["space_group_number"] = st.has_symmetry ? Json(st.symmetry_number) : Json();
-        ref["detector_distance_mm"] = st.distance_mm;
-        ref["beam_centre_mm"] = Json(Json::Array{Json(st.beam_x_mm), Json(st.beam_y_mm)});
-        ref["tilt_twist_mrad"] = Json(Json::Array{Json(st.tilt_mrad), Json(st.twist_mrad)});
-        ref["mosaicity_deg"] = st.mosaic_deg;
+        ref["stage"] = "process";
+        Json params = Json::object();
+        params["orientation"] = st.refine_orientation ? "refined" : "fixed";
+        params["unit_cell"] = st.refine_cell ? "refined" : "fixed";
+        params["detector_distance"] = st.refine_distance ? "refined" : "fixed";
+        params["beam_centre"] = st.refine_beam ? "refined" : "fixed";
+        params["detector_tilt_twist"] = st.refine_tilt_twist ? "refined" : "fixed";
+        params["mosaicity"] = st.mosaic_from_user ? "fixed" : "estimated";
+        ref["parameters"] = std::move(params);
+        ref["unit_cell_constraint"] = st.has_symmetry ? "space_group_metric" : "none";
         doc_["refinement"] = std::move(ref);
         const auto& p = r.process;
         Json in = Json::object();
         in["frames"] = Json(Json::Object{{"first", r.process_first}, {"last", r.process_last}});
         const int half = st.peak_half_px >= 1 ? st.peak_half_px : st.spot_peak_half_px;
         in["peak_box_px"] = half >= 1 ? Json(2 * half + 1) : Json();
-        in["predictions"] = p.predictions.size();
-        in["reflections"] = p.mosflm_reflections.size();
-        in["overlapped"] = p.n_overlapped;
-        in["profile_fitted"] = p.n_profile_ok;
-        in["omitted"] = p.n_omitted;
+        // Populations: see docs/RUN_RECORDS.md. The first four count
+        // predicted observations (per frame, before partials are summed);
+        // integrated_reflections counts the rows written to the MTZ.
+        Json counts = Json::object();
+        counts["predicted_observations"] = p.predictions.size();
+        counts["profile_fitted_observations"] = p.n_profile_ok;
+        counts["overlapped_observations"] = p.n_overlapped;
+        counts["omitted"] = p.n_omitted;
+        counts["integrated_reflections"] = p.mosflm_reflections.size();
+        in["counts"] = std::move(counts);
         doc_["integration"] = std::move(in);
+        s["results"] = Json(Json::Object{{"integrated_reflections", p.mosflm_reflections.size()}});
         if (!p.mosflm_reflections.empty() && r.crystal.spacegroup != nullptr) {
             const auto q = diffraction::compute_data_quality(
                 r.crystal, p.mosflm_reflections, st.dmax_A, st.dmin_A
             );
             Json qual = Json::object();
-            qual["note"] = "unscaled: no batch scaling or outlier rejection";
-            qual["space_group"] = r.crystal.spacegroup->hm;
+            qual["scaling_status"] = "unscaled";
+            qual["outlier_rejection_status"] = "not_performed";
+            qual["space_group"] = space_group_json(r.crystal.spacegroup->number);
+            qual["resolution_range_angstrom"] = Json(Json::Object{{"low", q.dmax_A}, {"high", q.dmin_A}});
+            qual["min_i_over_sigma"] = q.min_isigma;
+            qual["shell_definition"] = Json(Json::Object{
+                {"method", "equal_width_in_inverse_d"},
+                {"count", q.shells.size()},
+                {"d_min_angstrom", "high-resolution edge of each shell"}});
             Json shells = Json::array();
             for (const auto& sh : q.shells) {
                 shells.push_back(shell_json(sh));
             }
             qual["shells"] = std::move(shells);
             qual["total"] = shell_json(q.total);
-            qual["accepted_observations"] = q.n_accepted_obs;
-            qual["unique_reflections"] = q.n_unique_accepted;
-            qual["rejected_misfits"] = q.n_rejected_misfits;
+            // One population, the integrated reflections: these sum to it.
+            Json qc = Json::object();
+            qc["integrated_reflections"] = p.mosflm_reflections.size();
+            qc["rejected_misfit_observations"] = q.n_rejected_misfits;
+            qc["invalid_sigma_observations"] = q.n_invalid_sigma;
+            qc["systematic_absence_observations"] = q.n_systematic_absent;
+            qc["below_min_i_over_sigma_observations"] = q.n_below_min_isigma;
+            qc["outside_resolution_observations"] = q.n_outside_resolution;
+            qc["accepted_observations"] = q.n_accepted_obs;
+            qc["unique_reflections"] = q.n_unique_accepted;
+            qual["counts"] = std::move(qc);
             doc_["quality"] = std::move(qual);
         }
         if (st.has_xparm_out) {
@@ -381,12 +518,19 @@ void ProcessRecord::add_output(const std::filesystem::path& p, const std::string
     if (!std::filesystem::exists(p, ec)) {
         return;
     }
+    // Relative to the run directory when inside it, so a run can be moved.
+    std::filesystem::path rel = p;
+    const auto r = std::filesystem::absolute(p).lexically_normal().lexically_relative(
+        std::filesystem::absolute(dir_).lexically_normal());
+    if (!r.empty() && *r.begin() != "..") {
+        rel = r;
+    }
     for (const auto& o : doc_["outputs"].items()) {
-        if (o.find("path") && o.find("path")->string() == p.string()) {
+        if (o.find("path") && o.find("path")->string() == rel.string()) {
             return;
         }
     }
-    doc_["outputs"].push_back(Json(Json::Object{{"kind", kind}, {"path", p.string()}}));
+    doc_["outputs"].push_back(Json(Json::Object{{"kind", kind}, {"path", rel.string()}}));
     write();
 }
 
@@ -399,12 +543,14 @@ void ProcessRecord::fail(const std::string& error) {
     if (!running_.empty()) {
         Json& s = stage(running_);
         s["status"] = "failed";
-        s["finished"] = now_iso8601();
+        s["finished_at"] = now_rfc3339();
+        s["duration_s"] = seconds_since(stage_start_);
         s["error"] = error;
     }
     doc_["status"] = "failed";
     doc_["error"] = error;
-    doc_["finished"] = now_iso8601();
+    doc_["finished_at"] = now_rfc3339();
+    doc_["duration_s"] = seconds_since(run_start_);
     write();
 }
 
@@ -417,7 +563,8 @@ void ProcessRecord::complete() {
         }
     }
     doc_["status"] = "completed";
-    doc_["finished"] = now_iso8601();
+    doc_["finished_at"] = now_rfc3339();
+    doc_["duration_s"] = seconds_since(run_start_);
     write();
 }
 
@@ -431,9 +578,12 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
     const auto str = [](const Json* j) { return j == nullptr ? std::string() : j->string(); };
     md << "# ProcessingLab report\n\n";
     md << "**Status:** " << str(pr.find("status")) << "  \n";
-    md << "**Started:** " << str(pr.find("started"));
-    if (const auto* f = pr.find("finished"); f != nullptr && !f->is_null()) {
+    md << "**Started:** " << str(pr.find("started_at"));
+    if (const auto* f = pr.find("finished_at"); f != nullptr && !f->is_null()) {
         md << " · **Finished:** " << f->string();
+    }
+    if (const auto* d = pr.find("duration_s"); d != nullptr && !d->is_null()) {
+        md << " (" << fmt(d->number(), 1) << " s)";
     }
     md << "  \n**Mode:** `ProcessingLab " << (str(in.find("mode")) == "run" ? "run" : "<script>") << "`";
     if (const auto* rm = in.find("run_mode")) {
@@ -489,7 +639,7 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
     md << "\n## Stages\n\n| Stage | Status | Detail |\n| --- | --- | --- |\n";
     for (const auto& s : pr.find("stages")->items()) {
         std::string detail = str(s.find("message"));
-        if (const auto* e = s.find("error")) {
+        if (const auto* e = s.find("error"); e != nullptr && !e->is_null()) {
             detail = e->string();
         }
         if (const auto* r = s.find("results"); r != nullptr && r->find("spots")) {
@@ -503,8 +653,8 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
         const Json& sol = *ix->find("selected_solution");
         md << "\n## Indexing\n\n";
         md << "- Lattice: " << str(sol.find("lattice"));
-        if (const auto* sg = sol.find("space_group_number"); sg && !sg->is_null()) {
-            md << ", space group " << md_value(*sg);
+        if (const auto* sg = sol.find("space_group"); sg && !sg->is_null()) {
+            md << ", space group " << md_value(*sg->find("number"));
         }
         md << "\n";
         if (const auto* c = sol.find("unit_cell"); c && !c->is_null()) {
@@ -517,30 +667,44 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
            << " (hkl)\n";
     }
 
-    if (const auto* rf = pr.find("refinement"); rf != nullptr && !rf->is_null()) {
-        const Json& c = *rf->find("unit_cell");
+    if (const auto* x = pr.find("experiment"); x != nullptr && !x->is_null()) {
+        const Json& c = *x->find("crystal")->find("unit_cell");
+        const Json& det = *x->find("detector");
+        const Json& beam = *det.find("beam_centre_mm");
         md << "\n## Refined geometry\n\n";
         md << "- Cell: " << md_num(c.find("a"), 3) << " " << md_num(c.find("b"), 3) << " "
            << md_num(c.find("c"), 3) << " Å, " << md_num(c.find("alpha"), 2) << " "
            << md_num(c.find("beta"), 2) << " " << md_num(c.find("gamma"), 2) << "°\n";
-        md << "- Distance: " << md_num(rf->find("detector_distance_mm"), 3) << " mm; beam "
-           << md_value(*rf->find("beam_centre_mm")) << " mm\n";
-        md << "- Mosaicity: " << md_num(rf->find("mosaicity_deg"), 3) << "°\n";
+        md << "- Distance: " << md_num(det.find("distance_mm"), 3) << " mm; beam "
+           << md_num(beam.find("x"), 3) << " " << md_num(beam.find("y"), 3) << " mm\n";
+        md << "- Mosaicity: " << md_num(x->find("mosaicity_deg"), 3) << "°\n";
+        if (const auto* rf = pr.find("refinement"); rf != nullptr && !rf->is_null()) {
+            std::string refined;
+            std::string fixed;
+            for (const auto& [k, v] : rf->find("parameters")->members()) {
+                auto& list = v.string() == "fixed" ? fixed : refined;
+                list += (list.empty() ? "" : ", ") + k;
+            }
+            md << "- Refined: " << (refined.empty() ? "nothing" : refined) << "; fixed: "
+               << (fixed.empty() ? "nothing" : fixed) << "\n";
+        }
     }
 
     if (const auto* ig = pr.find("integration"); ig != nullptr && !ig->is_null()) {
         md << "\n## Integration\n\n";
         md << "- Frames " << md_value(*ig->find("frames")) << ", peak box "
            << md_value(*ig->find("peak_box_px")) << " px\n";
-        md << "- " << md_value(*ig->find("reflections")) << " reflections from "
-           << md_value(*ig->find("predictions")) << " predictions ("
-           << md_value(*ig->find("overlapped")) << " overlapped, "
-           << md_value(*ig->find("profile_fitted")) << " profile-fitted)\n";
+        const Json& c = *ig->find("counts");
+        md << "- " << md_value(*c.find("integrated_reflections")) << " reflections integrated from "
+           << md_value(*c.find("predicted_observations")) << " predicted observations ("
+           << md_value(*c.find("profile_fitted_observations")) << " profile-fitted, "
+           << md_value(*c.find("overlapped_observations")) << " overlapped)\n";
     }
 
     if (const auto* q = pr.find("quality"); q != nullptr && !q->is_null()) {
-        md << "\n## Data quality\n\n" << str(q->find("space_group")) << "; "
-           << str(q->find("note")) << ".\n\n| d_min (Å) | Observed | Unique | Completeness | R_meas | I/σ | CC½ |\n"
+        md << "\n## Data quality\n\n" << str(q->find("space_group")->find("symbol"))
+           << "; unscaled: no batch scaling or outlier rejection.\n\n"
+           << "| d_min (Å) | Observed | Unique | Completeness | R_meas | I/σ | CC½ |\n"
            << "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n";
         const auto row = [&](const Json& sh, const std::string& label) {
             md << "| " << label << " | " << md_value(*sh.find("observed")) << " | "
@@ -553,6 +717,15 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
             row(sh, fmt(sh.find("d_min_angstrom")->number(), 2));
         }
         row(*q->find("total"), "**total**");
+        const Json& c = *q->find("counts");
+        md << "\n" << md_value(*c.find("accepted_observations")) << " of "
+           << md_value(*c.find("integrated_reflections")) << " integrated reflections accepted ("
+           << md_value(*c.find("rejected_misfit_observations")) << " misfits, "
+           << md_value(*c.find("systematic_absence_observations")) << " systematic absences, "
+           << md_value(*c.find("below_min_i_over_sigma_observations")) << " below I/σ "
+           << md_num(q->find("min_i_over_sigma"), 1) << ", "
+           << md_value(*c.find("outside_resolution_observations")) << " outside the resolution range, "
+           << md_value(*c.find("invalid_sigma_observations")) << " with invalid σ).\n";
     }
 
     if (const auto* w = pr.find("warnings"); w != nullptr && !w->items().empty()) {
@@ -577,6 +750,98 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
     return md.str();
 }
 
+namespace {
+
+/// ``process.json`` ``experiment`` → the model ``--from`` carries forward,
+/// refusing missing geometry, a cell the space group forbids, a matrix that
+/// implies another cell, and a wavelength or pixel size that disagrees with
+/// the run's ``input.json``.
+PreviousModel read_final_model(const Json& x, const Json& input, const std::filesystem::path& pj) {
+    const auto need = [&](const Json* parent, const char* key) -> const Json& {
+        const Json* v = parent != nullptr ? parent->find(key) : nullptr;
+        if (v == nullptr || v->is_null()) {
+            throw std::runtime_error(pj.string() + ": experiment." + key + " is missing");
+        }
+        return *v;
+    };
+    const auto cell_of = [&](const Json& c) {
+        return std::array<double, 6>{need(&c, "a").number(),     need(&c, "b").number(),
+                                     need(&c, "c").number(),     need(&c, "alpha").number(),
+                                     need(&c, "beta").number(),  need(&c, "gamma").number()};
+    };
+    PreviousModel m;
+    const Json& crystal = need(&x, "crystal");
+    m.cell = cell_of(need(&crystal, "unit_cell"));
+    m.space_group = static_cast<int>(need(&need(&crystal, "space_group"), "number").number());
+    check_cell_fits_spacegroup(m.cell, m.space_group);
+    m.wavelength_A = need(&x, "wavelength_angstrom").number();
+    const Json& det = need(&x, "detector");
+    m.distance_mm = need(&det, "distance_mm").number();
+    const Json& beam = need(&det, "beam_centre_mm");
+    m.beam_mm = {need(&beam, "x").number(), need(&beam, "y").number()};
+    const Json& pixel = need(&det, "pixel_size_mm");
+    m.pixel_mm = {need(&pixel, "x").number(), need(&pixel, "y").number()};
+    const Json& tt = need(&det, "tilt_twist_mrad");
+    m.tilt_twist_mrad = {need(&tt, "tilt").number(), need(&tt, "twist").number()};
+    m.mosaicity_deg = need(&x, "mosaicity_deg").number();
+
+    const Json& o = need(&x, "orientation");
+    if (need(&o, "convention").string() != "mosflm_amat") {
+        throw std::runtime_error(pj.string() + ": orientation convention '" + o.find("convention")->string() +
+                                 "' is not mosflm_amat");
+    }
+    const auto& rows = need(&o, "matrix").items();
+    if (rows.size() != 3) {
+        throw std::runtime_error(pj.string() + ": orientation.matrix is not 3×3");
+    }
+    Eigen::Matrix3d a;
+    for (int r = 0; r < 3; ++r) {
+        if (rows[static_cast<std::size_t>(r)].items().size() != 3) {
+            throw std::runtime_error(pj.string() + ": orientation.matrix is not 3×3");
+        }
+        for (int k = 0; k < 3; ++k) {
+            a(r, k) = rows[static_cast<std::size_t>(r)].items()[static_cast<std::size_t>(k)].number();
+            m.matrix[static_cast<std::size_t>(3 * r + k)] = a(r, k);
+        }
+    }
+    m.matrix_wavelength_A = need(&o, "wavelength_angstrom").number();
+    m.invertx = need(&o, "invertx").boolean();
+    // The matrix must belong to the cell it is carried with: recompute the
+    // cell it implies rather than trusting the stored copy.
+    const UnitCell implied = OrientationMatrix::from_mosflm_orientation_matrix(a, m.matrix_wavelength_A).cell();
+    const std::array<double, 6> ic{implied.a, implied.b, implied.c,
+                                   implied.alpha_deg, implied.beta_deg, implied.gamma_deg};
+    for (std::size_t k = 0; k < 6; ++k) {
+        const bool bad = k < 3 ? std::fabs(ic[k] - m.cell[k]) > 2e-3 * m.cell[k] : std::fabs(ic[k] - m.cell[k]) > 0.2;
+        if (bad) {
+            std::ostringstream s;
+            s << std::fixed << std::setprecision(3) << pj.string() << ": the orientation matrix implies cell "
+              << ic[0] << ' ' << ic[1] << ' ' << ic[2] << ' ' << ic[3] << ' ' << ic[4] << ' ' << ic[5]
+              << ", not the run's " << m.cell[0] << ' ' << m.cell[1] << ' ' << m.cell[2] << ' ' << m.cell[3] << ' '
+              << m.cell[4] << ' ' << m.cell[5];
+            throw std::runtime_error(s.str());
+        }
+    }
+    // The beam and detector are the run's own: they must match its inputs.
+    const auto agrees = [&](const char* key, std::size_t k, double v, const char* what) {
+        const Json* in = input_value(input, key);
+        if (in == nullptr) {
+            return;
+        }
+        const double want = in->is_array() ? in->items()[k].number() : in->number();
+        if (std::fabs(v - want) > 1e-4 * std::fabs(want)) {
+            throw std::runtime_error(pj.string() + ": final " + what + " " + fmt(v, 6) + " differs from " + fmt(want, 6) +
+                                     " in input.json");
+        }
+    };
+    agrees("wavelength", 0, m.wavelength_A, "wavelength");
+    agrees("pixel_size", 0, m.pixel_mm.first, "pixel size x");
+    agrees("pixel_size", 1, m.pixel_mm.second, "pixel size y");
+    return m;
+}
+
+}  // namespace
+
 PreviousRun read_previous_run(const std::filesystem::path& path) {
     namespace fs = std::filesystem;
     PreviousRun prev;
@@ -599,6 +864,13 @@ PreviousRun read_previous_run(const std::filesystem::path& path) {
         throw std::runtime_error("no process.json in " + prev.directory.string());
     }
     const Json process = read_json_file(pj);
+    // Version 1 (before RFC 3339 / unit fields) and 2 are both readable.
+    if (const auto* v = process.find("schema_version");
+        v != nullptr && v->number() > kRunRecordSchemaVersion) {
+        throw std::runtime_error(pj.string() + ": schema_version " + md_value(*v) +
+                                 " is newer than this ProcessingLab reads (" +
+                                 std::to_string(kRunRecordSchemaVersion) + ")");
+    }
     const auto* status = process.find("status");
     if (status == nullptr || status->string() != "completed") {
         throw std::runtime_error(pj.string() + ": the run is " +
@@ -609,8 +881,16 @@ PreviousRun read_previous_run(const std::filesystem::path& path) {
     if (refinement == nullptr || refinement->is_null()) {
         throw std::runtime_error(pj.string() + ": no refined geometry (PROCESS did not run)");
     }
-    if (const auto* tt = refinement->find("tilt_twist_mrad"); tt != nullptr && tt->items().size() == 2) {
-        prev.tilt_twist_mrad = std::pair{tt->items()[0].number(), tt->items()[1].number()};
+    const fs::path ij = prev.directory / "input.json";
+    const Json input = read_json_file(ij);
+    if (const auto* x = process.find("experiment"); x != nullptr && !x->is_null()) {
+        prev.model = read_final_model(*x, input, pj);
+    }
+    if (const auto* tt = refinement->find("detector_tilt_twist_mrad");
+        tt != nullptr && tt->find("tilt") != nullptr && tt->find("twist") != nullptr) {
+        prev.tilt_twist_mrad = std::pair{tt->find("tilt")->number(), tt->find("twist")->number()};
+    } else if (const auto* v1 = refinement->find("tilt_twist_mrad"); v1 != nullptr && v1->items().size() == 2) {
+        prev.tilt_twist_mrad = std::pair{v1->items()[0].number(), v1->items()[1].number()};  // version 1
     }
     for (const auto& o : process.find("outputs") != nullptr ? process.find("outputs")->items() : Json::Array{}) {
         const auto* kind = o.find("kind");
@@ -623,12 +903,11 @@ PreviousRun read_previous_run(const std::filesystem::path& path) {
     if (prev.gxparm.empty()) {
         prev.gxparm = prev.directory / "GXPARM.XDS";
     }
-    if (!fs::exists(prev.gxparm)) {
+    // Without a final model (version 1) the orientation comes from GXPARM.XDS.
+    if (!prev.model && !fs::exists(prev.gxparm)) {
         throw std::runtime_error("refined geometry not found: " + prev.gxparm.string());
     }
 
-    const fs::path ij = prev.directory / "input.json";
-    const Json input = read_json_file(ij);
     const auto* inputs = input.find("inputs");
     const auto* images = inputs != nullptr ? inputs->find("images") : nullptr;
     if (images == nullptr || images->items().empty() || images->items()[0].find("path") == nullptr) {

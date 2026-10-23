@@ -38,6 +38,16 @@ struct DataQualityReport {
     double mean_isigma_systematic_absent{-99.0};
     int n_accepted_obs{0};
     int n_unique_accepted{0};
+    /// The rest of the input rows, by the filter that dropped them, so that
+    /// rows = rejected_misfits + invalid_sigma + systematic_absent +
+    /// below_min_isigma + outside_resolution + accepted_obs.
+    int n_invalid_sigma{0};       ///< σ ≤ 0, or I or σ not finite
+    int n_below_min_isigma{0};    ///< I/σ < ``min_isigma``
+    int n_outside_resolution{0};  ///< d outside [``dmin_A``, ``dmax_A``]
+    /// The range and cut actually used (defaults replace an empty range).
+    double dmax_A{0.0};
+    double dmin_A{0.0};
+    double min_isigma{0.0};
 };
 
 /// Build XDS-style completeness / R-factor / R-meas / CC(1/2) table from

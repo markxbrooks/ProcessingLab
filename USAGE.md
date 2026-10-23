@@ -46,6 +46,7 @@ script. The image headers supply the experiment metadata; XDS.INP and
 | `--from RUN` | Re-process from a completed run: its directory or `process.json`. See [Re-processing](#re-processing-with-refined-parameters-run---from). |
 | `--spacegroup N` | Space group number or symbol (`92`, `P41212`), over every import and `--from`. See [Overriding](#overriding-the-space-group-and-cell-run---spacegroup-run---cell). |
 | `--cell A B C α β γ` | Unit cell, over every import and `--from`; must fit the space group. |
+| `--refine LIST` | What PROCESS refines: `orientation`, `cell`, `distance`, `beam`, `tilt_twist`, `mosaicity` (re-estimated), or `all` / `none`; the rest are held fixed. Default: `orientation,mosaicity` with `--from` / `--xparm`, otherwise `all`. |
 | `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
 | `--help`, `--version` | Usage, build version. |
 
@@ -111,20 +112,35 @@ ProcessingLab run --from processing_20261022_235027/process.json --range 1:450
 ```
 
 `--from` takes a completed run directory, or its `process.json`, and
-processes again from its refined parameters:
+processes again from that run's final model:
 
 | From | Values |
 | ---- | ------ |
-| `GXPARM.XDS` (the `gxparm` output listed in `process.json`) | Cell, space group, wavelength, distance, beam, pixel size, orientation matrix |
-| `process.json` (`refinement.tilt_twist_mrad`) | Detector tilt and twist; `GXPARM.XDS` doesn't carry them |
+| `process.json` `experiment` | Cell, space group, wavelength, distance, beam, pixel size, tilt/twist, mosaicity, orientation matrix |
 | `input.json` | First image and frame range, unless `--image` / `--range` are given |
+
+The model is checked before anything runs. A matrix that implies a cell other
+than the run's own is refused, and so is a cell its space group forbids, a
+wavelength or pixel size that disagrees with the run's `input.json`, or
+missing geometry. Runs from before schema 2 (no `experiment` block) use
+their `GXPARM.XDS` and `refinement.tilt_twist_mrad` instead.
 
 Each value is tagged `[previous run]` in `process.log` (`previous_run` in
 `input.json`, which also records the run under `inputs.imports`). With the
-orientation known, `AUTOINDEX` is skipped: `FINDSPOTS` still runs to size
-the measurement box, and `PROCESS` refines the orientation only, keeping
-the refined cell, distance and beam. There is no `XPARM.XDS` or `index.log`
-in the output.
+orientation known, `AUTOINDEX` is skipped, and there is no `XPARM.XDS` or
+`index.log` in the output. `FINDSPOTS` still runs, to size the measurement
+box. The refinement policy is printed with the metadata:
+
+```text
+  Mosaicity:     0.101°  [previous run]  (re-estimated)
+  Refine:        orientation, mosaicity; fixed: cell, distance, beam, tilt_twist
+```
+
+`--refine` changes it. `--refine orientation,cell` also refines the cell,
+and `--refine orientation` holds the mosaicity at its previous value. The
+policy is recorded in `input.json` (`experiment.refinement_policy`) and what
+was done in `process.json` (`refinement.parameters`). The full contract is
+in [processing-lab/docs/RUN_RECORDS.md](processing-lab/docs/RUN_RECORDS.md#second-round-processing-run---from).
 
 ```text
   Cell:          57.94 57.94 150.24 90.00 90.00 90.00  [previous run]
@@ -284,7 +300,7 @@ it and writes `XPARM.XDS`; `GO` after `PROCESS` integrates and writes MTZ /
 | `CELL a b c α β γ` | Direct cell (Å, degrees). |
 | `SYMMETRY n` | Space-group number (1–230). |
 | `MATRIX` then 9 numbers | MOSFLM orientation matrix [A] (lab X,Y,Z rows). |
-| `CELLFIX ON\|OFF\|HARD\|SOFT [s]` | Project the cell onto the space-group metric before PROCESS (default ON, hard). |
+| `CELLFIX ON\|OFF\|HARD\|SOFT [s]` | Project the cell onto the space-group metric before PROCESS (default ON, hard). The orientation matrix is rebuilt for the projected cell, keeping its orientation, so predictions use the cell that is reported. |
 | `MOSAIC` | Mosaic spread (degrees). Default 0.15. |
 | `DIVERGENCE` / `DIVH` `DIVV` | Beam divergence (degrees). |
 | `YSCALE` `TILT` `TWIST` `ROTMAT2` | Detector fiducials (insulin-style). |
@@ -453,7 +469,7 @@ and spot lists, `XPARM.XDS` and `GXPARM.XDS` to `DIRECTORY` (default `.`).
 | File | When | Contents |
 | ---- | ---- | -------- |
 | `input.json` | start (with an output directory) | Resolved inputs: images, imports, each experiment value as `{value, unit, source, overrides}`, effective FINDSPOTS / AUTOINDEX / integration / refinement settings, the CONTROL run. |
-| `process.json` | created at start, updated at every `GO` | `status` (`running` / `completed` / `failed`), `stages` with status and timing, `indexing.selected_solution`, `refinement` (after PROCESS), `integration`, `quality` (unscaled shells + total), `warnings`, `error`, `outputs`. Written atomically. |
+| `process.json` | created at start, updated at every `GO` | `status` (`running` / `completed` / `failed`), `stages` with status and timing, `indexing.selected_solution`, `refinement` (after PROCESS), `integration`, `quality` (unscaled shells + total, and counts that add up to the integrated reflections), `validation`, `warnings`, `error`, `outputs` (relative to `run_directory`). Written atomically; schema version 2, defined in [processing-lab/docs/RUN_RECORDS.md](processing-lab/docs/RUN_RECORDS.md). |
 | `process.md` | with `process.json` | Report rendered from the two records. |
 | `process.log` | always (unless `--no-log`) | Everything printed to the terminal. |
 | `HKLOUT` (`process.mtz` if unset) | PROCESS `GO` | Unmerged MOSFLM-style MTZ. |

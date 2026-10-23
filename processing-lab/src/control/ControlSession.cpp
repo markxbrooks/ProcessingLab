@@ -10,6 +10,7 @@
 #include "mosflm/diffraction/TrustedRegion.hpp"
 #include "mosflm/geometry/CellFix.hpp"
 #include "mosflm/geometry/LabFrame.hpp"
+#include "mosflm/geometry/OrientationMatrix.hpp"
 #include "mosflm/io/XparmIO.hpp"
 #include "mosflm/image/ImageIO.hpp"
 #include "mosflm/refinement/PositionalRefinement.hpp"
@@ -810,11 +811,11 @@ void ControlSession::apply_keyword(
         return;
     }
     if (key == "REFINE") {
-        // REFINE ALL | any of ORIENTATION CELL DISTANCE BEAM TILT: the
-        // parameters positional refinement may change during PROCESS.
+        // REFINE ALL | NONE | any of ORIENTATION CELL DISTANCE BEAM TILT:
+        // the parameters positional refinement may change during PROCESS.
         if (args.empty()) {
             throw std::invalid_argument(
-                "CONTROL REFINE needs ALL or ORIENTATION/CELL/DISTANCE/BEAM/TILT"
+                "CONTROL REFINE needs ALL, NONE or ORIENTATION/CELL/DISTANCE/BEAM/TILT"
             );
         }
         bool all = false;
@@ -827,6 +828,8 @@ void ControlSession::apply_keyword(
             const std::string w = upper(a);
             if (w == "ALL") {
                 all = true;
+            } else if (w == "NONE") {
+                // Nothing positional; the flags below stay false.
             } else if (w.rfind("ORIENT", 0) == 0) {
                 orientation = true;
             } else if (w == "CELL") {
@@ -2250,6 +2253,7 @@ ControlGoResult ControlSession::go(
     out.process_last = last;
 
     // MOSFLM CELLFIX: project cell onto crystal-system metric before integrate.
+    bool cellfix_changed = false;
     if (state_.cellfix_enabled && state_.has_symmetry) {
         const auto* sg =
             crystal::SpaceGroupInfo::find_by_number(state_.symmetry_number);
@@ -2269,6 +2273,7 @@ ControlGoResult ControlSession::go(
                 std::cout << "  CELLFIX applied: " << state_.cell.describe()
                           << " → " << fixed.describe() << '\n';
                 state_.cell = fixed;
+                cellfix_changed = true;
             }
         }
     }
@@ -2301,6 +2306,15 @@ ControlGoResult ControlSession::go(
         image0.metadata.wavelength_angstrom > 0.0) {
         state_.wavelength_A = image0.metadata.wavelength_angstrom;
         state_.has_wavelength = true;
+    }
+    // The matrix carries the cell too (A = λ·U·B): give it the constrained
+    // cell, keeping the orientation, or predictions keep the unconstrained
+    // indexing cell while the run reports the CELLFIX one.
+    if (cellfix_changed && state_.has_matrix) {
+        const auto ub = OrientationMatrix::from_mosflm_orientation_matrix(state_.amat, state_.wavelength_A)
+                            .with_cell(state_.cell);
+        state_.amat = cpp_ub_to_mosflm_amat(ub.ub(), state_.wavelength_A);
+        std::cout << "  CELLFIX: orientation matrix rebuilt for the constrained cell\n";
     }
     double osc_log = state_.process_angle_deg;
     double start_log = state_.process_start_phi_deg;

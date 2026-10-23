@@ -160,8 +160,21 @@ void apply_import(
     m.imported.merge_from(g);
 }
 
-/// Refuse a cell that the space group's crystal system does not allow
-/// (e.g. a ≠ b for a tetragonal group): the run would predict nonsense.
+/// Image source from an import (directory + image or template).
+std::optional<std::filesystem::path> image_from_import(const ImportedSweepGeometry& g) {
+    const std::filesystem::path dir = g.has_directory ? g.directory : std::filesystem::path(".");
+    if (g.has_image) {
+        return g.image_path.is_absolute() ? g.image_path : dir / g.image_path;
+    }
+    if (g.has_template) {
+        const std::string t = xds_question_marks_to_hash(g.image_template);
+        return frame_path(dir, t, g.has_process_range ? g.process_first : 1);
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
 void check_cell_fits_spacegroup(const std::array<double, 6>& c, int number) {
     const auto* sg = crystal::SpaceGroupInfo::find_by_number(number);
     if (sg == nullptr) {
@@ -207,21 +220,6 @@ void check_cell_fits_spacegroup(const std::array<double, 6>& c, int number) {
                                  " (" + sg->hm + ": " + rule + ")");
     }
 }
-
-/// Image source from an import (directory + image or template).
-std::optional<std::filesystem::path> image_from_import(const ImportedSweepGeometry& g) {
-    const std::filesystem::path dir = g.has_directory ? g.directory : std::filesystem::path(".");
-    if (g.has_image) {
-        return g.image_path.is_absolute() ? g.image_path : dir / g.image_path;
-    }
-    if (g.has_template) {
-        const std::string t = xds_question_marks_to_hash(g.image_template);
-        return frame_path(dir, t, g.has_process_range ? g.process_first : 1);
-    }
-    return std::nullopt;
-}
-
-}  // namespace
 
 const char* source_label(MetadataSource source, bool hdf5) {
     switch (source) {
@@ -369,24 +367,59 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
     if (xinfo) {
         apply_import(m, *xinfo, MetadataSource::Xinfo);
     }
-    std::optional<XparmGeometry> xparm;
+    // A known orientation: from an XPARM, or the final model of --from.
+    struct Seed {
+        Eigen::Matrix3d amat;
+        double wavelength_A;
+        bool invertx;
+        MetadataSource source;
+    };
+    std::optional<Seed> seed;
     if (in.xparm) {
-        xparm = read_xparm(*in.xparm);
-        const auto& g = *xparm;
+        const auto g = read_xparm(*in.xparm);
         apply_import(m, imported_from_xparm(g), in.xparm_source);
         if (g.has_amat) {
-            std::array<double, 9> a{};
-            for (int r = 0; r < 3; ++r) {
-                for (int k = 0; k < 3; ++k) {
-                    a[static_cast<std::size_t>(3 * r + k)] = g.amat(r, k);
-                }
-            }
-            m.orientation = {a, in.xparm_source};
-            m.orientation_control = xparm_orientation_lines(g);
+            // XPARM matrices are in the XDS lab frame (beam +z, axis +x),
+            // which has ProcessingLab .spt handedness: INVERTX OFF.
+            seed = Seed{g.amat, g.wavelength_A > 0.1 ? g.wavelength_A : m.wavelength_A.value, false,
+                        in.xparm_source};
         }
     }
     if (in.tilt_twist_mrad) {
         m.tilt_twist_mrad = {*in.tilt_twist_mrad, in.xparm_source};
+    }
+    if (in.previous) {
+        const auto& p = *in.previous;
+        ImportedSweepGeometry g;
+        g.has_wavelength = true;
+        g.wavelength_A = p.wavelength_A;
+        g.has_distance = true;
+        g.distance_mm = p.distance_mm;
+        g.has_beam = true;
+        g.beam_x_mm = p.beam_mm.first;
+        g.beam_y_mm = p.beam_mm.second;
+        g.has_pixel = true;
+        g.pixel_x_mm = p.pixel_mm.first;
+        g.pixel_y_mm = p.pixel_mm.second;
+        g.has_cell = true;
+        g.cell_a = p.cell[0];
+        g.cell_b = p.cell[1];
+        g.cell_c = p.cell[2];
+        g.cell_alpha = p.cell[3];
+        g.cell_beta = p.cell[4];
+        g.cell_gamma = p.cell[5];
+        g.has_symmetry = true;
+        g.symmetry_number = p.space_group;
+        apply_import(m, g, MetadataSource::PreviousRun);
+        m.tilt_twist_mrad = {p.tilt_twist_mrad, MetadataSource::PreviousRun};
+        m.mosaicity_deg = {p.mosaicity_deg, MetadataSource::PreviousRun};
+        Eigen::Matrix3d a;
+        for (int r = 0; r < 3; ++r) {
+            for (int k = 0; k < 3; ++k) {
+                a(r, k) = p.matrix[static_cast<std::size_t>(3 * r + k)];
+            }
+        }
+        seed = Seed{a, p.matrix_wavelength_A, p.invertx, MetadataSource::PreviousRun};
     }
     if (in.cell || in.symmetry) {
         ImportedSweepGeometry cli;
@@ -410,22 +443,59 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
         }
         // The matrix carries the cell too (UB = U·B): keep the orientation,
         // use the given cell, or predictions keep the old one.
-        if (in.cell && xparm && xparm->has_amat) {
-            XparmGeometry g = *xparm;
-            const double lam = g.wavelength_A > 0.1 ? g.wavelength_A : m.wavelength_A.value;
+        if (in.cell && seed) {
             const UnitCell cell{(*in.cell)[0], (*in.cell)[1], (*in.cell)[2],
                                 (*in.cell)[3], (*in.cell)[4], (*in.cell)[5]};
-            const auto ub = OrientationMatrix::from_mosflm_orientation_matrix(g.amat, lam).with_cell(cell);
-            g.amat = cpp_ub_to_mosflm_amat(ub.ub(), lam);
-            std::array<double, 9> a{};
-            for (int r = 0; r < 3; ++r) {
-                for (int k = 0; k < 3; ++k) {
-                    a[static_cast<std::size_t>(3 * r + k)] = g.amat(r, k);
-                }
-            }
-            m.orientation.assign(a, MetadataSource::CommandLine);
-            m.orientation_control = xparm_orientation_lines(g);
+            const auto ub = OrientationMatrix::from_mosflm_orientation_matrix(seed->amat, seed->wavelength_A)
+                                .with_cell(cell);
+            seed->amat = cpp_ub_to_mosflm_amat(ub.ub(), seed->wavelength_A);
+            seed->source = MetadataSource::CommandLine;
         }
+    }
+    if (seed) {
+        std::array<double, 9> a{};
+        std::ostringstream line;
+        line << std::setprecision(12) << "MATRIX";
+        for (int r = 0; r < 3; ++r) {
+            for (int k = 0; k < 3; ++k) {
+                a[static_cast<std::size_t>(3 * r + k)] = seed->amat(r, k);
+                line << ' ' << seed->amat(r, k);
+            }
+        }
+        m.orientation = {a, seed->source};
+        m.orientation_control = {seed->invertx ? "INVERTX ON" : "INVERTX OFF", line.str()};
+    }
+
+    // Refinement policy: --refine, else orientation (and a re-estimated
+    // mosaicity) when the orientation is known, else everything.
+    if (in.refine) {
+        m.refine = *in.refine;
+    } else if (seed) {
+        m.refine = {"orientation", "mosaicity"};
+    } else {
+        m.refine.assign(std::begin(kRefinableParameters), std::end(kRefinableParameters));
+    }
+    const auto refines = [&](const char* name) {
+        return std::find(m.refine.begin(), m.refine.end(), name) != m.refine.end();
+    };
+    if (in.refine || seed) {
+        static const std::pair<const char*, const char*> keywords[] = {
+            {"orientation", "ORIENTATION"}, {"cell", "CELL"}, {"distance", "DISTANCE"},
+            {"beam", "BEAM"}, {"tilt_twist", "TILT"}};
+        std::string refine;
+        for (const auto& [name, keyword] : keywords) {
+            if (refines(name)) {
+                refine += std::string(" ") + keyword;
+            }
+        }
+        m.refinement_control.push_back(refine.empty() ? "REFINE NONE" : "REFINE" + refine);
+    }
+    if (!refines("mosaicity")) {
+        if (!m.mosaicity_deg.set()) {
+            throw std::runtime_error(
+                "--refine without mosaicity holds it fixed, which needs a known mosaicity (--from)");
+        }
+        m.refinement_control.push_back("MOSAIC " + fmt(m.mosaicity_deg.value, 5));
     }
     if (in.range) {
         auto [a, b] = *in.range;
@@ -464,6 +534,7 @@ std::vector<std::string> ExperimentModel::control_lines() const {
         lines.push_back("TWIST " + fmt(tilt_twist_mrad.value.second, 4));
     }
     lines.insert(lines.end(), orientation_control.begin(), orientation_control.end());
+    lines.insert(lines.end(), refinement_control.begin(), refinement_control.end());
     return lines;
 }
 
@@ -512,6 +583,19 @@ void ExperimentModel::write_summary(std::ostream& os) const {
     if (orientation.set()) {
         os << "  Orientation:   refined matrix, no autoindexing" << tag(orientation.source) << '\n';
     }
+    if (mosaicity_deg.set()) {
+        const bool kept = std::find(refine.begin(), refine.end(), "mosaicity") == refine.end();
+        os << "  Mosaicity:     " << fmt(mosaicity_deg.value, 3) << "°" << tag(mosaicity_deg.source)
+           << (kept ? "  (fixed)" : "  (re-estimated)") << '\n';
+    }
+    std::string fixed;
+    std::string refined;
+    for (const char* name : kRefinableParameters) {
+        auto& list = std::find(refine.begin(), refine.end(), name) != refine.end() ? refined : fixed;
+        list += (list.empty() ? "" : ", ") + std::string(name);
+    }
+    os << "  Refine:        " << (refined.empty() ? "nothing" : refined)
+       << (fixed.empty() ? "" : "; fixed: " + fixed) << '\n';
     os << "  Frame range:   " << frame_range.value.first << "–" << frame_range.value.second
        << tag(frame_range.source) << "  (" << frames_available << " on disk)\n";
     for (const auto& w : warnings) {
@@ -522,6 +606,16 @@ void ExperimentModel::write_summary(std::ostream& os) const {
 void apply_control_state(
     ExperimentModel& m, const control::ControlState& st, MetadataSource source
 ) {
+    // The policy is the parsed state's (REFINE / MOSAIC keywords).
+    m.refine.clear();
+    for (const auto& [name, on] : {std::pair{"orientation", st.refine_orientation}, std::pair{"cell", st.refine_cell},
+                                   std::pair{"distance", st.refine_distance}, std::pair{"beam", st.refine_beam},
+                                   std::pair{"tilt_twist", st.refine_tilt_twist},
+                                   std::pair{"mosaicity", !st.mosaic_from_user}}) {
+        if (on) {
+            m.refine.emplace_back(name);
+        }
+    }
     ImportedSweepGeometry g;
     const auto differs = [](double a, double b) { return rel_differs(a, b, 1e-9); };
     // Only values the script changed: imports already applied to ``st`` match.
@@ -596,16 +690,20 @@ Json ExperimentModel::to_json() const {
     e["detector_distance"] = field(distance_mm, num, "mm");
     e["beam_centre"] = field(beam_mm, pair, "mm");
     e["pixel_size"] = field(pixel_mm, pair, "mm");
-    e["oscillation_width"] = field(oscillation_deg, num, "deg");
+    e["oscillation_width"] = field(oscillation_deg, num, "degree");
     e["unit_cell"] = field(cell, [](const std::array<double, 6>& c) {
         Json::Array a;
         for (double v : c) {
             a.emplace_back(v);
         }
         return Json(std::move(a));
-    }, "angstrom/deg");
+    }, nullptr);
+    // Lengths and angles have different units.
+    e["unit_cell"]["length_unit"] = "angstrom";
+    e["unit_cell"]["angle_unit"] = "degree";
     e["space_group_number"] = field(symmetry, [](int v) { return Json(v); }, nullptr);
     e["detector_tilt_twist"] = field(tilt_twist_mrad, pair, "mrad");
+    e["mosaicity"] = field(mosaicity_deg, num, "degree");
     e["orientation_matrix"] = field(orientation, [](const std::array<double, 9>& a) {
         Json::Array rows;
         for (std::size_t r = 0; r < 3; ++r) {
@@ -619,6 +717,17 @@ Json ExperimentModel::to_json() const {
         j["last"] = r.second;
         return j;
     }, nullptr);
+    // From the first frame's header (no other source sets them).
+    e["detector_size_px"] = Json(Json::Object{{"fast", detector_nx}, {"slow", detector_ny}});
+    e["detector_id"] = detector_id;
+    e["phi_start_deg"] = phi_start_deg;
+    // The refinement policy: each parameter refined or held fixed.
+    Json policy = Json::object();
+    for (const char* name : kRefinableParameters) {
+        const bool r = std::find(refine.begin(), refine.end(), name) != refine.end();
+        policy[name] = r ? (std::string(name) == "mosaicity" ? "estimated" : "refined") : "fixed";
+    }
+    e["refinement_policy"] = std::move(policy);
     return e;
 }
 

@@ -130,10 +130,15 @@ Start from the refined parameters of an earlier run:
     --output-dir thaumatin_rerun
 ```
 
-`--from` reuses the refined cell, space group, wavelength, detector geometry
-(including tilt and twist) and orientation. With the orientation known,
-autoindexing is skipped and only the orientation is refined during
-integration. Give a completed run directory or its `process.json`; for a
+`--from` starts from the earlier run's final model: the refined cell, space
+group, wavelength, detector geometry (including tilt and twist), mosaicity
+and orientation. The model is checked first. A matrix that doesn't belong to
+its cell, a cell its space group forbids, or a wavelength that disagrees with
+the earlier inputs is refused.
+
+With the orientation known, autoindexing is skipped. By default only the
+orientation is refined and the mosaicity re-estimated; `--refine` chooses
+otherwise, for example `--refine orientation,cell`. Give a completed run directory or its `process.json`; for a
 multi-sweep run, the `sweep_N` directory you want.
 
 ### 3. A MOSFLM-style CONTROL script
@@ -232,6 +237,7 @@ the integration went, not the final data quality, which comes from scaling.
 | `--from RUN` | Reprocess from a completed run, or its `process.json`. |
 | `--spacegroup N` | Override the space group, by number or symbol. |
 | `--cell A B C α β γ` | Override the unit cell; it must fit the space group. |
+| `--refine LIST` | What integration refines: `orientation`, `cell`, `distance`, `beam`, `tilt_twist`, `mosaicity`, `all` or `none`; the rest stay fixed. |
 | `--run-mode MODE` | State where the parameters come from (see below). |
 
 Without `--output-dir`, each run creates a new `processing_YYYYMMDD_HHMMSS`
@@ -344,7 +350,9 @@ Every information type has one home:
 - reflections: `process.mtz`.
 
 The JSON records give applications and pipelines a stable interface. Both
-carry `"schema_version": 1`.
+carry `"schema_version": 2`; every field, unit and count is defined in
+[processing-lab/docs/RUN_RECORDS.md](processing-lab/docs/RUN_RECORDS.md).
+`--from` also reads version 1 runs.
 
 `process.json` starts as `"status": "running"` with every stage `pending`.
 Each stage then moves to `running` and on to `completed` or `failed`, and

@@ -5,6 +5,7 @@
 #include "mosflm/io/Json.hpp"
 #include "mosflm/io/RunMode.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -13,8 +14,11 @@
 
 namespace mosflm::io {
 
-/// Schema version of ``input.json`` and ``process.json``.
-inline constexpr int kRunRecordSchemaVersion = 1;
+/// Schema version of ``input.json`` and ``process.json`` (docs/RUN_RECORDS.md).
+/// 2: RFC 3339 ``*_at`` timestamps and durations, uniform stage objects,
+/// separate length/angle units, ``space_group`` objects, run-relative output
+/// paths, defined integration / quality counts, ``validation``.
+inline constexpr int kRunRecordSchemaVersion = 2;
 
 /// How a run was invoked, for ``input.json``.
 struct RunContext {
@@ -86,6 +90,8 @@ private:
     Json input_;
     Json doc_;
     std::string running_;
+    std::chrono::steady_clock::time_point run_start_{std::chrono::steady_clock::now()};
+    std::chrono::steady_clock::time_point stage_start_{run_start_};
 };
 
 /// What ``run --from`` takes from an earlier run.
@@ -97,16 +103,21 @@ struct PreviousRun {
     /// Refined detector tilt / twist (mrad) from ``process.json``; GXPARM.XDS
     /// does not carry them.
     std::optional<std::pair<double, double>> tilt_twist_mrad;
+    /// Schema 2: the run's final model (``process.json`` ``experiment``),
+    /// validated. Version 1 runs have none; use ``gxparm`` and the tilt.
+    std::optional<PreviousModel> model;
 };
 
 /// Read an earlier run for ``run --from``.
 ///
 /// :param path: A run directory, or its ``process.json``.
-/// :return: Its image, frame range, refined ``GXPARM.XDS`` and refined
-///     detector tilt / twist.
+/// :return: Its image, frame range and final model (schema 2), or its
+///     refined ``GXPARM.XDS`` and detector tilt / twist (version 1).
 /// :raises std::runtime_error: If the run did not complete, has no refined
-///     geometry, or a record or ``GXPARM.XDS`` is missing; a multi-sweep
-///     directory names its ``sweep_N`` subdirectories.
+///     geometry, or a record or ``GXPARM.XDS`` is missing; if its final
+///     model lacks geometry, has a cell its space group forbids, a matrix
+///     that implies another cell, or a wavelength / pixel size other than
+///     its ``input.json``; a multi-sweep directory names its ``sweep_N``.
 [[nodiscard]] PreviousRun read_previous_run(const std::filesystem::path& path);
 
 /// ``process.md`` from the two records; outputs inside ``dir`` are shown
