@@ -2,13 +2,16 @@
 
 #include "mosflm/control/ControlSession.hpp"
 #include "mosflm/geometry/LabFrame.hpp"
+#include "mosflm/io/ImportedSweepGeometry.hpp"
 
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mosflm::io {
@@ -435,19 +438,103 @@ void write_xparm(
     out << g.det_y[0] << ' ' << g.det_y[1] << ' ' << g.det_y[2] << '\n';
 }
 
+namespace {
+
+/// Where the beam meets the detector (mm), if the XPARM gives it.
+std::optional<std::pair<double, double>> xparm_beam_mm(const XparmGeometry& g) {
+    if (!(g.qx_mm > 0.0 && g.qy_mm > 0.0)) {
+        return std::nullopt;
+    }
+    if (g.has_direct_beam) {
+        // Classic XDS: BEAM is where the beam meets the detector (fast,
+        // slow), not ORGX/ORGY (the foot of the detector normal).
+        return std::pair{g.beam_fast_px * g.qx_mm, g.beam_slow_px * g.qy_mm};
+    }
+    if (g.orgx_px > 0.0 && g.orgy_px > 0.0) {
+        // ProcessingLab bridge GXPARM stores its own BEAM as ORGX/ORGY.
+        return std::pair{g.orgx_px * g.qx_mm, g.orgy_px * g.qy_mm};
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+ImportedSweepGeometry imported_from_xparm(const XparmGeometry& g) {
+    ImportedSweepGeometry im;
+    if (g.cell.a > 1.0) {
+        im.has_cell = true;
+        im.cell_a = g.cell.a;
+        im.cell_b = g.cell.b;
+        im.cell_c = g.cell.c;
+        im.cell_alpha = g.cell.alpha_deg;
+        im.cell_beta = g.cell.beta_deg;
+        im.cell_gamma = g.cell.gamma_deg;
+    }
+    if (g.spacegroup_number >= 1 && g.spacegroup_number <= 230) {
+        im.has_symmetry = true;
+        im.symmetry_number = g.spacegroup_number;
+    }
+    if (g.wavelength_A > 0.1) {
+        im.has_wavelength = true;
+        im.wavelength_A = g.wavelength_A;
+    }
+    if (g.distance_mm > 1.0) {
+        im.has_distance = true;
+        im.distance_mm = g.distance_mm;
+    }
+    if (g.qx_mm > 0.0 && g.qy_mm > 0.0) {
+        im.has_pixel = true;
+        im.pixel_x_mm = g.qx_mm;
+        im.pixel_y_mm = g.qy_mm;
+    }
+    if (const auto b = xparm_beam_mm(g)) {
+        im.has_beam = true;
+        im.beam_x_mm = b->first;
+        im.beam_y_mm = b->second;
+    }
+    return im;
+}
+
+std::vector<std::string> xparm_orientation_lines(const XparmGeometry& g) {
+    if (!g.has_amat) {
+        return {};
+    }
+    std::ostringstream m;
+    m << std::setprecision(12) << "MATRIX";
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            m << ' ' << g.amat(r, c);
+        }
+    }
+    return {
+        // The AMAT is built in the XDS lab frame (beam +z, axis +x), whose
+        // handedness matches ProcessingLab .spt indexing, not MOSFLM's.
+        "INVERTX OFF",
+        // Keep the XDS-refined detector and cell; refine the orientation
+        // only, as XDS INTEGRATE does. Distance and cell together are
+        // degenerate (both scale the pattern; 385 → 390 mm on 76c1b), and
+        // per-period cell refinement wandered b 185–189 Å late in that sweep.
+        "REFINE ORIENTATION",
+        m.str(),
+    };
+}
+
 void apply_xparm(
     control::ControlSession& session,
     const XparmGeometry& g
 ) {
     std::ostringstream line;
     line << std::setprecision(12);
-    if (g.cell.a > 1.0) {
+    const auto emit = [&] {
+        session.parse_line(line.str());
         line.str("");
         line.clear();
+    };
+    if (g.cell.a > 1.0) {
         line << "CELL " << g.cell.a << ' ' << g.cell.b << ' ' << g.cell.c << ' '
              << g.cell.alpha_deg << ' ' << g.cell.beta_deg << ' '
              << g.cell.gamma_deg;
-        session.parse_line(line.str());
+        emit();
     }
     if (g.spacegroup_number >= 1 && g.spacegroup_number <= 230) {
         session.parse_line(
@@ -455,57 +542,23 @@ void apply_xparm(
         );
     }
     if (g.wavelength_A > 0.1) {
-        line.str("");
-        line.clear();
         line << "WAVELENGTH " << g.wavelength_A;
-        session.parse_line(line.str());
+        emit();
     }
     if (g.distance_mm > 1.0) {
-        line.str("");
-        line.clear();
         line << "DISTANCE " << g.distance_mm;
-        session.parse_line(line.str());
+        emit();
     }
     if (g.qx_mm > 0.0 && g.qy_mm > 0.0) {
-        line.str("");
-        line.clear();
         line << "PIXEL " << g.qx_mm << ' ' << g.qy_mm;
-        session.parse_line(line.str());
-        if (g.has_direct_beam) {
-            // Classic XDS: BEAM is where the beam meets the detector (fast,
-            // slow), not ORGX/ORGY (the foot of the detector normal).
-            line.str("");
-            line.clear();
-            line << "BEAM " << (g.beam_fast_px * g.qx_mm) << ' '
-                 << (g.beam_slow_px * g.qy_mm);
-            session.parse_line(line.str());
-        } else if (g.orgx_px > 0.0 && g.orgy_px > 0.0) {
-            // ProcessingLab bridge GXPARM stores its own BEAM as ORGX/ORGY.
-            line.str("");
-            line.clear();
-            line << "BEAM " << (g.orgx_px * g.qx_mm) << ' '
-                 << (g.orgy_px * g.qy_mm);
-            session.parse_line(line.str());
-        }
+        emit();
     }
-    if (g.has_amat) {
-        // The AMAT is built in the XDS lab frame (beam +z, axis +x), whose
-        // handedness matches ProcessingLab .spt indexing, not MOSFLM's.
-        session.parse_line("INVERTX OFF");
-        // Keep the XDS-refined detector and cell; refine the orientation
-        // only, as XDS INTEGRATE does. Distance and cell together are
-        // degenerate (both scale the pattern; 385 → 390 mm on 76c1b), and
-        // per-period cell refinement wandered b 185–189 Å late in that sweep.
-        session.parse_line("REFINE ORIENTATION");
-        line.str("");
-        line.clear();
-        line << "MATRIX";
-        for (int r = 0; r < 3; ++r) {
-            for (int c = 0; c < 3; ++c) {
-                line << ' ' << g.amat(r, c);
-            }
-        }
-        session.parse_line(line.str());
+    if (const auto b = xparm_beam_mm(g)) {
+        line << "BEAM " << b->first << ' ' << b->second;
+        emit();
+    }
+    for (const auto& l : xparm_orientation_lines(g)) {
+        session.parse_line(l);
     }
 }
 

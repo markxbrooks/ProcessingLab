@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -57,6 +58,11 @@ public:
     [[nodiscard]] const std::string& string() const;  ///< "" if not a string
     [[nodiscard]] bool boolean() const;  ///< false if not a bool
 
+    /// Parse JSON text (objects keep their member order).
+    ///
+    /// :raises std::runtime_error: With the offset, if ``text`` is not JSON.
+    [[nodiscard]] static Json parse(std::string_view text);
+
     /// Serialise; non-finite numbers are written as ``null``.
     [[nodiscard]] std::string dump(int indent = 2) const;
 
@@ -64,6 +70,11 @@ private:
     void dump_to(std::string& out, int indent, int depth) const;
     std::variant<std::monostate, bool, std::int64_t, double, std::string, Array, Object> v_;
 };
+
+/// Read and parse a JSON file.
+///
+/// :raises std::runtime_error: If it cannot be read or is not JSON.
+[[nodiscard]] Json read_json_file(const std::filesystem::path& path);
 
 /// Write ``text`` to ``path`` atomically: a temporary file in the same
 /// directory is written, flushed to disk and renamed over ``path``, so a

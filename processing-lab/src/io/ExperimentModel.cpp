@@ -3,6 +3,7 @@
 #include "mosflm/image/ImageIO.hpp"
 #include "mosflm/io/XdsInpImporter.hpp"
 #include "mosflm/io/XinfoImporter.hpp"
+#include "mosflm/io/XparmIO.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -181,6 +182,8 @@ const char* source_label(MetadataSource source, bool hdf5) {
             return ".xinfo";
         case MetadataSource::Xparm:
             return "XPARM";
+        case MetadataSource::PreviousRun:
+            return "previous run";
         case MetadataSource::Control:
             return "CONTROL";
         case MetadataSource::CommandLine:
@@ -197,6 +200,7 @@ const char* source_id(MetadataSource source) {
         case MetadataSource::XdsInp: return "xds_inp";
         case MetadataSource::Xinfo: return "xinfo";
         case MetadataSource::Xparm: return "xparm";
+        case MetadataSource::PreviousRun: return "previous_run";
         case MetadataSource::Control: return "control";
         case MetadataSource::CommandLine: return "command_line";
         case MetadataSource::None: break;
@@ -307,6 +311,20 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
     if (xinfo) {
         apply_import(m, *xinfo, MetadataSource::Xinfo);
     }
+    if (in.xparm) {
+        const auto g = read_xparm(*in.xparm);
+        apply_import(m, imported_from_xparm(g), in.xparm_source);
+        if (g.has_amat) {
+            std::array<double, 9> a{};
+            for (int r = 0; r < 3; ++r) {
+                for (int k = 0; k < 3; ++k) {
+                    a[static_cast<std::size_t>(3 * r + k)] = g.amat(r, k);
+                }
+            }
+            m.orientation = {a, in.xparm_source};
+            m.orientation_control = xparm_orientation_lines(g);
+        }
+    }
     if (in.range) {
         auto [a, b] = *in.range;
         if (b < a) {
@@ -339,6 +357,7 @@ std::vector<std::string> ExperimentModel::control_lines() const {
     for (auto& l : g.to_control_lines()) {
         lines.push_back(std::move(l));
     }
+    lines.insert(lines.end(), orientation_control.begin(), orientation_control.end());
     return lines;
 }
 
@@ -379,6 +398,9 @@ void ExperimentModel::write_summary(std::ostream& os) const {
     }
     if (symmetry.set()) {
         os << "  Space group:   " << symmetry.value << tag(symmetry.source) << '\n';
+    }
+    if (orientation.set()) {
+        os << "  Orientation:   refined matrix, no autoindexing" << tag(orientation.source) << '\n';
     }
     os << "  Frame range:   " << frame_range.value.first << "–" << frame_range.value.second
        << tag(frame_range.source) << "  (" << frames_available << " on disk)\n";
@@ -473,6 +495,13 @@ Json ExperimentModel::to_json() const {
         return Json(std::move(a));
     }, "angstrom/deg");
     e["space_group_number"] = field(symmetry, [](int v) { return Json(v); }, nullptr);
+    e["orientation_matrix"] = field(orientation, [](const std::array<double, 9>& a) {
+        Json::Array rows;
+        for (std::size_t r = 0; r < 3; ++r) {
+            rows.emplace_back(Json::Array{Json(a[3 * r]), Json(a[3 * r + 1]), Json(a[3 * r + 2])});
+        }
+        return Json(std::move(rows));
+    }, nullptr);
     e["frame_range"] = field(frame_range, [](const std::pair<int, int>& r) {
         Json j = Json::object();
         j["first"] = r.first;

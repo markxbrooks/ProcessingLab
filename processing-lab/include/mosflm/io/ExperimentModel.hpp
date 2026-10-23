@@ -20,7 +20,8 @@ enum class MetadataSource {
     ImageHeader,
     XdsInp,
     Xinfo,
-    Xparm,    ///< ``--xparm`` XPARM.XDS / GXPARM.XDS (script mode)
+    Xparm,    ///< ``--xparm`` XPARM.XDS / GXPARM.XDS
+    PreviousRun,  ///< ``run --from``: the earlier run's refined GXPARM.XDS
     Control,  ///< CONTROL script keyword (script mode)
     CommandLine,
 };
@@ -60,12 +61,17 @@ struct ExperimentInputs {
     std::optional<std::string> sweep;
     /// ``--range FIRST:LAST`` (inclusive).
     std::optional<std::pair<int, int>> range;
+    /// ``--xparm`` (or the GXPARM.XDS of ``--from``): cell, symmetry,
+    /// geometry and orientation, above ``.xinfo`` and below the command line.
+    std::optional<std::filesystem::path> xparm;
+    /// Provenance of ``xparm``: ``Xparm``, or ``PreviousRun`` for ``--from``.
+    MetadataSource xparm_source{MetadataSource::Xparm};
 };
 
 /// The experiment once every source is merged, with per-field provenance.
 ///
 /// Precedence per field, lowest to highest: image header, ``XDS.INP``,
-/// ``.xinfo``, command line. A source only overrides the fields it sets, so
+/// ``.xinfo``, XPARM (``--xparm`` / ``--from``), command line. A source only overrides the fields it sets, so
 /// an ``.xinfo`` without detector geometry keeps the header's.
 struct ExperimentModel {
     Sourced<std::filesystem::path> image;  ///< HDF5 master or first frame.
@@ -80,6 +86,9 @@ struct ExperimentModel {
     Sourced<std::array<double, 6>> cell;
     Sourced<int> symmetry;
     Sourced<std::pair<int, int>> frame_range;
+    /// Orientation matrix (row-major) from an XPARM; when set, ``run`` skips
+    /// autoindexing and refines only the orientation.
+    Sourced<std::array<double, 9>> orientation;
     int frames_available{0};  ///< Frames found on disk / in the master.
     /// Scientifically meaningful disagreements between sources (the higher
     /// priority value is used; nothing is reconciled silently).
@@ -87,6 +96,9 @@ struct ExperimentModel {
     /// Values from imports/CLI, for CONTROL (header values are left to the
     /// session's own header defaults).
     ImportedSweepGeometry imported;
+    /// CONTROL lines that set ``orientation`` (``INVERTX``, ``REFINE``,
+    /// ``MATRIX``), after the imported geometry.
+    std::vector<std::string> orientation_control;
 
     /// CONTROL lines: DIRECTORY/TEMPLATE for CBF/SMV, then imported geometry.
     [[nodiscard]] std::vector<std::string> control_lines() const;

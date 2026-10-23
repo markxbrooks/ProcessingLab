@@ -76,7 +76,9 @@ cpp: cbf-lib
 	fi
 	$(MAKE) cpp-core
 
+# ``cpp`` builds only the shipped binaries; build the test programs too.
 test: cpp
+	cmake --build $(CPP_BUILD)
 	ctest --test-dir $(CPP_BUILD) --output-on-failure
 
 # Optional Fortran science amalgamation (nightly / differentials).

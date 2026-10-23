@@ -81,7 +81,7 @@ int main() {
     const fs::path bin = fs::absolute(find_processinglab());
     CHECK_MSG(fs::exists(bin), "missing ProcessingLab binary in build/");
 
-    // Empty stdin → Mosflm-like banner + NO RUN CARD + END OF PROCESSING.
+    // Empty stdin → ProcessingLab banner + NO RUN CARD + END OF PROCESSING.
     {
         const fs::path out =
             fs::temp_directory_path() / "mosflm_e0_empty.out";
@@ -89,8 +89,8 @@ int main() {
             "cd " + mosflm_test::output_dir("ipmosflm_thin_run").string() + " && " + bin.string() + " </dev/null >" + out.string() + " 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         const std::string text = slurp(out);
-        CHECK_MSG(text.find("Mosflm version 7.4.0") != std::string::npos,
-                  "missing Mosflm 7.4.0 banner");
+        CHECK_MSG(text.find("ProcessingLab v") != std::string::npos,
+                  "missing ProcessingLab banner");
         CHECK_MSG(text.find("NO \"RUN\" CARD GIVEN") != std::string::npos,
                   "missing NO RUN CARD warning");
         CHECK_MSG(text.find("END OF PROCESSING") != std::string::npos,

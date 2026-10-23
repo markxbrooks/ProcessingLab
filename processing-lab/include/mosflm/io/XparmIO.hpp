@@ -5,12 +5,16 @@
 #include <Eigen/Dense>
 
 #include <filesystem>
+#include <string>
+#include <vector>
 
 namespace mosflm::control {
 class ControlSession;
 }
 
 namespace mosflm::io {
+
+struct ImportedSweepGeometry;
 
 /// Minimal XDS ``XPARM.XDS`` / ``GXPARM.XDS`` geometry snapshot.
 struct XparmGeometry {
@@ -58,6 +62,14 @@ void write_xparm(
     const std::filesystem::path& path,
     const XparmGeometry& g
 );
+
+/// Cell, symmetry, wavelength, distance, pixel and beam from an XPARM, as
+/// import fields (for per-field provenance; orientation not included).
+[[nodiscard]] ImportedSweepGeometry imported_from_xparm(const XparmGeometry& g);
+
+/// CONTROL lines that set the XPARM orientation (``INVERTX OFF``,
+/// ``REFINE ORIENTATION``, ``MATRIX …``); empty if it has none.
+[[nodiscard]] std::vector<std::string> xparm_orientation_lines(const XparmGeometry& g);
 
 /// Apply XPARM cell / detector / matrix into CONTROL (does not set IMAGE).
 void apply_xparm(
