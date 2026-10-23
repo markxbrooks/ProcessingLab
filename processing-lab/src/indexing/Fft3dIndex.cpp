@@ -162,7 +162,49 @@ void fft1d(std::vector<Cplx>& a, bool inverse) {
     }
 }
 
-void fft3d(std::vector<Cplx>& data, int n, bool inverse) {
+
+enum class Axis { X, Y, Z };
+
+void fftAxis(std::vector<Cplx>& data, std::size_t n, bool inverse, Axis axis) {
+    std::vector<Cplx> line(n);
+
+    for (std::size_t a0 = 0; a0 < n; ++a0) {
+        for (std::size_t a1 = 0; a1 < n; ++a1) {
+
+            // gather into line[0..n)
+            for (std::size_t t = 0; t < n; ++t) {
+                std::size_t x, y, z;
+                if (axis == Axis::X) { x = t; y = a0; z = a1; }
+                if (axis == Axis::Y) { x = a0; y = t; z = a1; }
+                if (axis == Axis::Z) { x = a0; y = a1; z = t; }
+
+                line[t] = data[idx(x, y, z, n)];
+            }
+
+            // transform
+            fft1d(line, inverse);
+
+            // scatter back
+            for (std::size_t t = 0; t < n; ++t) {
+                std::size_t x, y, z;
+                if (axis == Axis::X) { x = t; y = a0; z = a1; }
+                if (axis == Axis::Y) { x = a0; y = t; z = a1; }
+                if (axis == Axis::Z) { x = a0; y = a1; z = t; }
+
+                data[idx(x, y, z, n)] = line[t];
+            }
+        }
+    }
+}
+
+void fft3d(std::vector<Cplx>& data, int n_int, bool inverse) {
+    std::size_t n = static_cast<std::size_t>(n_int);
+    fftAxis(data, n, inverse, Axis::X);
+    fftAxis(data, n, inverse, Axis::Y);
+    fftAxis(data, n, inverse, Axis::Z);
+}
+
+void fft3dold(std::vector<Cplx>& data, int n, bool inverse) {
     std::vector<Cplx> line(static_cast<std::size_t>(n));
     for (int y = 0; y < n; ++y) {
         for (int z = 0; z < n; ++z) {
