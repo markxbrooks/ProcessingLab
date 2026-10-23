@@ -15,7 +15,8 @@ AR_FLAGS   = ruv
 TIDY       = rm -f sta*
 VERBOSE    = @VERBOSE@
 CC         = gcc -c
-CFLAGS     = -g -O0 -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration
+# Pre-C99 DPS sources call undeclared functions; keep that a warning.
+CFLAGS     = -g -O0  -Wno-error=implicit-function-declaration
 RANLIB     = ranlib
 
 # 	location of the modified DPS libraries and source code

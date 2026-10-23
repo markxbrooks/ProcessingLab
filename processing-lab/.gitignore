@@ -6,7 +6,7 @@ cmake_install.cmake
 CTestTestfile.cmake
 *.a
 *.o
-/mosflm_cpp_cli
+/processinglab_dev
 # Only ignore test binaries at repo root (build outputs); never the sources.
 /test_*
 /test_*.dSYM/

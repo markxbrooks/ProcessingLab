@@ -53,4 +53,4 @@
 # D3 INTEG3: StandardProfileFitter (learned Rossmann global profile);
 # CTest insulin_profile. Multi-region NMASKS still future work.
 # D5 CONTROL: cpp_process.in (MATRIX from this file) → ControlSession /
-# mosflm_cpp_cli run; CTest insulin_control (no Fortran CONTROL).
+# ProcessingLab; CTest insulin_control (no Fortran CONTROL).

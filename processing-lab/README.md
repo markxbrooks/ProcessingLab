@@ -9,7 +9,7 @@ C++ computational core for **ProcessingLab** (MOSFLM port). See
 **`ControlSession`** + **`ProcessingLab`** (default release binary; no
 amalgamation; `.exe` on Windows) + LP + C ABI + MTZ + pure-C++ `ProcessPipeline`.
 F77 oracle remains `ipmosflm` (`make fortran-oracle`). Oracle splice library
-`mosflm_predict_hook` only with `-DMOSFLM_FORTRAN_ORACLE=ON`. CTests include
+`processinglab_predict_hook` only with `-DMOSFLM_FORTRAN_ORACLE=ON`. CTests include
 `control_session`, `insulin_control`, `integrationlab`, `ipmosflm_perf`.
 
 Phase A–D table and vertical-slice checklist: [`../porting.md`](../porting.md)
@@ -25,7 +25,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 #   cmake -S . -B build -DMOSFLM_FORTRAN_ORACLE=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
-# Install ProcessingLab + mosflm_cpp_cli:
+# Install ProcessingLab (processinglab_dev stays in build/):
 #   cmake --install build --prefix /path/to/prefix
 ```
 
@@ -42,20 +42,20 @@ CCP4) enables `Hdf5ImageReader` for Dectris Eiger NeXus masters
 
 ## CLI
 
+`processinglab_dev` is a developer diagnostics tool (fixtures, smoke
+checks); it is not installed. Use `ProcessingLab` to process data.
+
 ```bash
-./build/mosflm_cpp_cli version
-./build/mosflm_cpp_cli predict-still /tmp/still.dump
-./build/mosflm_cpp_cli predict-osc /tmp/osc.dump
-./build/mosflm_cpp_cli vertical-slice /tmp/slice.mtz
-./build/mosflm_cpp_cli cbf-slice testdata/cbf/sample_minicbf.cbf /tmp/cbf.mtz
-./build/mosflm_cpp_cli profile-fit /tmp/profile.mtz
-./build/mosflm_cpp_cli profile-fit-cbf testdata/cbf/sample_minicbf.cbf /tmp/pf.mtz
+./build/processinglab_dev version
+./build/processinglab_dev predict-still /tmp/still.dump
+./build/processinglab_dev predict-osc /tmp/osc.dump
+./build/processinglab_dev vertical-slice /tmp/slice.mtz
+./build/processinglab_dev cbf-slice testdata/cbf/sample_minicbf.cbf /tmp/cbf.mtz
+./build/processinglab_dev profile-fit /tmp/profile.mtz
+./build/processinglab_dev profile-fit-cbf testdata/cbf/sample_minicbf.cbf /tmp/pf.mtz
 # Requires CCP4 insulin SMV (or MOSFLM_IMAGE / CCP4 env):
-./build/mosflm_cpp_cli process-insulin   # → insulin_cpp_process.mtz
-./build/mosflm_cpp_cli process-insulin /path/to/insulin_1_001.img /tmp/out.mtz
-# Keyword-driven PROCESS (D5):
-./build/mosflm_cpp_cli run testdata/images/known_indexed/cpp_process.in \
-  --image /path/to/insulin_1_001.img /tmp/control.mtz
+./build/processinglab_dev process-insulin   # → insulin_cpp_process.mtz
+./build/processinglab_dev process-insulin /path/to/insulin_1_001.img /tmp/out.mtz
 # Default release binary (D6/E; ProcessingLab.exe on Windows):
 ./build/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   testdata/images/known_indexed/cpp_process.in

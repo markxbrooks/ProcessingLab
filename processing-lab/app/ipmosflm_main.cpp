@@ -250,8 +250,8 @@ void emit_autoindex_dump(const mosflm::control::ControlState& state) {
     try {
         std::ofstream out(
             state.output_directory.empty()
-                ? std::filesystem::path("ProcessingLabIndex.txt")
-                : state.output_directory / "ProcessingLabIndex.txt"
+                ? std::filesystem::path("index.log")
+                : state.output_directory / "index.log"
         );
         if (out) {
             out << std::setprecision(10);
@@ -566,7 +566,7 @@ int run_command(int argc, char** argv) {
             const auto runs = session.run_stream(in, img_override, "");
             report_runs(session, runs, dir / "process.mtz");
             record->add_output(dir / "process.mtz", "mtz");
-            record->add_output(dir / "ProcessingLabIndex.txt", "index_summary");
+            record->add_output(dir / "index.log", "index_summary");
             record->add_output(dir / "process.log", "log");
             record->complete();
             print_end();
@@ -888,7 +888,7 @@ int main(int argc, char** argv) {
         report_runs(session, runs, out_mtz);
         if (record) {
             record->add_output(out_mtz, "mtz");
-            record->add_output(*output_dir / "ProcessingLabIndex.txt", "index_summary");
+            record->add_output(*output_dir / "index.log", "index_summary");
             if (log_path) {
                 record->add_output(*log_path, "log");
             }

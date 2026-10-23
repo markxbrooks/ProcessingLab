@@ -84,7 +84,7 @@
 /* #undef STACK_DIRECTION */
 
 /* Define if you have the ANSI C header files. */
-#define STDC_HEADERS 1
+/* #undef STDC_HEADERS */
 
 /* Define to empty if `const' does not conform to ANSI C. */
 /* #undef const */

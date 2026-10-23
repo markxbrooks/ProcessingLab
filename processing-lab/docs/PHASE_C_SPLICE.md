@@ -42,7 +42,7 @@ writes `/GENDATA/` + `/IOSP/`.
 
 ```bash
 cmake -S processing-lab -B processing-lab/build -DMOSFLM_WITH_FORTRAN=ON
-cmake --build processing-lab/build --target mosflm_predict_hook
+cmake --build processing-lab/build --target processinglab_predict_hook
 cd mosflm
 rm -f mosflm_all_ip_inc_noX.o
 make MOSFLM_CPP_PREDICT=1 ipmosflm

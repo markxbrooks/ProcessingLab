@@ -279,10 +279,10 @@ struct GoObserver {
 /// verbs (``REFIX``, …) throw. Other unknown keywords warn once then continue.
 class ControlSession {
 public:
-    /// Register DPS AUTOINDEX implementation (from ``mosflm_indexing``).
+    /// Register DPS AUTOINDEX implementation (from ``processinglab_indexing``).
     static void register_autoindex_runner(AutoIndexRunner runner);
 
-    /// Register DiffractionLab-style FINDSPOTS (from ``mosflm_indexing``).
+    /// Register DiffractionLab-style FINDSPOTS (from ``processinglab_indexing``).
     static void register_findspots_runner(FindSpotsRunner runner);
 
     /// Parse one logical line (comments stripped). Throws on malformed

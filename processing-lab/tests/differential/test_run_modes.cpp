@@ -11,6 +11,7 @@
  *   - CONTROL script mode with ``--output-dir``
  *   - run records: input.json provenance, process.json lifecycle (completed
  *     and failed), process.md
+ *   - --run-mode xds / xia2 / mosflm and the inputs each requires
  *
  * Every run happens in ``<build>/test_output/run_modes``; the test checks that
  * nothing is written into ``testdata/run_modes`` or next to the image.
@@ -93,7 +94,7 @@ bool contains(const std::string& text, const std::string& what) {
 /// The six standard outputs, with an MTZ of usable size.
 void check_outputs(const fs::path& dir, const std::string& spots, const std::string& label) {
     for (const std::string& f : std::vector<std::string>{"process.log", "process.mtz", "XPARM.XDS",
-                                                         "GXPARM.XDS", "ProcessingLabIndex.txt", spots,
+                                                         "GXPARM.XDS", "index.log", spots,
                                                          "input.json", "process.json", "process.md"}) {
         CHECK_MSG(fs::exists(dir / f), label + ": missing " + f);
     }
@@ -223,6 +224,26 @@ int main() {
         const std::string ij = slurp(work / "xds" / "input.json");
         CHECK(contains(ij, "\"source\": \"xds_inp\""));
         CHECK(contains(ij, "\"overrides\": [\n        {\n          \"value\": 160,\n          \"source\": \"image_header\""));
+    }
+
+    // 10. --run-mode: recorded where parameters come from; inputs that do
+    //     not match the mode are refused before anything is created.
+    {
+        CHECK(contains(slurp(work / "xds" / "input.json"), "\"run_mode\": \"RunMode.PROCESSINGLAB\""));
+        CHECK(contains(slurp(work / "script" / "input.json"), "\"run_mode\": \"RunMode.MOSFLM\""));
+        CHECK_EQ(run(work, "run --run-mode xds --xds-inp insulin_XDS.INP --output-dir mode_xds",
+                     "mode_xds.out"), 0);
+        CHECK(contains(slurp(work / "mode_xds" / "input.json"), "\"run_mode\": \"RunMode.XDS\""));
+        CHECK(contains(slurp(work / "mode_xds" / "process.log"), "Run mode:        RunMode.XDS"));
+        CHECK_EQ(run(work, "run --run-mode xia2 --xinfo insulin.xinfo --output-dir mode_xia2",
+                     "mode_xia2.out"), 0);
+        CHECK(contains(slurp(work / "mode_xia2" / "process.md"), "`RunMode.XIA2`"));
+        CHECK_EQ(run(work, "run --run-mode xds --image " + img + " --output-dir mode_refused",
+                     "mode_refused.out"), 2);
+        CHECK(contains(slurp(work / "mode_refused.out"), "RunMode.XDS needs --xds-inp"));
+        CHECK_EQ(run(work, "run --run-mode mosflm --image " + img + " --output-dir mode_refused",
+                     "mode_mosflm.out"), 2);
+        CHECK(!fs::exists(work / "mode_refused"));
     }
 
     // Nothing written into the fixtures or next to the image.

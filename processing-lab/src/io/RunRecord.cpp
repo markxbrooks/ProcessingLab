@@ -325,7 +325,7 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
         ix["rmsd_hkl"] = st.autoindex_rmsd_hkl;
         doc_["indexing"] = Json(Json::Object{{"selected_solution", std::move(ix)}});
         add_output(control::output_path(st, "XPARM.XDS"), "xparm");
-        add_output(control::output_path(st, "ProcessingLabIndex.txt"), "index_summary");
+        add_output(control::output_path(st, "index.log"), "index_summary");
     }
     if (r.ran_process) {
         Json ref = Json::object();

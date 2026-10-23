@@ -7,10 +7,10 @@ mode. The test is skipped if the image is missing.
 
 | File | Mode |
 | ---- | ---- |
-| `insulin_XDS.INP` | `run --xds-inp` (cell, symmetry, geometry; names the image) |
-| `insulin.xinfo` | `run --xinfo` with no `--image` |
+| `insulin_XDS.INP` | `run --xds-inp` (cell, symmetry, geometry; names the image); also `run --run-mode xds` |
+| `insulin.xinfo` | `run --xinfo` with no `--image`; also `run --run-mode xia2` |
 | `insulin_two_sweeps.xinfo` | `run --xinfo` with two sweeps: needs `--sweep`; each sweep names its own wavelength |
-| `process.in` | CONTROL script mode with `--output-dir` |
+| `process.in` | CONTROL script mode with `--output-dir` (`RunMode.MOSFLM`) |
 
 `@IMAGE_DIR@` in the import files is replaced with the insulin image's
 directory. The test writes the filled-in copies, and every output, under

@@ -17,7 +17,7 @@ each `H K L`; `ROT` is the reflection rotation angle. These are the raw
 positional oracle for a future `PREDICT` differential test.
 
 `predict_still.dump` / `predict_osc.dump` remain the synthetic analytical
-fixtures (`tools/generate_synthetic_known_indexed.sh`, `mosflm_cpp_cli`); they
+fixtures (`tools/generate_synthetic_known_indexed.sh`, `processinglab_dev`); they
 are **not** from `ipmosflm`.
 
 ## Differentials

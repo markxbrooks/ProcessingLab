@@ -7,11 +7,20 @@ then writes unmerged MTZ plus XDS-style orientation snapshots.
 It does **not** run XDS. `--xds-inp` and `--xinfo` only parse those files and
 seed CONTROL. Native XDS binaries are optional and unused at runtime.
 
-Build the binary with `make cpp`. The install path is `bin/ProcessingLab`.
+## Build and install
 
 ```bash
+./configure --prefix=$HOME/.local   # default prefix: the CCP4 tree ($CCP4)
+make                                # → bin/ProcessingLab in the source tree
+make install                        # → $(prefix)/bin/ProcessingLab
 ./bin/ProcessingLab --help
 ```
+
+`configure` needs `$CCP4` set, or `--with-ccp4-prefix=/path/to/ccp4`.
+`make` skips DPS autoindexing, with a warning, when gfortran is missing.
+`make install` only copies the binary `make` built. Use `sudo` for
+`make install` alone, and only when the prefix needs it. `make uninstall`
+removes it again.
 
 ## Quick start: `ProcessingLab run`
 
@@ -33,6 +42,7 @@ script. The image headers supply the experiment metadata; XDS.INP and
 | `--xds-inp PATH` | Import XDS.INP. |
 | `--xinfo PATH` | Import Xia2 `.xinfo`. |
 | `--sweep NAME` | Which `.xinfo` sweep, when it has several (required then). |
+| `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
 | `--help`, `--version` | Usage, build version. |
 
 **Metadata precedence**, per field, lowest to highest: image header, XDS.INP,
@@ -59,11 +69,45 @@ for indexing come from the first 50 frames of the range. With a known cell
 lost in autoindexing. For anything else (fixed matrix, resolution limits,
 `NPROC`, …) use a CONTROL script as below.
 
+## Run modes (`--run-mode`)
+
+Every run has a run mode: where its parameters come from. It is written to
+`process.log`, to `input.json` (`run_mode`, `parameter_source`) and to
+`process.md`. Inputs that contradict the mode are refused before any
+processing.
+
+| `--run-mode` | Shown as | Parameters from | Requires |
+| ------------ | -------- | --------------- | -------- |
+| `processinglab` | `RunMode.PROCESSINGLAB` | Image headers, overridden per field by any `--xds-inp` / `--xinfo` | Nothing. Default for `run`. |
+| `xds` | `RunMode.XDS` | `XDS.INP`; headers fill unset fields | `run` with `--xds-inp`; no `--xinfo` / `--sweep` |
+| `xia2` | `RunMode.XIA2` | Xia2 `.xinfo`; headers fill unset fields | `run` with `--xinfo`; no `--xds-inp` |
+| `mosflm` | `RunMode.MOSFLM` | MOSFLM CONTROL keywords | A CONTROL script (no `run`). Default for scripts. |
+
+Values are case-insensitive.
+
+```bash
+ProcessingLab run --run-mode xds --xds-inp /data/XDS.INP --range 1:180
+ProcessingLab run --run-mode xia2 --xinfo automatic.xinfo --sweep SWEEP1
+ProcessingLab --run-mode mosflm --image /data/sweep_0001.cbf script.in
+```
+
+```text
+ Run mode:        RunMode.XDS  (parameters from XDS.INP (--xds-inp); image headers fill unset fields)
+```
+
+Mismatches fail with what to change, for example:
+
+```text
+ProcessingLab run: RunMode.XDS needs --xds-inp XDS.INP
+ProcessingLab run: RunMode.XIA2 takes parameters from the .xinfo only; drop --xds-inp or use --run-mode xds
+ProcessingLab: RunMode.XDS is for 'ProcessingLab run'; a CONTROL script is RunMode.MOSFLM
+```
+
 ## Invocation
 
 ```text
 ProcessingLab run [options]          (see above)
-ProcessingLab [HKLOUT out.mtz] [--image img]
+ProcessingLab [HKLOUT out.mtz] [--image img] [--run-mode mosflm]
               [--xinfo file.xinfo] [--xds-inp XDS.INP]
               [--xparm XPARM.XDS] [--output-dir DIR] [script.in]
 ```
@@ -79,6 +123,7 @@ the session.
 | `--xds-inp path` | Parse `XDS.INP` into CONTROL (see below). |
 | `--xinfo path` | Parse Xia2 `.xinfo` into CONTROL (first sweep and the wavelength it names). `run --sweep` selects another. |
 | `--xparm path` | Parse `XPARM.XDS` / `GXPARM.XDS` into `CELL`, `SYMMETRY`, geometry, and `MATRIX`. Alias `--gxparm`. |
+| `--run-mode mosflm` | Optional: a script run is `RunMode.MOSFLM` (parameters from MOSFLM CONTROL keywords), recorded in the log and `input.json`. Other modes are refused for scripts. |
 | `--output-dir DIR` | New directory (must not exist) for `process.log`, the MTZ, spot lists, `XPARM.XDS`, `GXPARM.XDS` and the run records (`input.json`, `process.json`, `process.md`). Relative paths in the script (`DIRECTORY`, `IMAGE`) still resolve against the current directory. |
 | `script.in` | CONTROL file. Lines starting with `!` are comments. |
 

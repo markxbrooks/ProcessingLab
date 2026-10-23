@@ -5,33 +5,43 @@ Progressive C++ port of the MOSFLM diffraction-processing core.
 ![ProcessingLab Logo](resources/ProcessingLabLogo.png)
 
 
-**Phase D Done:** default build/install is the C++ core. The release binary is
-**`ProcessingLab`** (`ProcessingLab.exe` on Windows) — a thin CONTROL →
-PROCESS driver that does **not** link the Fortran amalgamation. Autotools
-`mosflm/` remains an optional scientific oracle named **`ipmosflm`** (F77).
 
-| Path | Role |
-| ---- | ---- |
-| [`processing-lab`](processing-lab/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
-| [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle** → `bin/ipmosflm`) |
-| `bin/ProcessingLab` | C++ CONTROL binary (default; `.exe` on Windows) |
-| `bin/mosflm_cpp_cli` | Full C++ CLI |
-| `bin/ipmosflm` | F77 oracle only (`make fortran-oracle`) |
+## Build and install
 
-## Quick start (default)
+Requirements: CMake ≥ 3.24, a C++20 compiler, ZLIB and a CCP4 installation
+(`configure` reads `$CCP4`). Optional: gfortran, for DPS autoindexing; HDF5,
+for Eiger/NeXus masters; and FFTW.
 
 ```bash
-make cpp          # builds cbf/lib/libcbf.a then processing-lab
-make test         # ctest in processing-lab/build
-./bin/ProcessingLab version
-./bin/mosflm_cpp_cli process-insulin
+./configure --prefix=$HOME/.local   # or --with-ccp4-prefix=/Applications/ccp4-9
+make                                # → bin/ProcessingLab
+make test                           # ctest in processing-lab/build
+make install                        # → $(prefix)/bin/ProcessingLab
+```
+
+- **`./configure`:** without `--prefix`, it installs into the CCP4 tree
+  (`$CCP4/bin`). `--with-ccp4-prefix` names the CCP4 tree when `$CCP4` is
+  not set.
+- **`make`:** builds CBFlib, the DPS archives (skipped with a warning when
+  gfortran is missing; then `make cpp-core` builds without autoindexing) and
+  `ProcessingLab`.
+- **`make install`:** copies only what `make` built, and stops if you
+  haven't run `make` yet. Run `make` as yourself; if the prefix needs root,
+  use `sudo` only for `make install`, so nothing in the tree ends up owned
+  by root.
+- **Removing it:** `make uninstall` takes it out again.
+
+The developer tool `processinglab_dev` stays in `processing-lab/build/` and
+is never installed. If you configure `processing-lab` with CMake directly,
+build CBFlib first: `make -C cbf`.
+
+```bash
+./bin/ProcessingLab --version
 ./bin/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
   processing-lab/testdata/images/known_indexed/cpp_process.in
 # C++ vs F77 PROCESS wall-time (CCP4 ipmosflm by default):
 ./processing-lab/tools/bench_ipmosflm_perf.sh
 ```
-
-If configuring `processing-lab` directly, build CBFlib first: `make -C cbf`.
 
 Top-level CMake (`-S .`) adds `processing-lab` when `PROCESSINGLAB_BUILD_CPP=ON`
 (default).
@@ -47,7 +57,7 @@ make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite ProcessingLab)
 #   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm
 # Experimental C++ PREDICT splice into the oracle:
 #   cmake -S processing-lab -B processing-lab/build -DMOSFLM_FORTRAN_ORACLE=ON
-#   cmake --build processing-lab/build --target mosflm_predict_hook
+#   cmake --build processing-lab/build --target processinglab_predict_hook
 #   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm
 ```
 
@@ -80,6 +90,9 @@ There are two ways to run ProcessingLab:
 
 # An .xinfo with several sweeps needs --sweep
 ./bin/ProcessingLab run --xinfo automatic.xinfo --sweep SWEEP1
+
+# State where the parameters come from: here, only XDS.INP
+./bin/ProcessingLab run --run-mode xds --xds-inp XDS.INP
 ```
 
 | Option | Role |
@@ -90,6 +103,37 @@ There are two ways to run ProcessingLab:
 | `--xds-inp PATH` | Import `XDS.INP`. |
 | `--xinfo PATH` | Import a Xia2 `.xinfo`. |
 | `--sweep NAME` | Which `.xinfo` sweep, when it has several. |
+| `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
+
+### Run modes (`--run-mode`)
+
+`--run-mode` states where a run's parameters come from, so a log or report
+shows it at a glance. ProcessingLab refuses inputs that contradict the mode.
+
+| Mode | Shown as | Parameters from | Requires |
+| ---- | -------- | --------------- | -------- |
+| `processinglab` | `RunMode.PROCESSINGLAB` | Image headers, overridden per field by any `--xds-inp` / `--xinfo` | Nothing (default for `run`) |
+| `xds` | `RunMode.XDS` | `XDS.INP`; headers fill unset fields | `--xds-inp`; no `--xinfo` / `--sweep` |
+| `xia2` | `RunMode.XIA2` | Xia2 `.xinfo`; headers fill unset fields | `--xinfo`; no `--xds-inp` |
+| `mosflm` | `RunMode.MOSFLM` | MOSFLM CONTROL keywords | A CONTROL script, not `run` (default for scripts) |
+
+```bash
+./bin/ProcessingLab run --image sweep_0001.cbf                    # RunMode.PROCESSINGLAB
+./bin/ProcessingLab run --run-mode xds --xds-inp XDS.INP          # RunMode.XDS
+./bin/ProcessingLab run --run-mode xia2 --xinfo automatic.xinfo   # RunMode.XIA2
+./bin/ProcessingLab --run-mode mosflm --image img.cbf script.in   # RunMode.MOSFLM
+```
+
+The mode is recorded in `process.log` (`Run mode:  RunMode.XDS (parameters
+from …)`), in `input.json` (`run_mode`, `parameter_source`) and in
+`process.md`. A mismatch fails before any processing, with what to change:
+
+```text
+ProcessingLab run: RunMode.XDS needs --xds-inp XDS.INP
+ProcessingLab: RunMode.XDS is for 'ProcessingLab run'; a CONTROL script is RunMode.MOSFLM
+```
+
+### Metadata precedence
 
 Metadata precedence, per field, lowest to highest: image header, `XDS.INP`,
 `.xinfo`, command line. A source only overrides the fields it sets.
@@ -150,6 +194,9 @@ EOF
   Without `--output-dir`, the log, MTZ and `ProcessingLabIndex.txt` go in
   the current directory, and spot lists, `XPARM.XDS` and `GXPARM.XDS` go in
   `DIRECTORY`.
+- **Run mode:** a script run is `RunMode.MOSFLM`: parameters come from its
+  MOSFLM keywords. `--run-mode mosflm` says so explicitly; other modes are
+  refused here.
 - **Imports:** `--xds-inp`, `--xinfo` and `--xparm XPARM.XDS` fill CONTROL
   before the script runs, in that order, and the script's keywords override
   them.
@@ -196,6 +243,19 @@ library path itself and prints the end of the `ipmosflm` log if a step fails:
 - `testdata/oracle/known_indexed_cpp_predict/insulin_1_001.mtz`: build
   `ipmosflm` with `MOSFLM_CPP_PREDICT=1` (see above), run the script with
   `IPMOSFLM=` pointing at it, and copy the MTZ there.
+
+# Binaries
+**`ProcessingLab`** (`ProcessingLab.exe` on Windows) — a thin CONTROL →
+PROCESS driver that does **not** link the Fortran amalgamation. Autotools
+`mosflm/` remains an optional scientific oracle named **`ipmosflm`** (F77).
+
+| Path | Role |
+| ---- | ---- |
+| [`processing-lab`](processing-lab/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
+| [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle** → `bin/ipmosflm`) |
+| `bin/ProcessingLab` | C++ CONTROL binary (default; `.exe` on Windows) |
+| `processing-lab/build/processinglab_dev` | Developer diagnostics (not installed) |
+| `bin/ipmosflm` | F77 oracle only (`make fortran-oracle`) |
 
 ## License
 

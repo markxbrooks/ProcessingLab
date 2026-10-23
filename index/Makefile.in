@@ -15,7 +15,8 @@ AR_FLAGS   = @AR_FLAGS@
 TIDY       = @TIDY@
 VERBOSE    = @VERBOSE@
 CC         = @CC@ -c
-CFLAGS     = @CFLAGS@
+# Pre-C99 DPS sources call undeclared functions; keep that a warning.
+CFLAGS     = @CFLAGS@ -Wno-error=implicit-function-declaration
 RANLIB     = @RANLIB@
 
 # 	location of the modified DPS libraries and source code

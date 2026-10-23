@@ -5,14 +5,15 @@
 #
 #
 # Version 0.1
-STDFLAGS = -g -O0 -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration
+STDFLAGS = -g -O0 
 UTIL_INC = ../../../src/dps/utils
 LIBDIR = ../../../lib
 BIN = ../../../bin
 F77 = gfortran -c
 FFLAGS = -g -O2 -fno-second-underscore -fallow-argument-mismatch
 CC = gcc -c
-CFLAGS = ${STDFLAGS} -I${UTIL_INC}
+# Pre-C99 DPS sources call undeclared functions; keep that a warning.
+CFLAGS = ${STDFLAGS} -I${UTIL_INC} -Wno-error=implicit-function-declaration
 AR_FLAGS = ruv
 
 IOBJS = index.o error_exit.o \

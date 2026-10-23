@@ -24,7 +24,7 @@ option(MOSFLM_WITH_FORTRAN
 )
 
 option(MOSFLM_FORTRAN_ORACLE
-    "Build mosflm_predict_hook for Autotools amalgamation splice (opt-in; D6)"
+    "Build processinglab_predict_hook for Autotools amalgamation splice (opt-in; D6)"
     OFF
 )
 
@@ -265,9 +265,9 @@ if(MOSFLM_HAS_HDF5)
     )
 endif()
 
-add_library(mosflm_geometry ${MOSFLM_GEOMETRY_SOURCES})
+add_library(processinglab_geometry ${MOSFLM_GEOMETRY_SOURCES})
 
-target_include_directories(mosflm_geometry
+target_include_directories(processinglab_geometry
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${gemmi_SOURCE_DIR}/include
@@ -275,7 +275,7 @@ target_include_directories(mosflm_geometry
         ${MOSFLM_CBF_INCLUDE_DIR}
 )
 
-target_link_libraries(mosflm_geometry
+target_link_libraries(processinglab_geometry
     PUBLIC
         Eigen3::Eigen
         ZLIB::ZLIB
@@ -284,34 +284,34 @@ target_link_libraries(mosflm_geometry
         m
 )
 
-target_compile_definitions(mosflm_geometry
+target_compile_definitions(processinglab_geometry
     PUBLIC
         GEMMI_WRITE_IMPLEMENTATION
 )
 
 if(MOSFLM_HAS_OPENMP)
-    target_link_libraries(mosflm_geometry PUBLIC OpenMP::OpenMP_CXX)
-    target_compile_definitions(mosflm_geometry
+    target_link_libraries(processinglab_geometry PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(processinglab_geometry
         PUBLIC PROCESSINGLAB_HAS_OPENMP=1
     )
 endif()
 
 if(MOSFLM_HAS_HDF5)
-    target_include_directories(mosflm_geometry PRIVATE
+    target_include_directories(processinglab_geometry PRIVATE
         ${HDF5_INCLUDE_DIRS}
         ${MOSFLM_IPMOSFLM_ROOT}/lz4
         ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle
     )
     # ${HDF5_LIBRARIES} is often only libhdf5; H5LT lives in libhdf5_hl.
-    target_link_libraries(mosflm_geometry PRIVATE ${HDF5_LIBRARIES})
+    target_link_libraries(processinglab_geometry PRIVATE ${HDF5_LIBRARIES})
     if(TARGET hdf5::hdf5_hl)
-        target_link_libraries(mosflm_geometry PRIVATE hdf5::hdf5_hl)
+        target_link_libraries(processinglab_geometry PRIVATE hdf5::hdf5_hl)
     elseif(HDF5_HL_LIBRARIES)
-        target_link_libraries(mosflm_geometry PRIVATE ${HDF5_HL_LIBRARIES})
+        target_link_libraries(processinglab_geometry PRIVATE ${HDF5_HL_LIBRARIES})
     else()
-        target_link_libraries(mosflm_geometry PRIVATE hdf5_hl)
+        target_link_libraries(processinglab_geometry PRIVATE hdf5_hl)
     endif()
-    target_compile_definitions(mosflm_geometry PUBLIC MOSFLM_HAS_HDF5=1)
+    target_compile_definitions(processinglab_geometry PUBLIC MOSFLM_HAS_HDF5=1)
     # Vendored filter sources are C99.
     set_source_files_properties(
         ${MOSFLM_IPMOSFLM_ROOT}/lz4/lz4.c
@@ -343,8 +343,8 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             src/indexing/ControlFindSpots.cpp
         )
     endif()
-    add_library(mosflm_indexing ${MOSFLM_INDEXING_SOURCES})
-    target_include_directories(mosflm_indexing
+    add_library(processinglab_indexing ${MOSFLM_INDEXING_SOURCES})
+    target_include_directories(processinglab_indexing
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/include
         PRIVATE
@@ -354,21 +354,21 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             ${MOSFLM_IPMOSFLM_ROOT}/src/dps/index
             ${MOSFLM_IPMOSFLM_ROOT}/src/dps/util
     )
-    target_link_libraries(mosflm_indexing
+    target_link_libraries(processinglab_indexing
         PUBLIC
-            mosflm_geometry
+            processinglab_geometry
         PRIVATE
             m
     )
     if(MOSFLM_HAS_FFTW)
         if(TARGET PkgConfig::FFTW3)
-            target_link_libraries(mosflm_indexing PRIVATE PkgConfig::FFTW3)
+            target_link_libraries(processinglab_indexing PRIVATE PkgConfig::FFTW3)
         else()
-            target_include_directories(mosflm_indexing PRIVATE
+            target_include_directories(processinglab_indexing PRIVATE
                 ${FFTW3_INCLUDE_DIR})
-            target_link_libraries(mosflm_indexing PRIVATE ${FFTW3_LIBRARY})
+            target_link_libraries(processinglab_indexing PRIVATE ${FFTW3_LIBRARY})
         endif()
-        target_compile_definitions(mosflm_indexing PRIVATE MOSFLM_HAS_FFTW=1)
+        target_compile_definitions(processinglab_indexing PRIVATE MOSFLM_HAS_FFTW=1)
     endif()
     # findlen.f is required by ind_gen_direct but not in libdps_index.a.
     set(MOSFLM_FINDLEN_F "${MOSFLM_IPMOSFLM_ROOT}/src/dps/index/findlen.f")
@@ -384,7 +384,7 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             list(APPEND MOSFLM_DPS_LINK_LIBS ${MOSFLM_DPS_FFTPACK_LIB})
         endif()
         if(MOSFLM_HAS_FORTRAN AND EXISTS "${MOSFLM_FINDLEN_F}")
-            target_sources(mosflm_indexing PRIVATE ${MOSFLM_FINDLEN_F})
+            target_sources(processinglab_indexing PRIVATE ${MOSFLM_FINDLEN_F})
             set_source_files_properties(${MOSFLM_FINDLEN_F}
                 PROPERTIES Fortran_FORMAT FIXED
             )
@@ -399,16 +399,16 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
     endif()
     # Propagate DPS archives to executables (PUBLIC) so they appear on the
     # final link line; ProcessingLab wraps them for circular resolution.
-    target_link_libraries(mosflm_indexing PUBLIC ${MOSFLM_DPS_LINK_LIBS})
+    target_link_libraries(processinglab_indexing PUBLIC ${MOSFLM_DPS_LINK_LIBS})
 endif()
 
-add_executable(mosflm_cpp_cli
+add_executable(processinglab_dev
     app/main.cpp
 )
 
-target_link_libraries(mosflm_cpp_cli
+target_link_libraries(processinglab_dev
     PRIVATE
-        mosflm_geometry
+        processinglab_geometry
 )
 
 # Default release binary (C++ CONTROL). Distinct from F77 ``ipmosflm`` oracle.
@@ -418,22 +418,22 @@ add_executable(ProcessingLab
 )
 target_link_libraries(ProcessingLab
     PRIVATE
-        mosflm_geometry
+        processinglab_geometry
 )
-if(TARGET mosflm_indexing AND MOSFLM_HAS_DPS_INDEXER)
-    # Circular static deps: libdps_index ↔ libdps ↔ findlen_ in mosflm_indexing.
+if(TARGET processinglab_indexing AND MOSFLM_HAS_DPS_INDEXER)
+    # Circular static deps: libdps_index ↔ libdps ↔ findlen_ in processinglab_indexing.
     # LINK_GROUP:RESCAN needs GNU ld (--start-group); Apple ld does not support
     # that feature for CXX, so repeat the archive list instead.
     if(APPLE)
         target_link_libraries(ProcessingLab PRIVATE
-            mosflm_indexing
+            processinglab_indexing
             ${MOSFLM_DPS_LINK_LIBS}
-            mosflm_indexing
+            processinglab_indexing
             ${MOSFLM_DPS_LINK_LIBS}
         )
     else()
         target_link_libraries(ProcessingLab PRIVATE
-            "$<LINK_GROUP:RESCAN,mosflm_indexing,${MOSFLM_DPS_LINK_LIBS}>"
+            "$<LINK_GROUP:RESCAN,processinglab_indexing,${MOSFLM_DPS_LINK_LIBS}>"
         )
     endif()
     target_compile_definitions(ProcessingLab PRIVATE MOSFLM_HAS_INDEXING=1)
@@ -442,10 +442,10 @@ set_target_properties(ProcessingLab PROPERTIES
     OUTPUT_NAME ProcessingLab
 )
 
-install(TARGETS mosflm_cpp_cli ProcessingLab
+install(TARGETS ProcessingLab
     RUNTIME DESTINATION bin
 )
-install(TARGETS mosflm_geometry
+install(TARGETS processinglab_geometry
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
 )
@@ -478,79 +478,79 @@ if(BUILD_TESTING)
     add_executable(test_unit_cell
         tests/unit/test_unit_cell.cpp
     )
-    target_link_libraries(test_unit_cell PRIVATE mosflm_geometry)
+    target_link_libraries(test_unit_cell PRIVATE processinglab_geometry)
     add_test(NAME unit_cell COMMAND test_unit_cell)
 
     add_executable(test_cell_fix
         tests/unit/test_cell_fix.cpp
     )
-    target_link_libraries(test_cell_fix PRIVATE mosflm_geometry)
+    target_link_libraries(test_cell_fix PRIVATE processinglab_geometry)
     add_test(NAME cell_fix COMMAND test_cell_fix)
 
     add_executable(test_metric_tensor_projector
         tests/unit/test_metric_tensor_projector.cpp
     )
-    target_link_libraries(test_metric_tensor_projector PRIVATE mosflm_geometry)
+    target_link_libraries(test_metric_tensor_projector PRIVATE processinglab_geometry)
     add_test(NAME metric_tensor_projector COMMAND test_metric_tensor_projector)
 
     add_executable(test_rotation_lp
         tests/unit/test_rotation_lp.cpp
     )
-    target_link_libraries(test_rotation_lp PRIVATE mosflm_geometry)
+    target_link_libraries(test_rotation_lp PRIVATE processinglab_geometry)
     add_test(NAME rotation_lp COMMAND test_rotation_lp)
 
     add_executable(test_positional_refinement
         tests/unit/test_positional_refinement.cpp
     )
-    target_link_libraries(test_positional_refinement PRIVATE mosflm_geometry)
+    target_link_libraries(test_positional_refinement PRIVATE processinglab_geometry)
     add_test(NAME positional_refinement COMMAND test_positional_refinement)
 
     add_executable(test_partial_summation
         tests/unit/test_partial_summation.cpp
     )
-    target_link_libraries(test_partial_summation PRIVATE mosflm_geometry)
+    target_link_libraries(test_partial_summation PRIVATE processinglab_geometry)
     add_test(NAME partial_summation COMMAND test_partial_summation)
 
     add_executable(test_xparm_io
         tests/unit/test_xparm_io.cpp
     )
-    target_link_libraries(test_xparm_io PRIVATE mosflm_geometry)
+    target_link_libraries(test_xparm_io PRIVATE processinglab_geometry)
     add_test(NAME xparm_io COMMAND test_xparm_io)
 
     add_executable(test_trusted_region
         tests/unit/test_trusted_region.cpp
     )
-    target_link_libraries(test_trusted_region PRIVATE mosflm_geometry)
+    target_link_libraries(test_trusted_region PRIVATE processinglab_geometry)
     add_test(NAME trusted_region COMMAND test_trusted_region)
 
     add_executable(test_detector_init
         tests/unit/test_detector_init.cpp
     )
-    target_link_libraries(test_detector_init PRIVATE mosflm_geometry)
+    target_link_libraries(test_detector_init PRIVATE processinglab_geometry)
     add_test(NAME detector_init COMMAND test_detector_init)
 
     add_executable(test_partial_absorb
         tests/unit/test_partial_absorb.cpp
     )
-    target_link_libraries(test_partial_absorb PRIVATE mosflm_geometry)
+    target_link_libraries(test_partial_absorb PRIVATE processinglab_geometry)
     add_test(NAME partial_absorb COMMAND test_partial_absorb)
 
     add_executable(test_orientation
         tests/unit/test_orientation.cpp
     )
-    target_link_libraries(test_orientation PRIVATE mosflm_geometry)
+    target_link_libraries(test_orientation PRIVATE processinglab_geometry)
     add_test(NAME orientation COMMAND test_orientation)
 
     add_executable(test_detector
         tests/unit/test_detector.cpp
     )
-    target_link_libraries(test_detector PRIVATE mosflm_geometry)
+    target_link_libraries(test_detector PRIVATE processinglab_geometry)
     add_test(NAME detector COMMAND test_detector)
 
     add_executable(test_metric_invcel
         tests/differential/test_metric_invcel.cpp
     )
-    target_link_libraries(test_metric_invcel PRIVATE mosflm_geometry)
+    target_link_libraries(test_metric_invcel PRIVATE processinglab_geometry)
     add_test(NAME metric_invcel COMMAND test_metric_invcel)
     set_tests_properties(metric_invcel PROPERTIES
         ENVIRONMENT
@@ -560,13 +560,13 @@ if(BUILD_TESTING)
     add_executable(test_gemmi_crystal
         tests/differential/test_gemmi_crystal.cpp
     )
-    target_link_libraries(test_gemmi_crystal PRIVATE mosflm_geometry)
+    target_link_libraries(test_gemmi_crystal PRIVATE processinglab_geometry)
     add_test(NAME gemmi_crystal COMMAND test_gemmi_crystal)
 
     add_executable(test_cbf_image_reader
         tests/unit/test_cbf_image_reader.cpp
     )
-    target_link_libraries(test_cbf_image_reader PRIVATE mosflm_geometry)
+    target_link_libraries(test_cbf_image_reader PRIVATE processinglab_geometry)
     add_test(
         NAME cbf_image_reader
         COMMAND test_cbf_image_reader
@@ -576,7 +576,7 @@ if(BUILD_TESTING)
     add_executable(test_smv_image_reader
         tests/unit/test_smv_image_reader.cpp
     )
-    target_link_libraries(test_smv_image_reader PRIVATE mosflm_geometry)
+    target_link_libraries(test_smv_image_reader PRIVATE processinglab_geometry)
     add_test(
         NAME smv_image_reader
         COMMAND test_smv_image_reader
@@ -586,36 +586,36 @@ if(BUILD_TESTING)
     add_executable(test_measurement_box
         tests/unit/test_measurement_box.cpp
     )
-    target_link_libraries(test_measurement_box PRIVATE mosflm_geometry)
+    target_link_libraries(test_measurement_box PRIVATE processinglab_geometry)
     add_test(NAME measurement_box COMMAND test_measurement_box)
 
     add_executable(test_standard_profile
         tests/unit/test_standard_profile.cpp
     )
-    target_link_libraries(test_standard_profile PRIVATE mosflm_geometry)
+    target_link_libraries(test_standard_profile PRIVATE processinglab_geometry)
     add_test(NAME standard_profile COMMAND test_standard_profile)
 
     add_executable(test_profile3d
         tests/unit/test_profile3d.cpp
     )
-    target_link_libraries(test_profile3d PRIVATE mosflm_geometry)
+    target_link_libraries(test_profile3d PRIVATE processinglab_geometry)
     add_test(NAME profile3d COMMAND test_profile3d)
 
     add_executable(test_post_refinement
         tests/unit/test_post_refinement.cpp
     )
-    target_link_libraries(test_post_refinement PRIVATE mosflm_geometry)
+    target_link_libraries(test_post_refinement PRIVATE processinglab_geometry)
     add_test(NAME post_refinement COMMAND test_post_refinement)
     add_executable(test_prediction_divergence
         tests/unit/test_prediction_divergence.cpp
     )
-    target_link_libraries(test_prediction_divergence PRIVATE mosflm_geometry)
+    target_link_libraries(test_prediction_divergence PRIVATE processinglab_geometry)
     add_test(NAME prediction_divergence COMMAND test_prediction_divergence)
 
     add_executable(test_control_session
         tests/unit/test_control_session.cpp
     )
-    target_link_libraries(test_control_session PRIVATE mosflm_geometry)
+    target_link_libraries(test_control_session PRIVATE processinglab_geometry)
     add_test(
         NAME control_session
         COMMAND test_control_session
@@ -625,13 +625,13 @@ if(BUILD_TESTING)
     add_executable(test_openmp_nproc
         tests/unit/test_openmp_nproc.cpp
     )
-    target_link_libraries(test_openmp_nproc PRIVATE mosflm_geometry)
+    target_link_libraries(test_openmp_nproc PRIVATE processinglab_geometry)
     add_test(NAME openmp_nproc COMMAND test_openmp_nproc)
 
     add_executable(test_xinfo_xds_import
         tests/unit/test_xinfo_xds_import.cpp
     )
-    target_link_libraries(test_xinfo_xds_import PRIVATE mosflm_geometry)
+    target_link_libraries(test_xinfo_xds_import PRIVATE processinglab_geometry)
     add_test(
         NAME xinfo_xds_import
         COMMAND test_xinfo_xds_import
@@ -641,7 +641,7 @@ if(BUILD_TESTING)
     add_executable(test_run_record
         tests/unit/test_run_record.cpp
     )
-    target_link_libraries(test_run_record PRIVATE mosflm_geometry)
+    target_link_libraries(test_run_record PRIVATE processinglab_geometry)
     add_test(
         NAME run_record
         COMMAND test_run_record
@@ -651,7 +651,7 @@ if(BUILD_TESTING)
     add_executable(test_experiment_model
         tests/unit/test_experiment_model.cpp
     )
-    target_link_libraries(test_experiment_model PRIVATE mosflm_geometry)
+    target_link_libraries(test_experiment_model PRIVATE processinglab_geometry)
     add_test(
         NAME experiment_model
         COMMAND test_experiment_model
@@ -661,15 +661,15 @@ if(BUILD_TESTING)
     add_executable(test_data_quality_stats
         tests/unit/test_data_quality_stats.cpp
     )
-    target_link_libraries(test_data_quality_stats PRIVATE mosflm_geometry)
+    target_link_libraries(test_data_quality_stats PRIVATE processinglab_geometry)
     add_test(NAME data_quality_stats COMMAND test_data_quality_stats)
 
     add_executable(test_image_io tests/unit/test_image_io.cpp)
-    target_link_libraries(test_image_io PRIVATE mosflm_geometry)
+    target_link_libraries(test_image_io PRIVATE processinglab_geometry)
     add_test(NAME image_io COMMAND test_image_io)
 
     add_executable(test_imosflm_socket tests/unit/test_imosflm_socket.cpp)
-    target_link_libraries(test_imosflm_socket PRIVATE mosflm_geometry)
+    target_link_libraries(test_imosflm_socket PRIVATE processinglab_geometry)
     add_test(NAME imosflm_socket COMMAND test_imosflm_socket)
     set_tests_properties(cbf_image_reader PROPERTIES
         ENVIRONMENT
@@ -679,7 +679,7 @@ if(BUILD_TESTING)
     add_executable(test_predict_stub
         tests/differential/test_predict_stub.cpp
     )
-    target_link_libraries(test_predict_stub PRIVATE mosflm_geometry)
+    target_link_libraries(test_predict_stub PRIVATE processinglab_geometry)
     add_test(
         NAME predict_stub
         COMMAND test_predict_stub
@@ -693,7 +693,7 @@ if(BUILD_TESTING)
     add_executable(test_summation_integrate
         tests/differential/test_summation_integrate.cpp
     )
-    target_link_libraries(test_summation_integrate PRIVATE mosflm_geometry)
+    target_link_libraries(test_summation_integrate PRIVATE processinglab_geometry)
     add_test(
         NAME summation_integrate
         COMMAND test_summation_integrate
@@ -703,25 +703,25 @@ if(BUILD_TESTING)
     add_executable(test_dstar_rotmat
         tests/unit/test_dstar_rotmat.cpp
     )
-    target_link_libraries(test_dstar_rotmat PRIVATE mosflm_geometry)
+    target_link_libraries(test_dstar_rotmat PRIVATE processinglab_geometry)
     add_test(NAME dstar_rotmat COMMAND test_dstar_rotmat)
 
     add_executable(test_clcalc_matset
         tests/unit/test_clcalc_matset.cpp
     )
-    target_link_libraries(test_clcalc_matset PRIVATE mosflm_geometry)
+    target_link_libraries(test_clcalc_matset PRIVATE processinglab_geometry)
     add_test(NAME clcalc_matset COMMAND test_clcalc_matset)
 
     add_executable(test_vertical_slice
         tests/differential/test_vertical_slice.cpp
     )
-    target_link_libraries(test_vertical_slice PRIVATE mosflm_geometry)
+    target_link_libraries(test_vertical_slice PRIVATE processinglab_geometry)
     add_test(NAME vertical_slice COMMAND test_vertical_slice)
 
     add_executable(test_predict_osc
         tests/differential/test_predict_osc.cpp
     )
-    target_link_libraries(test_predict_osc PRIVATE mosflm_geometry)
+    target_link_libraries(test_predict_osc PRIVATE processinglab_geometry)
     add_test(
         NAME predict_osc
         COMMAND test_predict_osc
@@ -735,7 +735,7 @@ if(BUILD_TESTING)
     add_executable(test_cbf_vertical_slice
         tests/differential/test_cbf_vertical_slice.cpp
     )
-    target_link_libraries(test_cbf_vertical_slice PRIVATE mosflm_geometry)
+    target_link_libraries(test_cbf_vertical_slice PRIVATE processinglab_geometry)
     add_test(
         NAME cbf_vertical_slice
         COMMAND test_cbf_vertical_slice
@@ -750,7 +750,7 @@ if(BUILD_TESTING)
     add_executable(test_cbf_process_compare
         tests/differential/test_cbf_process_compare.cpp
     )
-    target_link_libraries(test_cbf_process_compare PRIVATE mosflm_geometry)
+    target_link_libraries(test_cbf_process_compare PRIVATE processinglab_geometry)
     add_test(
         NAME cbf_process_compare
         COMMAND test_cbf_process_compare
@@ -767,7 +767,7 @@ if(BUILD_TESTING)
     add_executable(test_run_modes
         tests/differential/test_run_modes.cpp
     )
-    target_link_libraries(test_run_modes PRIVATE mosflm_geometry)
+    target_link_libraries(test_run_modes PRIVATE processinglab_geometry)
     target_compile_definitions(test_run_modes PRIVATE
         PROCESSINGLAB_BIN="$<TARGET_FILE:ProcessingLab>"
     )
@@ -781,7 +781,7 @@ if(BUILD_TESTING)
     add_executable(test_smv_process_compare
         tests/differential/test_smv_process_compare.cpp
     )
-    target_link_libraries(test_smv_process_compare PRIVATE mosflm_geometry)
+    target_link_libraries(test_smv_process_compare PRIVATE processinglab_geometry)
     add_dependencies(test_smv_process_compare ProcessingLab)
     add_test(
         NAME smv_process_compare
@@ -803,7 +803,7 @@ if(BUILD_TESTING)
     add_executable(test_thaumatin_dials_mtz_compare
         tests/differential/test_thaumatin_dials_mtz_compare.cpp
     )
-    target_link_libraries(test_thaumatin_dials_mtz_compare PRIVATE mosflm_geometry)
+    target_link_libraries(test_thaumatin_dials_mtz_compare PRIVATE processinglab_geometry)
     add_test(
         NAME thaumatin_dials_mtz_compare
         COMMAND test_thaumatin_dials_mtz_compare
@@ -814,7 +814,7 @@ if(BUILD_TESTING)
     add_executable(test_thaumatin_profile3d
         tests/differential/test_thaumatin_profile3d.cpp
     )
-    target_link_libraries(test_thaumatin_profile3d PRIVATE mosflm_geometry)
+    target_link_libraries(test_thaumatin_profile3d PRIVATE processinglab_geometry)
     add_test(
         NAME thaumatin_profile3d
         COMMAND test_thaumatin_profile3d
@@ -826,7 +826,7 @@ if(BUILD_TESTING)
     add_executable(test_smv_dials_compare
         tests/differential/test_smv_dials_compare.cpp
     )
-    target_link_libraries(test_smv_dials_compare PRIVATE mosflm_geometry)
+    target_link_libraries(test_smv_dials_compare PRIVATE processinglab_geometry)
     add_dependencies(test_smv_dials_compare ProcessingLab)
     add_test(
         NAME smv_dials_compare
@@ -842,31 +842,31 @@ if(BUILD_TESTING)
     add_executable(test_profile_fitter
         tests/differential/test_profile_fitter.cpp
     )
-    target_link_libraries(test_profile_fitter PRIVATE mosflm_geometry)
+    target_link_libraries(test_profile_fitter PRIVATE processinglab_geometry)
     add_test(NAME profile_fitter COMMAND test_profile_fitter)
 
     add_executable(test_c_api_lp
         tests/unit/test_c_api_lp.cpp
     )
-    target_link_libraries(test_c_api_lp PRIVATE mosflm_geometry)
+    target_link_libraries(test_c_api_lp PRIVATE processinglab_geometry)
     add_test(NAME c_api_lp COMMAND test_c_api_lp)
 
     add_executable(test_c_api_contract
         tests/unit/test_c_api_contract.cpp
     )
-    target_link_libraries(test_c_api_contract PRIVATE mosflm_geometry)
+    target_link_libraries(test_c_api_contract PRIVATE processinglab_geometry)
     add_test(NAME c_api_contract COMMAND test_c_api_contract)
 
     add_executable(test_ub_from_psi
         tests/unit/test_ub_from_psi.cpp
     )
-    target_link_libraries(test_ub_from_psi PRIVATE mosflm_geometry)
+    target_link_libraries(test_ub_from_psi PRIVATE processinglab_geometry)
     add_test(NAME ub_from_psi COMMAND test_ub_from_psi)
 
     add_executable(test_lab_frame
         tests/unit/test_lab_frame.cpp
     )
-    target_link_libraries(test_lab_frame PRIVATE mosflm_geometry)
+    target_link_libraries(test_lab_frame PRIVATE processinglab_geometry)
     add_test(NAME lab_frame COMMAND test_lab_frame)
 
     if(MOSFLM_FORTRAN_TESTS)
@@ -874,7 +874,7 @@ if(BUILD_TESTING)
             fortran/mosflm_c_bind.f90
             fortran/test_fortran_c_api.f90
         )
-        target_link_libraries(test_fortran_c_api PRIVATE mosflm_geometry)
+        target_link_libraries(test_fortran_c_api PRIVATE processinglab_geometry)
         # C++ provides the ABI implementation; keep C++ as the link driver and
         # pull in the GNU Fortran runtime when needed.
         set_target_properties(test_fortran_c_api PROPERTIES
@@ -893,7 +893,7 @@ if(BUILD_TESTING)
         set_source_files_properties(fortran/test_predict_still_f77.f
             PROPERTIES Fortran_FORMAT FIXED
         )
-        target_link_libraries(test_predict_still_f77 PRIVATE mosflm_geometry)
+        target_link_libraries(test_predict_still_f77 PRIVATE processinglab_geometry)
         set_target_properties(test_predict_still_f77 PROPERTIES
             LINKER_LANGUAGE CXX
         )
@@ -907,7 +907,7 @@ if(BUILD_TESTING)
             fortran/predict_cpp_bridge.f90
             fortran/test_predict_cpp_bridge.f90
         )
-        target_link_libraries(test_predict_cpp_bridge PRIVATE mosflm_geometry)
+        target_link_libraries(test_predict_cpp_bridge PRIVATE processinglab_geometry)
         set_target_properties(test_predict_cpp_bridge PROPERTIES
             LINKER_LANGUAGE CXX
         )
@@ -920,7 +920,7 @@ if(BUILD_TESTING)
             fortran/predict_cpp_bridge.f90
             fortran/test_predict_cpp_psi.f90
         )
-        target_link_libraries(test_predict_cpp_psi PRIVATE mosflm_geometry)
+        target_link_libraries(test_predict_cpp_psi PRIVATE processinglab_geometry)
         set_target_properties(test_predict_cpp_psi PROPERTIES
             LINKER_LANGUAGE CXX
         )
@@ -934,7 +934,7 @@ if(BUILD_TESTING)
             fortran/predict_gendata_pack.f90
             fortran/test_predict_gendata_pack.f90
         )
-        target_link_libraries(test_predict_gendata_pack PRIVATE mosflm_geometry)
+        target_link_libraries(test_predict_gendata_pack PRIVATE processinglab_geometry)
         set_target_properties(test_predict_gendata_pack PROPERTIES
             LINKER_LANGUAGE CXX
             Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_gendata_mods
@@ -950,7 +950,7 @@ if(BUILD_TESTING)
             fortran/predict_cpp_hook.f90
             fortran/test_predict_cpp_hook.f90
         )
-        target_link_libraries(test_predict_cpp_hook PRIVATE mosflm_geometry)
+        target_link_libraries(test_predict_cpp_hook PRIVATE processinglab_geometry)
         set_target_properties(test_predict_cpp_hook PROPERTIES
             LINKER_LANGUAGE CXX
             Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_hook_mods
@@ -969,7 +969,7 @@ if(BUILD_TESTING)
         set_source_files_properties(fortran/test_predict_cpp_hook_f77.f
             PROPERTIES Fortran_FORMAT FIXED
         )
-        target_link_libraries(test_predict_cpp_hook_f77 PRIVATE mosflm_geometry)
+        target_link_libraries(test_predict_cpp_hook_f77 PRIVATE processinglab_geometry)
         set_target_properties(test_predict_cpp_hook_f77 PROPERTIES
             LINKER_LANGUAGE CXX
             Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_hook_f77_mods
@@ -986,7 +986,7 @@ if(BUILD_TESTING)
             fortran/predict_cpp_from_common.f90
             fortran/test_predict_cpp_from_common.f90
         )
-        target_link_libraries(test_predict_cpp_from_common PRIVATE mosflm_geometry)
+        target_link_libraries(test_predict_cpp_from_common PRIVATE processinglab_geometry)
         set_target_properties(test_predict_cpp_from_common PROPERTIES
             LINKER_LANGUAGE CXX
             Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_from_common_mods
@@ -1002,28 +1002,28 @@ if(BUILD_TESTING)
     if(MOSFLM_HAS_FORTRAN AND MOSFLM_FORTRAN_ORACLE)
         # Static archive for Autotools
         # ``make MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm``.
-        add_library(mosflm_predict_hook STATIC
+        add_library(processinglab_predict_hook STATIC
             fortran/predict_cpp_bridge.f90
             fortran/predict_gendata_pack.f90
             fortran/predict_cpp_hook.f90
             fortran/predict_cpp_from_common.f90
         )
-        target_link_libraries(mosflm_predict_hook PUBLIC mosflm_geometry)
-        set_target_properties(mosflm_predict_hook PROPERTIES
+        target_link_libraries(processinglab_predict_hook PUBLIC processinglab_geometry)
+        set_target_properties(processinglab_predict_hook PROPERTIES
             Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fortran_hook_lib_mods
             POSITION_INDEPENDENT_CODE ON
         )
-        message(STATUS "MOSFLM_FORTRAN_ORACLE=ON: building mosflm_predict_hook")
+        message(STATUS "MOSFLM_FORTRAN_ORACLE=ON: building processinglab_predict_hook")
     elseif(MOSFLM_FORTRAN_ORACLE AND NOT MOSFLM_HAS_FORTRAN)
         message(WARNING
             "MOSFLM_FORTRAN_ORACLE=ON but no Fortran compiler; "
-            "skipping mosflm_predict_hook")
+            "skipping processinglab_predict_hook")
     endif()
 
     add_executable(test_known_indexed_oracle
         tests/differential/test_known_indexed_oracle.cpp
     )
-    target_link_libraries(test_known_indexed_oracle PRIVATE mosflm_geometry)
+    target_link_libraries(test_known_indexed_oracle PRIVATE processinglab_geometry)
     add_test(
         NAME known_indexed_oracle
         COMMAND test_known_indexed_oracle
@@ -1033,7 +1033,7 @@ if(BUILD_TESTING)
     add_executable(test_insulin_hkl_overlap
         tests/differential/test_insulin_hkl_overlap.cpp
     )
-    target_link_libraries(test_insulin_hkl_overlap PRIVATE mosflm_geometry)
+    target_link_libraries(test_insulin_hkl_overlap PRIVATE processinglab_geometry)
     add_test(
         NAME insulin_hkl_overlap
         COMMAND test_insulin_hkl_overlap
@@ -1043,7 +1043,7 @@ if(BUILD_TESTING)
     add_executable(test_insulin_xdet
         tests/differential/test_insulin_xdet.cpp
     )
-    target_link_libraries(test_insulin_xdet PRIVATE mosflm_geometry)
+    target_link_libraries(test_insulin_xdet PRIVATE processinglab_geometry)
     add_test(
         NAME insulin_xdet
         COMMAND test_insulin_xdet
@@ -1053,7 +1053,7 @@ if(BUILD_TESTING)
     add_executable(test_insulin_process_mtz
         tests/differential/test_insulin_process_mtz.cpp
     )
-    target_link_libraries(test_insulin_process_mtz PRIVATE mosflm_geometry)
+    target_link_libraries(test_insulin_process_mtz PRIVATE processinglab_geometry)
     add_test(
         NAME insulin_process_mtz
         COMMAND test_insulin_process_mtz
@@ -1063,7 +1063,7 @@ if(BUILD_TESTING)
     add_executable(test_insulin_cpp_process
         tests/differential/test_insulin_cpp_process.cpp
     )
-    target_link_libraries(test_insulin_cpp_process PRIVATE mosflm_geometry)
+    target_link_libraries(test_insulin_cpp_process PRIVATE processinglab_geometry)
     add_test(
         NAME insulin_cpp_process
         COMMAND test_insulin_cpp_process
@@ -1073,7 +1073,7 @@ if(BUILD_TESTING)
     add_executable(test_insulin_isi
         tests/differential/test_insulin_isi.cpp
     )
-    target_link_libraries(test_insulin_isi PRIVATE mosflm_geometry)
+    target_link_libraries(test_insulin_isi PRIVATE processinglab_geometry)
     add_test(
         NAME insulin_isi
         COMMAND test_insulin_isi
@@ -1083,7 +1083,7 @@ if(BUILD_TESTING)
     add_executable(test_insulin_profile
         tests/differential/test_insulin_profile.cpp
     )
-    target_link_libraries(test_insulin_profile PRIVATE mosflm_geometry)
+    target_link_libraries(test_insulin_profile PRIVATE processinglab_geometry)
     add_test(
         NAME insulin_profile
         COMMAND test_insulin_profile
@@ -1093,7 +1093,7 @@ if(BUILD_TESTING)
     add_executable(test_insulin_postref
         tests/differential/test_insulin_postref.cpp
     )
-    target_link_libraries(test_insulin_postref PRIVATE mosflm_geometry)
+    target_link_libraries(test_insulin_postref PRIVATE processinglab_geometry)
     add_test(
         NAME insulin_postref
         COMMAND test_insulin_postref
@@ -1103,7 +1103,7 @@ if(BUILD_TESTING)
     add_executable(test_insulin_control
         tests/differential/test_insulin_control.cpp
     )
-    target_link_libraries(test_insulin_control PRIVATE mosflm_geometry)
+    target_link_libraries(test_insulin_control PRIVATE processinglab_geometry)
     add_test(
         NAME insulin_control
         COMMAND test_insulin_control
@@ -1150,13 +1150,13 @@ if(BUILD_TESTING)
         add_executable(test_bravais_classifier
             tests/differential/test_bravais_classifier.cpp
         )
-        target_link_libraries(test_bravais_classifier PRIVATE mosflm_indexing)
+        target_link_libraries(test_bravais_classifier PRIVATE processinglab_indexing)
         add_test(NAME bravais_classifier COMMAND test_bravais_classifier)
 
         add_executable(test_bravais_select
             tests/unit/test_bravais_select.cpp
         )
-        target_link_libraries(test_bravais_select PRIVATE mosflm_indexing)
+        target_link_libraries(test_bravais_select PRIVATE processinglab_indexing)
         add_test(
             NAME bravais_select
             COMMAND test_bravais_select
@@ -1166,7 +1166,7 @@ if(BUILD_TESTING)
         add_executable(test_spot_list
             tests/unit/test_spot_list.cpp
         )
-        target_link_libraries(test_spot_list PRIVATE mosflm_indexing)
+        target_link_libraries(test_spot_list PRIVATE processinglab_indexing)
         add_test(
             NAME spot_list
             COMMAND test_spot_list
@@ -1176,7 +1176,7 @@ if(BUILD_TESTING)
         add_executable(test_spot_finder
             tests/unit/test_spot_finder.cpp
         )
-        target_link_libraries(test_spot_finder PRIVATE mosflm_indexing)
+        target_link_libraries(test_spot_finder PRIVATE processinglab_indexing)
         add_test(
             NAME spot_finder
             COMMAND test_spot_finder
@@ -1188,7 +1188,7 @@ if(BUILD_TESTING)
         add_executable(test_insulin_autoindex
             tests/differential/test_insulin_autoindex.cpp
         )
-        target_link_libraries(test_insulin_autoindex PRIVATE mosflm_indexing)
+        target_link_libraries(test_insulin_autoindex PRIVATE processinglab_indexing)
         add_test(
             NAME insulin_autoindex
             COMMAND test_insulin_autoindex
@@ -1200,7 +1200,7 @@ if(BUILD_TESTING)
         add_executable(test_thaumatin_autoindex
             tests/differential/test_thaumatin_autoindex.cpp
         )
-        target_link_libraries(test_thaumatin_autoindex PRIVATE mosflm_indexing)
+        target_link_libraries(test_thaumatin_autoindex PRIVATE processinglab_indexing)
         add_test(
             NAME thaumatin_autoindex
             COMMAND test_thaumatin_autoindex
@@ -1211,7 +1211,7 @@ if(BUILD_TESTING)
         add_executable(test_control_autoindex
             tests/differential/test_control_autoindex.cpp
         )
-        target_link_libraries(test_control_autoindex PRIVATE mosflm_indexing)
+        target_link_libraries(test_control_autoindex PRIVATE processinglab_indexing)
         add_test(
             NAME control_autoindex
             COMMAND test_control_autoindex
@@ -1221,7 +1221,7 @@ if(BUILD_TESTING)
         add_executable(test_diff_vector_index
             tests/unit/test_diff_vector_index.cpp
         )
-        target_link_libraries(test_diff_vector_index PRIVATE mosflm_indexing)
+        target_link_libraries(test_diff_vector_index PRIVATE processinglab_indexing)
         add_test(
             NAME diff_vector_index
             COMMAND test_diff_vector_index
@@ -1231,7 +1231,7 @@ if(BUILD_TESTING)
         add_executable(test_supercell_reduce
             tests/unit/test_supercell_reduce.cpp
         )
-        target_link_libraries(test_supercell_reduce PRIVATE mosflm_indexing)
+        target_link_libraries(test_supercell_reduce PRIVATE processinglab_indexing)
         add_test(
             NAME supercell_reduce
             COMMAND test_supercell_reduce
@@ -1241,7 +1241,7 @@ if(BUILD_TESTING)
         add_executable(test_fft3d_index
             tests/unit/test_fft3d_index.cpp
         )
-        target_link_libraries(test_fft3d_index PRIVATE mosflm_indexing)
+        target_link_libraries(test_fft3d_index PRIVATE processinglab_indexing)
         add_test(
             NAME fft3d_index
             COMMAND test_fft3d_index
@@ -1251,7 +1251,7 @@ if(BUILD_TESTING)
         add_executable(test_rlp_roundtrip
             tests/unit/test_rlp_roundtrip.cpp
         )
-        target_link_libraries(test_rlp_roundtrip PRIVATE mosflm_indexing)
+        target_link_libraries(test_rlp_roundtrip PRIVATE processinglab_indexing)
         add_test(
             NAME rlp_roundtrip
             COMMAND test_rlp_roundtrip
@@ -1261,7 +1261,7 @@ if(BUILD_TESTING)
         add_executable(test_idxref_refine
             tests/unit/test_idxref_refine.cpp
         )
-        target_link_libraries(test_idxref_refine PRIVATE mosflm_indexing)
+        target_link_libraries(test_idxref_refine PRIVATE processinglab_indexing)
         add_test(
             NAME idxref_refine
             COMMAND test_idxref_refine
@@ -1271,7 +1271,7 @@ if(BUILD_TESTING)
         add_executable(test_76c1b_autoindex
             tests/differential/test_76c1b_autoindex.cpp
         )
-        target_link_libraries(test_76c1b_autoindex PRIVATE mosflm_indexing)
+        target_link_libraries(test_76c1b_autoindex PRIVATE processinglab_indexing)
         add_test(
             NAME 76c1b_autoindex
             COMMAND test_76c1b_autoindex
@@ -1283,7 +1283,7 @@ if(BUILD_TESTING)
     add_executable(test_76c1b_process_quality
         tests/differential/test_76c1b_process_quality.cpp
     )
-    target_link_libraries(test_76c1b_process_quality PRIVATE mosflm_geometry)
+    target_link_libraries(test_76c1b_process_quality PRIVATE processinglab_geometry)
     add_test(
         NAME 76c1b_process_quality
         COMMAND test_76c1b_process_quality

@@ -1,4 +1,4 @@
-# ProcessingLab top-level Makefile (Phase D / E).
+# ProcessingLab top-level Makefile.in (Phase D / E); ./configure → Makefile.
 #
 # Default: C++ core + ProcessingLab (no Fortran amalgamation).
 #   make / make cpp
@@ -8,7 +8,7 @@
 #
 # Autotools variables below remain for the optional oracle path.
 #-----------------------------------------------------------------------------
-prefix =  /Applications/ccp4-9
+prefix =  /Users/brooks/.local
 exec_prefix = ${prefix}
 bindir  = ${exec_prefix}/bin
 MOSHOME = .
@@ -56,14 +56,13 @@ dps-lib:
 cpp-core: cbf-lib
 	cmake -S processing-lab -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
 		-DMOSFLM_FORTRAN_ORACLE=OFF
-	cmake --build $(CPP_BUILD) --target mosflm_cpp_cli ProcessingLab
+	cmake --build $(CPP_BUILD) --target processinglab_dev ProcessingLab
 	mkdir -p bin
 	# Copy to a temp name then mv: overwriting a Mach-O in place on macOS
 	# leaves a stale code-signature cache and the binary dies with SIGKILL.
 	cp -f $(CPP_BUILD)/$(PROCESSINGLAB) bin/$(PROCESSINGLAB).tmp && \
 		mv -f bin/$(PROCESSINGLAB).tmp bin/$(PROCESSINGLAB)
-	cp -f $(CPP_BUILD)/mosflm_cpp_cli$(EXEEXT) bin/mosflm_cpp_cli$(EXEEXT).tmp && \
-		mv -f bin/mosflm_cpp_cli$(EXEEXT).tmp bin/mosflm_cpp_cli$(EXEEXT)
+	# processinglab_dev (developer diagnostics) stays in $(CPP_BUILD).
 	@echo "Installed thin binaries under bin/ (ProcessingLab; no amalgamation)."
 
 # Default release: C++ + DPS when gfortran is available.
@@ -124,11 +123,24 @@ distclean: distclean-generic clean
 
 realclean: clean
 
-install: cpp
+# Installs what ``make`` built; never builds, so ``sudo make install`` leaves
+# no root-owned files in the tree.
+install:
+	@test -x bin/$(PROCESSINGLAB) || { \
+		echo "error: bin/$(PROCESSINGLAB) not built; run 'make' first (without sudo)."; \
+		exit 1; \
+	}
 	mkdir -p "$(DESTDIR)$(bindir)"
 	$(INSTALL_PROGRAM) bin/$(PROCESSINGLAB) "$(DESTDIR)$(bindir)"
-	$(INSTALL_PROGRAM) bin/mosflm_cpp_cli$(EXEEXT) "$(DESTDIR)$(bindir)"
 
+# Also removes mosflm_cpp_cli left by older installs.
 uninstall:
 	rm -f "$(DESTDIR)$(bindir)/$(PROCESSINGLAB)" \
 		"$(DESTDIR)$(bindir)/mosflm_cpp_cli$(EXEEXT)"
+
+DIST_COMMON = install-sh README.html README.txt README600.html README600.txt \
+	README610.html README610.txt SUMMARY \
+	aclocal.m4 config.h.in config.sub configure config.guess
+
+EXTRA_DIST = doc/mosflm_user_guide.doc doc/mosflm_user_guide.html to_big.csh \
+	to_small.csh Q314.csh

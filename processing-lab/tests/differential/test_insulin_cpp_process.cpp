@@ -1,7 +1,7 @@
 /**
  * Phase D / D1: pure C++ insulin PROCESS (SMV → predict → sum → MTZ).
  *
- * No amalgamation / mosflm_predict_hook. ASU-aware HKL recall vs Fortran
+ * No amalgamation / processinglab_predict_hook. ASU-aware HKL recall vs Fortran
  * oracle MTZ reuses the D0 numeric gate (>= 0.85).
  */
 

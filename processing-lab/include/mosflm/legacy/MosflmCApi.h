@@ -29,7 +29,7 @@
  * - F77 symbol ``predict_still_cpp_`` assumes **gfortran** trailing-underscore
  *   calling convention.
  *
- * Build: linked into ``mosflm_geometry`` (C++ TU). Callers need only this
+ * Build: linked into ``processinglab_geometry`` (C++ TU). Callers need only this
  * header and the library.
  */
 #ifndef MOSFLM_C_API_H

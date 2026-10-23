@@ -12,6 +12,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -115,6 +116,39 @@ int main() {
         const std::string pj = slurp(dir2 / "process.json");
         CHECK(contains(pj, "\"status\": \"completed\""));
         CHECK(contains(pj, "\"status\": \"skipped\""));
+    }
+
+    // --run-mode: names, parsing, and inputs that must match the mode.
+    {
+        using mosflm::io::RunMode;
+        using mosflm::io::parse_run_mode;
+        using mosflm::io::validate_run_mode;
+        CHECK(parse_run_mode("xds") == RunMode::XDS);
+        CHECK(parse_run_mode("XIA2") == RunMode::XIA2);
+        CHECK(parse_run_mode("MosFlm") == RunMode::MOSFLM);
+        CHECK(parse_run_mode("processinglab") == RunMode::PROCESSINGLAB);
+        CHECK(!parse_run_mode("dials").has_value());
+        CHECK(std::string(mosflm::io::run_mode_name(RunMode::XDS)) == "RunMode.XDS");
+        CHECK(std::string(mosflm::io::run_mode_name(RunMode::MOSFLM)) == "RunMode.MOSFLM");
+        CHECK(std::string(mosflm::io::run_mode_name(RunMode::XIA2)) == "RunMode.XIA2");
+        const auto refused = [](RunMode m, bool script, bool xds, bool xinfo, bool sweep) {
+            try {
+                validate_run_mode(m, script, xds, xinfo, sweep);
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+        CHECK(!refused(RunMode::PROCESSINGLAB, false, true, true, true));  // any imports
+        CHECK(!refused(RunMode::XDS, false, true, false, false));
+        CHECK(refused(RunMode::XDS, false, false, false, false));   // needs --xds-inp
+        CHECK(refused(RunMode::XDS, false, true, true, false));     // not with --xinfo
+        CHECK(!refused(RunMode::XIA2, false, false, true, true));
+        CHECK(refused(RunMode::XIA2, false, false, false, false));  // needs --xinfo
+        CHECK(refused(RunMode::XIA2, false, true, true, false));    // not with --xds-inp
+        CHECK(!refused(RunMode::MOSFLM, true, false, false, false));
+        CHECK(refused(RunMode::MOSFLM, false, false, false, false));  // not with 'run'
+        CHECK(refused(RunMode::XDS, true, true, false, false));       // not a script run
     }
 
     return mosflm_test::finish("run_record");

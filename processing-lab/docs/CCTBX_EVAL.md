@@ -14,14 +14,14 @@ on vendored CBFlib.
 
 | Approach | Effort on this machine | Notes |
 | -------- | ---------------------- | ----- |
-| C++ `libtbx` link into `mosflm_geometry` | **High** | No ready `cctbx_build` found under `~/projects`; full bootstrap is multi-hour and would pull Boost/scitbx into every target |
+| C++ `libtbx` link into `processinglab_geometry` | **High** | No ready `cctbx_build` found under `~/projects`; full bootstrap is multi-hour and would pull Boost/scitbx into every target |
 | Phenix `cctbx.python` | **Low** | `/Applications/phenix-1.20.1-4487/build/bin/cctbx.python` (Python **2.7**) already imports `cctbx.uctbx` / `cctbx.sgtbx`; POC script is Py2/Py3-safe |
 | Conda `cctbx-base` | Medium | Documented alternative; not required for the POC |
 
 **Decision:** first-pass evaluator is a **standalone Python POC**
 ([`tools/cctbx_cell_poc.py`](../tools/cctbx_cell_poc.py)). CMake keeps
 `MOSFLM_WITH_CCTBX=OFF` by default and does **not** link CCTBX into
-`mosflm_geometry`.
+`processinglab_geometry`.
 
 ```bash
 # From processing-lab/
@@ -73,7 +73,7 @@ option(MOSFLM_WITH_CCTBX "Optional CCTBX validator targets" OFF)
 
 When `ON` in a future pass, add a non-default target that shells to
 `cctbx_cell_poc.py` or links a tiny C++ harness — never into the default
-`mosflm_geometry` library.
+`processinglab_geometry` library.
 
 ## Next science kernel
 

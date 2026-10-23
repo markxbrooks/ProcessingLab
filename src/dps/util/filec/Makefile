@@ -1,5 +1,6 @@
 CC      = gcc -c
-CFLAGS  = -g -O0 -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration
+# Pre-C99 DPS sources call undeclared functions; keep that a warning.
+CFLAGS  = -g -O0  -Wno-error=implicit-function-declaration
 BASEDIR = ../../../..
 LIBDIR  = $(BASEDIR)/lib
 INCDIR  = .

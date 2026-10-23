@@ -253,7 +253,7 @@ SHELL = /bin/sh
 # Set the compiler and flags
 #
 CC	= gcc
-CFLAGS	= -g -O0 -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration
+CFLAGS	= -g -O2
 
 #
 # Program to use to pack shars

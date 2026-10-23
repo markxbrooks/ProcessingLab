@@ -6,7 +6,7 @@ Prefer Phenix ``cctbx.python`` (Python 2.7 in Phenix 1.20)::
     /Applications/phenix-*/build/bin/cctbx.python tools/cctbx_cell_poc.py
 
 See ``docs/CCTBX_EVAL.md`` for adopt/defer decisions. This script is a
-standalone evaluator; it is **not** linked into ``mosflm_geometry``.
+standalone evaluator; it is **not** linked into ``processinglab_geometry``.
 """
 
 from __future__ import print_function

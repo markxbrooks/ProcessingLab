@@ -7,7 +7,8 @@
 # Version 0.1
 
 CC = @CC@
-CFLAGS = @CFLAGS@
+# Pre-C99 DPS sources call undeclared functions; keep that a warning.
+CFLAGS = @CFLAGS@ -Wno-error=implicit-function-declaration
 F77 = @F77@ -c
 FFLAGS = @FFLAGS@
 LIB = @top_srcdir@/lib

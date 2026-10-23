@@ -1,4 +1,3 @@
-#include "mosflm/control/ControlSession.hpp"
 #include "mosflm/crystal/MtzAdapter.hpp"
 #include "mosflm/diffraction/ProcessPipeline.hpp"
 #include "mosflm/diffraction/ProfileFitter.hpp"
@@ -33,7 +32,7 @@ void print_usage(const char* argv0) {
         << "  profile-fit [mtz]            Synthetic Gaussian peaks → profile fit → MTZ\n"
         << "  profile-fit-cbf <cbf> [mtz]  miniCBF → predict → profile fit → MTZ\n"
         << "  process-insulin [img] [mtz]  SMV insulin → predict → sum → MTZ (D1)\n"
-        << "  run <script.in> [--image img] [mtz]  CONTROL keyword PROCESS (D5)\n";
+        << "\nTo process data use ProcessingLab (run, or a CONTROL script).\n";
 }
 
 int cmd_version() {
@@ -353,34 +352,6 @@ int cmd_process_insulin(
     return 0;
 }
 
-int cmd_run_script(
-    const std::filesystem::path& script,
-    const std::optional<std::filesystem::path>& image,
-    const std::filesystem::path& mtz_path
-) {
-    mosflm::control::ControlSession session;
-    const auto runs = session.run_script(script, image);
-    std::size_t n_proc = 0;
-    for (const auto& r : runs) {
-        if (!r.ran_process) {
-            continue;
-        }
-        ++n_proc;
-        mosflm::diffraction::ProcessPipeline::write_mtz(
-            mtz_path, r.crystal, r.process, session.state().wavelength_A
-        );
-        std::cout << "run: " << script << " image=" << r.image_used
-                  << " preds=" << r.process.predictions.size()
-                  << " integrated=" << r.process.mtz_reflections.size()
-                  << " → " << mtz_path << '\n';
-    }
-    if (n_proc == 0) {
-        std::cerr << "run: no PROCESS GO executed (need MATRIX/CELL/PROCESS)\n";
-        return 1;
-    }
-    return 0;
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -443,29 +414,10 @@ int main(int argc, char** argv) {
             return cmd_process_insulin(img, mtz);
         }
         if (cmd == "run") {
-            if (argc < 3) {
-                print_usage(argv[0]);
-                return 2;
-            }
-            const std::filesystem::path script = argv[2];
-            std::optional<std::filesystem::path> image;
-            std::filesystem::path mtz = "control_process.mtz";
-            for (int i = 3; i < argc; ++i) {
-                const std::string_view a = argv[i];
-                if (a == "--image") {
-                    if (i + 1 >= argc) {
-                        std::cerr << "run: --image needs a path\n";
-                        return 2;
-                    }
-                    image = argv[++i];
-                } else {
-                    mtz = argv[i];
-                }
-            }
-            if (!image) {
-                image = default_insulin_img();
-            }
-            return cmd_run_script(script, image, mtz);
+            std::cerr << "processinglab_dev no longer runs CONTROL scripts; use\n"
+                         "  ProcessingLab [--image img] [--output-dir DIR] <script.in>\n"
+                         "  ProcessingLab run --image img [--xds-inp XDS.INP]\n";
+            return 2;
         }
         std::cerr << "Unknown command: " << cmd << '\n';
         print_usage(argv[0]);
