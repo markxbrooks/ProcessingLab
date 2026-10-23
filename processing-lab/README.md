@@ -1,7 +1,7 @@
 # processing-lab (ProcessingLab)
 
 C++ computational core for **ProcessingLab** (MOSFLM port). See
-[`../porting.md`](../porting.md) for strategy and legacy build notes.
+[`../DEVELOPMENT.md`](../DEVELOPMENT.md) for build, oracle and fixture notes.
 
 **Status (Phase D Done / D6):** geometry + Gemmi crystal + miniCBF + **SMV** I/O
 + DPS Bravais façade + stills/oscillation `PREDICT` + **MEAS** boxes +
@@ -11,9 +11,6 @@ amalgamation; `.exe` on Windows) + LP + C ABI + MTZ + pure-C++ `ProcessPipeline`
 F77 oracle remains `ipmosflm` (`make fortran-oracle`). Oracle splice library
 `processinglab_predict_hook` only with `-DMOSFLM_FORTRAN_ORACLE=ON`. CTests include
 `control_session`, `insulin_control`, `integrationlab`, `ipmosflm_perf`.
-
-Phase A–D table and vertical-slice checklist: [`../porting.md`](../porting.md)
-(section *Current status* and §3 / §5).
 
 ## Build
 

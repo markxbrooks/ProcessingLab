@@ -109,8 +109,8 @@ struct PreviousRun {
 ///     directory names its ``sweep_N`` subdirectories.
 [[nodiscard]] PreviousRun read_previous_run(const std::filesystem::path& path);
 
-/// ``process.md`` from the two records; outputs inside ``dir`` are shown by
-/// file name.
+/// ``process.md`` from the two records; outputs inside ``dir`` are shown
+/// relative to it (``process.mtz``, ``xds/XDS.INP``).
 [[nodiscard]] std::string render_markdown(
     const Json& input, const Json& process, const std::filesystem::path& dir = {}
 );

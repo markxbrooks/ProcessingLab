@@ -67,7 +67,7 @@ on a value (the higher-priority one is used):
 
 Every output goes in the output directory: `input.json`, `process.json`,
 `process.md`, `process.log`, `process.mtz`,
-`spots.spt`, `XPARM.XDS`, `GXPARM.XDS`, `ProcessingLabIndex.txt`, and the
+`spots.spt`, `XPARM.XDS`, `GXPARM.XDS`, `index.log`, and the
 [repeat inputs](#repeat-inputs-xds-xia2-mosflm) `xds/`, `xia2/` and
 `mosflm/`. Spots
 for indexing come from the first 50 frames of the range. With a known cell
@@ -460,7 +460,7 @@ and spot lists, `XPARM.XDS` and `GXPARM.XDS` to `DIRECTORY` (default `.`).
 | `spots.spt` (or `FINDSPOTS FILE`) | FINDSPOTS `GO` | MOSFLM spot list: header (nfast, nslow, pixel, yscale, omega; invflag; beam mm) then `x_mm y_mm φ_start φ_end I σ`. |
 | `XPARM.XDS` | successful AUTOINDEX | Bridge-format orientation + cell + detector (written next to `DIRECTORY`). |
 | `GXPARM.XDS` | PROCESS `GO` (unless `XPARMOUT OFF`) | Same layout after integration. Override the path with `XPARMOUT`. |
-| `ProcessingLabIndex.txt` | successful AUTOINDEX | Sidecar `CELL` / `MATRIX` / `SYSTEM` / `CHARACTER` / `INDEXED` / `RMSD_HKL`. |
+| `index.log` | successful AUTOINDEX | Autoindexing result: `CELL` / `MATRIX` / `SYSTEM` / `CHARACTER` / `NSPOTS` / `INDEXED` / `RMSD_HKL`. |
 | `xds/`, `xia2/`, `mosflm/` | start (with an output directory); `xds/` gets the XPARMs after the run | [Repeat inputs](#repeat-inputs-xds-xia2-mosflm) for each run mode. |
 | stdout | always | Banner, import lines, COLSPOT/INDEXFIT/IDXREF/PROCESS log, `PROCESSINGLAB_*` dump. |
 

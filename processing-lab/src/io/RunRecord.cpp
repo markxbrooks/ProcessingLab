@@ -564,8 +564,12 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
     md << "\n## Outputs\n\n";
     for (const auto& o : pr.find("outputs")->items()) {
         std::filesystem::path path = str(o.find("path"));
-        if (!dir.empty() && path.parent_path() == dir) {
-            path = path.filename();
+        // Inside the run directory (xds/XDS.INP too): relative to it.
+        if (!dir.empty()) {
+            const auto rel = path.lexically_relative(dir);
+            if (!rel.empty() && *rel.begin() != "..") {
+                path = rel;
+            }
         }
         md << "- " << str(o.find("kind")) << ": `" << path.string() << "`\n";
     }

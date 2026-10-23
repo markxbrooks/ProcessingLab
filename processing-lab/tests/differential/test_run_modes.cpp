@@ -305,6 +305,8 @@ int main() {
         CHECK(contains(slurp(work / "rep_xia2" / "process.log"), "Space group:   197  [.xinfo]"));
         // mosflm.in leaves HKLOUT to the new run's --output-dir.
         CHECK(!contains(slurp(work / "xds" / "mosflm" / "mosflm.in"), "HKLOUT"));
+        // process.md lists them relative to the run directory.
+        CHECK(contains(slurp(work / "xds" / "process.md"), "- xds_inp: `xds/XDS.INP`"));
         CHECK(fs::exists(work / "rep_mosflm" / "process.mtz"));
     }
 

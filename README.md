@@ -1,266 +1,148 @@
 # ProcessingLab
 
-Progressive C++ port of the MOSFLM diffraction-processing core.
+**A C++20 diffraction-processing engine for macromolecular crystallography.**
 
 ![ProcessingLab Logo](resources/ProcessingLabLogo.png)
 
+ProcessingLab is a modern, progressively independent C++ implementation of
+the MOSFLM diffraction-processing core. It finds spots, autoindexes, refines
+the orientation and integrates diffraction images. It takes its experiment
+parameters from image headers, `XDS.INP`, Xia2 `.xinfo` files and
+MOSFLM-style CONTROL scripts.
 
+ProcessingLab is a component of **DiffractionLab**, but its processing engine
+and command-line interface can also be used on their own.
 
-## Build and install
+## Features
 
-Requirements: CMake ≥ 3.24, a C++20 compiler, ZLIB and a CCP4 installation
-(`configure` reads `$CCP4`). Optional: gfortran, for DPS autoindexing; HDF5,
-for Eiger/NeXus masters; and FFTW.
+- **Automated processing:** give it the images, and it resolves the
+  experiment metadata, finds spots, autoindexes and integrates the
+  reflections.
+- **MOSFLM-compatible CONTROL interface:** explicit control of each
+  processing stage, with familiar keywords and `GO`.
+- **Image formats:** CBF and SMV sweeps, and HDF5/NeXus master files
+  (Dectris Eiger).
+- **Metadata import and provenance:** experiment parameters from image
+  headers, `XDS.INP`, Xia2 `.xinfo` and XDS orientation files. Every value
+  records where it came from.
+- **Crystallographic constraints:** unit cells are checked against the
+  space group, and supplied constraints are kept separate from refined
+  results.
+- **Reproducible processing:** each run records its effective inputs and
+  their sources, its stages, warnings, results and outputs.
+- **Interoperability:** unmerged MTZ, XDS-style orientation files, and
+  generated inputs to repeat a run with XDS, Xia2 or a MOSFLM-style script.
+- **C++ processing core:** geometry, reflection prediction, integration and
+  CONTROL execution are native C++20. DPS autoindexing optionally uses
+  Fortran.
+- **Differential testing:** selected results are compared against the
+  original Fortran `ipmosflm`.
+
+ProcessingLab covers indexing and integration. **Scaling and merging happen
+downstream**, typically with CCP4 Pointless and Aimless.
+
+## Installation
+
+### Requirements
+
+| Dependency | Purpose |
+| ---------- | ------- |
+| CMake ≥ 3.24 | Build system |
+| C++20 compiler | Processing engine |
+| ZLIB | Compression |
+| CCP4 | Required by `configure` (`$CCP4`, or `--with-ccp4-prefix`); default install location; reference `ipmosflm` |
+| gfortran (optional) | DPS autoindexing |
+| HDF5 (optional) | Eiger / NeXus master files |
+| FFTW (optional) | FFT-based autoindexing |
+
+### Build and install
 
 ```bash
-./configure --prefix=$HOME/.local   # or --with-ccp4-prefix=/Applications/ccp4-9
-make                                # → bin/ProcessingLab
-make test                           # ctest in processing-lab/build
-make install                        # → $(prefix)/bin/ProcessingLab
+./configure --prefix="$HOME/.local"   # or --with-ccp4-prefix=/Applications/ccp4-9
+make                                  # → bin/ProcessingLab
+make test                             # builds and runs the CTest suite
+make install                          # → $prefix/bin/ProcessingLab
 ```
 
-- **`./configure`:** without `--prefix`, it installs into the CCP4 tree
-  (`$CCP4/bin`). `--with-ccp4-prefix` names the CCP4 tree when `$CCP4` is
-  not set.
-- **`make`:** builds CBFlib, the DPS archives (skipped with a warning when
-  gfortran is missing; then `make cpp-core` builds without autoindexing) and
-  `ProcessingLab`.
-- **`make install`:** copies only what `make` built, and stops if you
-  haven't run `make` yet. Run `make` as yourself; if the prefix needs root,
-  use `sudo` only for `make install`, so nothing in the tree ends up owned
-  by root.
-- **Removing it:** `make uninstall` takes it out again.
+- **The prefix:** without `--prefix`, ProcessingLab installs into the CCP4
+  tree (`$CCP4/bin`). `--with-ccp4-prefix` names the CCP4 installation when
+  `$CCP4` is not set.
+- **Without gfortran:** `make` skips the DPS archives with a warning, and
+  `make cpp-core` builds the C++ core alone.
+- **Permissions:** run `make` as yourself. If the prefix needs elevated
+  permissions, use `sudo` for `make install` only: it copies what `make`
+  built and never compiles.
+- **Removing it:** `make uninstall`.
 
-The developer tool `processinglab_dev` stays in `processing-lab/build/` and
-is never installed. If you configure `processing-lab` with CMake directly,
-build CBFlib first: `make -C cbf`.
+Check the installation:
 
 ```bash
 ./bin/ProcessingLab --version
-./bin/ProcessingLab HKLOUT /tmp/out.mtz --image /path/to/insulin_1_001.img \
-  processing-lab/testdata/images/known_indexed/cpp_process.in
-# C++ vs F77 PROCESS wall-time (CCP4 ipmosflm by default):
-./processing-lab/tools/bench_ipmosflm_perf.sh
 ```
 
-Top-level CMake (`-S .`) adds `processing-lab` when `PROCESSINGLAB_BUILD_CPP=ON`
-(default).
+Direct CMake builds, the optional Fortran reference implementation and the
+test fixtures are described in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-## Optional Fortran oracle
+## Quick start
 
-Requires CCP4. See [`porting.md`](porting.md) for macOS notes.
+### 1. Automated processing
+
+An HDF5/NeXus master file:
 
 ```bash
-make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite ProcessingLab)
-# or:
-#   ./configure --with-ccp4-prefix=/Applications/ccp4-9
-#   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 ipmosflm
-# Experimental C++ PREDICT splice into the oracle:
-#   cmake -S processing-lab -B processing-lab/build -DMOSFLM_FORTRAN_ORACLE=ON
-#   cmake --build processing-lab/build --target processinglab_predict_hook
-#   make -C mosflm MOSFLM_FORTRAN_ORACLE=1 MOSFLM_CPP_PREDICT=1 ipmosflm
+./bin/ProcessingLab run --image ~/data/thaumatin_9_1_master.h5
 ```
 
-# Usage
+ProcessingLab reads the experiment metadata from the image headers, finds
+spots, autoindexes and integrates, all in a new output directory.
 
-There are two ways to run ProcessingLab:
-
-- **`ProcessingLab run`**: give it the images and it finds spots, autoindexes
-  and integrates, taking the experiment metadata from the image headers.
-- **CONTROL script**: MOSFLM-style keywords on stdin or in a file, for full
-  control of every step.
-
-`run` always writes into a new output directory, and a script does too with
-`--output-dir`. The full keyword and option reference is in
-[`USAGE.md`](USAGE.md).
-
-## `ProcessingLab run`
+A CBF sweep: name any one frame, and optionally an inclusive frame range:
 
 ```bash
-# Whole sweep from an Eiger HDF5 master
-./bin/ProcessingLab run --image ~/Downloads/thaumatin_9_1_master.h5
+./bin/ProcessingLab run \
+    --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf \
+    --range 1:900 \
+    --output-dir results/76c1b
+```
 
-# CBF sweep: name any one frame; its numbered siblings are the sweep
-./bin/ProcessingLab run --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf \
-    --range 1:900 --output-dir results/76c1b
+With an experiment description from XDS:
 
-# Take the cell, symmetry and geometry from XDS.INP (or .xinfo)
-./bin/ProcessingLab run --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf \
-    --xds-inp XDS.INP --range 1:900
+```bash
+./bin/ProcessingLab run \
+    --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf \
+    --xds-inp XDS.INP \
+    --range 1:900
+```
 
-# An .xinfo with several sweeps needs --sweep
+Or from Xia2. An `.xinfo` with several sweeps needs `--sweep`:
+
+```bash
 ./bin/ProcessingLab run --xinfo automatic.xinfo --sweep SWEEP1
-
-# State where the parameters come from: here, only XDS.INP
-./bin/ProcessingLab run --run-mode xds --xds-inp XDS.INP
-
-# Re-process with the refined cell, geometry and orientation of a run
-./bin/ProcessingLab run --from processing_20261022_235027
 ```
 
-| Option | Role |
-| ------ | ---- |
-| `--image PATH` | HDF5/NeXus master, or one frame of a CBF/SMV sweep. Repeatable: each image is one sweep, processed in turn into `sweep_1/`, `sweep_2/`, … |
-| `--range FIRST:LAST` | Inclusive frame range. Default: every frame found. |
-| `--output-dir DIR` | Output directory; it must not exist yet. Default: a new `processing_YYYYMMDD_HHMMSS`. |
-| `--xds-inp PATH` | Import `XDS.INP`. |
-| `--xinfo PATH` | Import a Xia2 `.xinfo`. |
-| `--sweep NAME` | Which `.xinfo` sweep, when it has several. |
-| `--xparm PATH` | Import `XPARM.XDS` / `GXPARM.XDS`: cell, space group, geometry and orientation. With an orientation, autoindexing is skipped. |
-| `--from RUN` | Re-process from a completed run (its directory or `process.json`), with its refined parameters; see below. |
-| `--spacegroup N` | Space group number or symbol, over every import and `--from`. |
-| `--cell A B C α β γ` | Unit cell, over every import and `--from`; must fit the space group. |
-| `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
+### 2. Reprocess a completed run
 
-### Run modes (`--run-mode`)
-
-`--run-mode` states where a run's parameters come from, so a log or report
-shows it at a glance. ProcessingLab refuses inputs that contradict the mode.
-
-| Mode | Shown as | Parameters from | Requires |
-| ---- | -------- | --------------- | -------- |
-| `processinglab` | `RunMode.PROCESSINGLAB` | Image headers, overridden per field by any `--xds-inp` / `--xinfo` / `--xparm` / `--from` | Nothing (default for `run`) |
-| `xds` | `RunMode.XDS` | `XDS.INP`; headers fill unset fields | `--xds-inp`; no `--xinfo` / `--sweep` / `--xparm` / `--from` |
-| `xia2` | `RunMode.XIA2` | Xia2 `.xinfo`; headers fill unset fields | `--xinfo`; no `--xds-inp` / `--xparm` / `--from` |
-| `mosflm` | `RunMode.MOSFLM` | MOSFLM CONTROL keywords | A CONTROL script, not `run` (default for scripts) |
+Start from the refined parameters of an earlier run:
 
 ```bash
-./bin/ProcessingLab run --image sweep_0001.cbf                    # RunMode.PROCESSINGLAB
-./bin/ProcessingLab run --run-mode xds --xds-inp XDS.INP          # RunMode.XDS
-./bin/ProcessingLab run --run-mode xia2 --xinfo automatic.xinfo   # RunMode.XIA2
-./bin/ProcessingLab --run-mode mosflm --image img.cbf script.in   # RunMode.MOSFLM
+./bin/ProcessingLab run \
+    --from processing_20261022_235027 \
+    --output-dir thaumatin_rerun
 ```
 
-The mode is recorded in `process.log` (`Run mode:  RunMode.XDS (parameters
-from …)`), in `input.json` (`run_mode`, `parameter_source`) and in
-`process.md`. A mismatch fails before any processing, with what to change:
+`--from` reuses the refined cell, space group, wavelength, detector geometry
+(including tilt and twist) and orientation. With the orientation known,
+autoindexing is skipped and only the orientation is refined during
+integration. Give a completed run directory or its `process.json`; for a
+multi-sweep run, the `sweep_N` directory you want.
 
-```text
-ProcessingLab run: RunMode.XDS needs --xds-inp XDS.INP
-ProcessingLab: RunMode.XDS is for 'ProcessingLab run'; a CONTROL script is RunMode.MOSFLM
-```
+### 3. A MOSFLM-style CONTROL script
 
-### Metadata precedence
-
-Metadata precedence, per field, lowest to highest: image header, `XDS.INP`,
-`.xinfo`, XPARM (`--xparm`, or `--from`'s refined values), command line. A
-source only overrides the fields it sets.
-`process.log` opens with each value and where it came from, and warns when
-sources disagree:
-
-```text
- Experiment metadata
-  Image source:  .../76c1b_0002212_1_0001.cbf  [CLI]
-  Wavelength:    0.97949 Å  [XDS.INP]
-  Distance:      384.99 mm  [XDS.INP]
-  Beam:          214.28 207.96 mm  [image header]
-  Cell:          62.04 186.93 72.36 90.00 100.19 90.00  [XDS.INP]
-  Frame range:   1–900  [CLI]  (900 on disk)
-```
-
-Spots for indexing come from the first 50 frames of the range. If you import
-a cell, the longest cell edge allowed during autoindexing (`DMAX`) is set to
-1.7× its longest edge. Otherwise it stays at the 200 Å default, which is too
-short for very long axes (76c1b's 187 Å). For those, pass `--xds-inp` or use a
-script with `DMAX`.
-
-### Overriding the space group and cell (`--spacegroup`, `--cell`)
-
-To use a space group or cell you've determined yourself, give them on the
-command line. They win over every other source, `--from` included:
+For explicit control of each stage:
 
 ```bash
-# Thaumatin is P4₁2₁2 (92), not P4₁ (76): keep the refined cell, change the symmetry
-./bin/ProcessingLab run --from processing_20261022_235027 --spacegroup 92
-
-# A cell of your own as well (six numbers, or one quoted list)
-./bin/ProcessingLab run --from processing_20261022_235027 --spacegroup P41212 \
-    --cell 57.898 57.898 150.952 90 90 90
-```
-
-- **`--spacegroup`:** takes a number or a symbol (`92`, `P41212`).
-- **`--cell`:** must fit the space group's crystal system (tetragonal:
-  a = b, α = β = γ = 90°). A cell that doesn't fit is refused before
-  anything runs.
-- **With `--from` or `--xparm`:** the orientation matrix also encodes the
-  cell, so it's rebuilt with your cell and the refined orientation kept;
-  otherwise predictions would keep the old cell. The cell then stays fixed
-  during integration, as the orientation alone is refined.
-- **In the records:** each override is tagged `[CLI]` in `process.log` and
-  `input.json`, with a warning naming the value it replaced. It also goes
-  into the repeat inputs (`xds/`, `xia2/`, `mosflm/`).
-
-Changing only the space group within the same lattice (P4₁ → P4₁2₁2) leaves
-the predictions untouched. On thaumatin frames 1–100 the residual stays at
-0.44–0.55 px. A cell from another source, such as a PDB `CRYST1`, may not
-match this dataset at the refined distance. With 57.898, 57.898, 150.952 Å
-against the refined 57.938, 57.938, 150.244 Å, the residual rose from 0.47
-to 1.12 px. Prefer `--spacegroup` alone, and keep a reference cell for
-scaling or refinement unless the data agree with it.
-
-### Repeat inputs (`xds/`, `xia2/`, `mosflm/`)
-
-At the start of every run, ProcessingLab writes the resolved experiment as
-input for each run mode, so the run can be repeated, or handed to XDS or
-xia2:
-
-| Directory | Files | Repeat with |
-| --------- | ----- | ----------- |
-| `xds/` | `XDS.INP`; after the run, copies of `XPARM.XDS` and `GXPARM.XDS` | `ProcessingLab run --run-mode xds --xds-inp RUN/xds/XDS.INP` |
-| `xia2/` | `automatic.xinfo`, `run_xia2.sh` | `ProcessingLab run --run-mode xia2 --xinfo RUN/xia2/automatic.xinfo` |
-| `mosflm/` | `mosflm.in`: the run's CONTROL script, without `HKLOUT` | `ProcessingLab --run-mode mosflm --output-dir NEW RUN/mosflm/mosflm.in` |
-
-Each reproduces the original run. Insulin (1 frame) and thaumatin
-(20 frames) give the same reflections and statistics in all three modes.
-CONTROL script runs with `--output-dir` write the same three directories.
-
-- **`XDS.INP`:** for XDS itself, it is a complete starting point:
-  - `JOB`, `DETECTOR` and `OVERLOAD` come from the header;
-  - the spot and background ranges match the run;
-  - an Eiger sweep appears as `x_??????.h5`, and needs XDS's HDF5 `LIB=`
-    plugin;
-  - check `DETECTOR`, `ROTATION_AXIS` and the trusted region for your
-    beamline.
-- **The copied `XPARM.XDS` and `GXPARM.XDS`:** these use ProcessingLab's
-  own layout. Use them with `--xparm`, not with XDS.
-- **`automatic.xinfo`:** it holds `USER_CELL` and `USER_SPACEGROUP` when the
-  run knew them. `BEAM` and `DISTANCE` appear only where the run overrode
-  the image header; xia2 reads the header for the rest.
-- **Refined values:** these files hold the values at the start of the run.
-  To re-process from the refined values, use `--from` (above).
-
-### Re-processing with refined parameters (`--from`)
-
-After a run has refined the cell and geometry, process again starting from
-them with `--from`. It takes a finished run directory, or its `process.json`:
-
-```bash
-./bin/ProcessingLab run --image ~/Downloads/thaumatin_9_1_master.h5 --range 1:900
-./bin/ProcessingLab run --from processing_20261022_235027 --output-dir thaumatin_rerun
-```
-
-- **What `--from` takes:** the refined cell, space group, wavelength,
-  distance, beam, pixel size and orientation from that run's `GXPARM.XDS`,
-  and the refined detector tilt/twist from its `process.json`. `GXPARM.XDS`
-  doesn't carry tilt/twist. Without them, thaumatin's positional residual
-  rose from 0.5 to 2 px.
-- **Images and frame range:** taken from its `input.json`, unless
-  `--image` or `--range` names others.
-- **No autoindexing:** the orientation is known, so `AUTOINDEX` is skipped
-  and only the orientation is refined. The cell, distance and beam stay at
-  their refined values.
-- **Provenance:** each value is tagged `[previous run]` in `process.log`,
-  and `input.json` records the run in `inputs.imports.previous_run`.
-- **What it refuses:** a run that failed, is still running or never reached
-  `PROCESS`. For a multi-sweep run, give one `sweep_N` directory.
-
-`--xparm GXPARM.XDS` does the same from an XPARM file alone (for example,
-one from XDS). It leaves out the tilt/twist that only `process.json` holds.
-
-## CONTROL script
-
-```bash
-./bin/ProcessingLab --image ~/Downloads/thaumatin_9_1_master.h5 \
+./bin/ProcessingLab \
+    --image ~/data/thaumatin_9_1_master.h5 \
     --output-dir thaumatin_run <<'EOF'
 FINDSPOTS THRESHOLD 5.0 MAXSPOTS 1500 FIND 1 FILE thaum.spt MULTIFRAME RANGE 1 50
 GO
@@ -272,93 +154,304 @@ EXIT
 EOF
 ```
 
+- **Script source:** CONTROL comes from a file named on the command line,
+  or from standard input.
+- **Running:** `GO` runs the pending step, and `EXIT` ends the session.
+- **Images:** CBF and SMV sweeps are named with `DIRECTORY` and `TEMPLATE`.
+  An HDF5 master needs only `--image`.
+
+[USAGE.md](USAGE.md) is the complete command-line and CONTROL keyword
+reference.
+
+## What a run produces
+
+From `run --image thaumatin_9_1_master.h5 --range 1:100`:
+
+```text
+processing_20261023_094808/
+├── input.json            resolved inputs, with the source of every value
+├── process.json          stage status, results, warnings, outputs
+├── process.md            readable report generated from the two records
+├── process.log           full processing log
+├── process.mtz           unmerged reflections
+├── spots.spt             FINDSPOTS spot list
+├── index.log             autoindexing result (cell, matrix, lattice, indexed %)
+├── XPARM.XDS             orientation, cell and detector after AUTOINDEX
+├── GXPARM.XDS            the same after PROCESS (refined)
+├── xds/                  XDS.INP, XPARM.XDS, GXPARM.XDS
+├── xia2/                 automatic.xinfo, run_xia2.sh
+└── mosflm/               mosflm.in
+```
+
+Excerpt of its `process.md`:
+
+```markdown
+**Status:** completed
+**Run mode:** `RunMode.PROCESSINGLAB` — parameters from image headers, …
+
+| Parameter | Value | Source | Overrides |
+| --- | --- | --- | --- |
+| Wavelength (Å) | 0.979499 | image_header | — |
+| Distance (mm) | 200 | image_header | — |
+| Frames | 1–100 | command_line | 1–2400 (image_header) |
+
+## Indexing
+- Lattice: tP, space group 75
+- Indexed 97% of 1500 spots, RMSD 0.093 (hkl)
+
+## Refined geometry
+- Cell: 57.938 57.938 150.244 Å, 90.00 90.00 90.00°
+- Distance: 199.982 mm; beam 166.119 172.925 mm
+- Mosaicity: 0.101°
+
+## Integration
+- 60881 reflections from 543070 predictions (44 overlapped, 512506 profile-fitted)
+
+## Data quality
+P 4; unscaled: no batch scaling or outlier rejection.
+| d_min (Å) | Observed | Unique | Completeness | R_meas | I/σ | CC½ |
+| **total** | 58405 | 45327 | 26.7% | 17.9% | 3.30 | 97.6 |
+```
+
+The statistics are unscaled and in the indexing space group. They show how
+the integration went, not the final data quality, which comes from scaling.
+
+## Command-line interface
+
+`run` is the recommended entry point for automated processing.
+
+| Option | Description |
+| ------ | ----------- |
+| `--image PATH` | HDF5/NeXus master, or one frame of a CBF/SMV sweep. Repeatable: each image is a sweep, processed into `sweep_1/`, `sweep_2/`, … |
+| `--range FIRST:LAST` | Inclusive frame range. Default: every frame found. |
+| `--output-dir DIR` | Output directory; it must not exist yet. |
+| `--xds-inp PATH` | Import experiment parameters from `XDS.INP`. |
+| `--xinfo PATH` | Import experiment parameters from a Xia2 `.xinfo`. |
+| `--sweep NAME` | The `.xinfo` sweep to use, when it has several. |
+| `--xparm PATH` | Import an `XPARM.XDS` / `GXPARM.XDS`: cell, space group, geometry and orientation. |
+| `--from RUN` | Reprocess from a completed run, or its `process.json`. |
+| `--spacegroup N` | Override the space group, by number or symbol. |
+| `--cell A B C α β γ` | Override the unit cell; it must fit the space group. |
+| `--run-mode MODE` | State where the parameters come from (see below). |
+
+Without `--output-dir`, each run creates a new `processing_YYYYMMDD_HHMMSS`
+directory. A directory is never reused, so runs stay independent and
+earlier results are never overwritten.
+
+## Run modes and metadata provenance
+
+A run mode states where a run's parameters come from, so it can be
+reproduced.
+
+| Mode | Parameters from | Requires |
+| ---- | --------------- | -------- |
+| `processinglab` (default for `run`) | Image headers, overridden per field by any imports | Nothing |
+| `xds` | `XDS.INP`; headers fill unset fields | `--xds-inp` |
+| `xia2` | Xia2 `.xinfo`; headers fill unset fields | `--xinfo` |
+| `mosflm` (default for scripts) | MOSFLM-style CONTROL keywords | A CONTROL script or standard input |
+
 ```bash
-./bin/ProcessingLab --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf \
-    --output-dir 76c1b_run <<'EOF'
-DIRECTORY ../test_xray_data_cbf
-TEMPLATE 76c1b_0002212_1_####.cbf
-DMAX 320
-FINDSPOTS THRESHOLD 5.0 MAXSPOTS 1500 FIND 1 FILE spots.spt MULTIFRAME RANGE 1 50
+./bin/ProcessingLab run --image sweep_0001.cbf                    # RunMode.PROCESSINGLAB
+./bin/ProcessingLab run --run-mode xds --xds-inp XDS.INP          # RunMode.XDS
+./bin/ProcessingLab run --run-mode xia2 --xinfo automatic.xinfo   # RunMode.XIA2
+```
+
+The mode is recorded in `process.log`, `input.json` and `process.md`.
+Inputs that contradict it are refused before processing starts.
+
+### Parameter precedence
+
+For `run`, each field is resolved separately, lowest priority first:
+
+1. Image header
+2. `XDS.INP`
+3. Xia2 `.xinfo`
+4. `--xparm`, or the refined values of `--from`
+5. The command line (`--range`, `--spacegroup`, `--cell`)
+
+A source overrides only the fields it supplies; it never erases a value it
+doesn't set. `process.log` opens with each resolved value and its source,
+and warns when sources disagree:
+
+```text
+ Experiment metadata
+  Wavelength:    0.97949 Å  [XDS.INP]
+  Distance:      384.99 mm  [XDS.INP]
+  Beam:          214.28 207.96 mm  [image header]
+  Cell:          62.04 186.93 72.36 90.00 100.19 90.00  [XDS.INP]
+  Frame range:   1–900  [CLI]  (900 on disk)
+```
+
+In a CONTROL script run, the imports fill the initial configuration and the
+script's keywords override them.
+
+### Unit-cell and space-group constraints
+
+```bash
+./bin/ProcessingLab run \
+    --from processing_20261022_235027 \
+    --spacegroup P41212 \
+    --cell 57.898 57.898 150.952 90 90 90
+```
+
+- **The cell must fit the space group's crystal system.** A tetragonal cell
+  needs a = b and α = β = γ = 90°. An incompatible cell is refused before
+  processing.
+- **The orientation matrix encodes the cell.** When you override the cell
+  while reusing an orientation (`--from`, `--xparm`), the matrix is rebuilt
+  with your cell and the refined orientation kept. Otherwise predictions
+  would still use the old cell.
+
+Changing only the space group within one lattice, such as P4₁ to P4₁2₁2,
+leaves the predictions unchanged. A reference cell from elsewhere, such as a
+PDB `CRYST1` record, may not match the metric refined from these images. On
+thaumatin, imposing 57.898, 57.898, 150.952 Å over the refined 57.938,
+57.938, 150.244 Å raised the positional residual from 0.47 to 1.12 px.
+Change only the space group when that is all the evidence supports, and
+check the positional residuals in `process.log` before accepting an imposed
+cell.
+
+### Autoindexing and long cell axes
+
+The autoindexing search is bounded by `DMAX`, which is 200 Å by default.
+With an imported cell, `run` sets it to 1.7× the longest cell edge. For
+crystals with very long axes (the 187 Å axis of the 76c1b test data),
+supply the cell with `--xds-inp`, or set `DMAX` in a CONTROL script.
+
+A search bound doesn't make an indexing solution correct. Check the selected
+lattice and cell against the fraction of spots indexed, the positional
+residuals and the symmetry evidence.
+
+## Processing records
+
+| File | Purpose |
+| ---- | ------- |
+| `input.json` | Resolved inputs, with each value's source and what it overrode, the images and the effective settings |
+| `process.json` | Stage status, the selected indexing solution, refined parameters, integration statistics, warnings, errors and output paths |
+| `process.md` | Readable report generated from `input.json` and `process.json` |
+| `process.log` | Detailed log, including the CONTROL input and resolved metadata |
+| `process.mtz` | Unmerged reflections for scaling |
+| `spots.spt` | Spot list from `FINDSPOTS` (or the `FILE` name given) |
+| `index.log` | Autoindexing result: `CELL`, `MATRIX`, `SYSTEM`, `INDEXED`, `RMSD_HKL` |
+| `XPARM.XDS` | Orientation, cell and detector after autoindexing |
+| `GXPARM.XDS` | Refined orientation, cell and detector after integration |
+
+Every information type has one home:
+
+- inputs and their provenance: `input.json`;
+- results and status: `process.json`;
+- per-image diagnostics: `process.log`;
+- reflections: `process.mtz`.
+
+The JSON records give applications and pipelines a stable interface. Both
+carry `"schema_version": 1`.
+
+`process.json` starts as `"status": "running"` with every stage `pending`.
+Each stage then moves to `running` and on to `completed` or `failed`, and
+the run ends `completed` or `failed` with the error. Each update replaces
+the file atomically, so a reader never sees it half-written. If the process
+dies, the file is left at `running`, showing the stage it was in.
+
+`run` always writes these records. A CONTROL script writes them when given
+`--output-dir`.
+
+## Interoperability with XDS, Xia2 and MOSFLM
+
+When a run starts, ProcessingLab writes its resolved experiment as input for
+each run mode, so the run can be repeated or handed to another program. A
+CONTROL script run with `--output-dir` does the same.
+
+| Directory | Contents | Use |
+| --------- | -------- | --- |
+| `xds/` | `XDS.INP`; after the run, copies of `XPARM.XDS` and `GXPARM.XDS` | Repeat with `--run-mode xds`, or start an XDS run |
+| `xia2/` | `automatic.xinfo`, `run_xia2.sh` | Repeat with `--run-mode xia2`, or run Xia2 |
+| `mosflm/` | `mosflm.in`: the run's CONTROL script, without `HKLOUT` | Repeat as a CONTROL-script run |
+
+```bash
+./bin/ProcessingLab run --run-mode xds \
+    --xds-inp processing_20261022_235027/xds/XDS.INP
+./bin/ProcessingLab run --run-mode xia2 \
+    --xinfo processing_20261022_235027/xia2/automatic.xinfo
+./bin/ProcessingLab --run-mode mosflm --output-dir repeated_run \
+    processing_20261022_235027/mosflm/mosflm.in
+```
+
+Each repeat reproduces the original run. The insulin and thaumatin tests
+give the same reflections and statistics in all three modes. The files hold
+the parameters from the start of the original run; to use the refined
+parameters, use `--from`.
+
+**Notes for XDS:**
+
+- **`XDS.INP`:** it is a complete starting point: detector type, overload,
+  image template, data/spot/background ranges and geometry. The detector,
+  overload and rotation axis are derived from the image header, so check
+  them, and the trusted region, for your beamline.
+- **Eiger HDF5:** the sweep appears as `name_??????.h5`, and needs XDS's
+  HDF5 plugin (`LIB=`).
+- **XPARM files:** ProcessingLab's `XPARM.XDS` and `GXPARM.XDS` use its own
+  layout. Use them with `--xparm`; XDS can't read them.
+- **`automatic.xinfo`:** `BEAM` and `DISTANCE` appear only where the run
+  overrode the image header; Xia2 reads the header for the rest.
+
+## Scaling and merging with CCP4
+
+ProcessingLab writes unmerged reflections. Pointless then assesses the
+space group, and Aimless scales and merges:
+
+```bash
+pointless HKLIN process.mtz HKLOUT process_pointless.mtz
+aimless HKLIN process_pointless.mtz HKLOUT process_aimless.mtz <<'EOF'
 GO
-AUTOINDEX DPS THRESHOLD 15 SEPMIN 6 CLUSTER_RADIUS 2
-GO
-PROCESS 1 TO 900
-GO
-EXIT
 EOF
 ```
 
-- **Script source:** CONTROL is read from a file named on the command line,
-  otherwise from stdin; `GO` runs the pending step and `EXIT` ends the session.
-- **`--output-dir DIR`:** the directory must be new. Relative paths in the
-  script (`DIRECTORY`, `IMAGE`) still resolve against the current directory.
-  Without `--output-dir`, the log, MTZ and `ProcessingLabIndex.txt` go in
-  the current directory, and spot lists, `XPARM.XDS` and `GXPARM.XDS` go in
-  `DIRECTORY`.
-- **Run mode:** a script run is `RunMode.MOSFLM`: parameters come from its
-  MOSFLM keywords. `--run-mode mosflm` says so explicitly; other modes are
-  refused here.
-- **Imports:** `--xds-inp`, `--xinfo` and `--xparm XPARM.XDS` fill CONTROL
-  before the script runs, in that order, and the script's keywords override
-  them.
-- **Threads:** by default all cores are used. `NPROC n` sets the number of
-  threads; the log reports it as `USING n PROCESSORS`.
-- **CBF/SMV sweeps:** give `DIRECTORY` and `TEMPLATE` (`#` for the frame
-  digits). An HDF5 master needs only `--image`.
+[`doc/reindex_scale.com`](doc/reindex_scale.com) runs the same two steps.
+This is a minimal example: a given experiment or CCP4 version may need more
+keywords. Read Pointless's symmetry assessment and Aimless's merging
+statistics; a run that completes doesn't establish the right symmetry or
+good data.
 
-## Outputs
+## Testing and validation
 
-| File | Contents |
-| ---- | -------- |
-| `input.json` | What ProcessingLab was asked to process, resolved before it starts: images, imports, every experiment value with its source and what it overrode, and the effective settings |
-| `process.json` | What it found: stage status, the selected indexing solution, refined geometry, integration and resolution-shell statistics, warnings, errors and output paths |
-| `process.md` | A readable report generated from the two JSON files |
-| `process.log` | Everything printed, starting with the CONTROL input (and, for `run`, the resolved metadata) |
-| `process.mtz` | Unmerged MTZ, for POINTLESS/AIMLESS (`HKLOUT` renames it) |
-| `spots.spt` (or the `FILE` name) | Spot list from `FINDSPOTS` |
-| `XPARM.XDS` | Orientation, cell and detector after `AUTOINDEX` |
-| `GXPARM.XDS` | The same after `PROCESS` (refined) |
-| `ProcessingLabIndex.txt` | Autoindexing result in a simple text form |
-| `xds/`, `xia2/`, `mosflm/` | Inputs to repeat the run in each run mode (see [Repeat inputs](#repeat-inputs-xds-xia2-mosflm)) |
+```bash
+make test
+```
 
-`run` always writes the three run records; a CONTROL script writes them when
-given `--output-dir`. Each value lives in one place: inputs and their sources
-in `input.json`, results in `process.json` (`process.md` is generated from
-them), per-image detail in `process.log`, reflections in `process.mtz`.
+CTest runs the unit and differential tests. Some compare ProcessingLab
+against the Fortran `ipmosflm` on the CCP4 insulin example. Their reference
+MTZs aren't in git; [DEVELOPMENT.md](DEVELOPMENT.md) describes how to
+regenerate them.
 
-`process.json` is created as `"status": "running"` with every stage
-`pending`. Each stage then goes `running` → `completed` or `failed`, and the
-run ends `completed` or `failed` with the error. Every update replaces the file
-atomically, so a reader never sees a partial file. A run that crashed is left
-at `running`, showing the stage it was in. Both files carry
-`"schema_version": 1`.
+For scientific validation, look beyond whether processing completes. Check:
 
-## Test fixtures
+- the refined cell and lattice;
+- the fraction of spots indexed;
+- the positional residuals;
+- completeness, I/σ and the resolution-dependent statistics.
 
-Some differential tests compare against `ipmosflm` runs on the CCP4 insulin
-example. The fixture MTZs are not in git. Regenerate them with
-`processing-lab/tools/capture_ipmosflm_oracle.sh`, which sets the macOS
-library path itself and prints the end of the `ipmosflm` log if a step fails:
+Evaluate an imposed cell or space group against the diffraction evidence.
 
-- `testdata/oracle/known_indexed/insulin_1_001.mtz`: run the script with
-  CCP4's `ipmosflm` (the default when `bin/ipmosflm` does not exist).
-- `testdata/oracle/known_indexed_cpp_predict/insulin_1_001.mtz`: build
-  `ipmosflm` with `MOSFLM_CPP_PREDICT=1` (see above), run the script with
-  `IPMOSFLM=` pointing at it, and copy the MTZ there.
-
-# Binaries
-**`ProcessingLab`** (`ProcessingLab.exe` on Windows) — a thin CONTROL →
-PROCESS driver that does **not** link the Fortran amalgamation. Autotools
-`mosflm/` remains an optional scientific oracle named **`ipmosflm`** (F77).
+## Project layout
 
 | Path | Role |
 | ---- | ---- |
-| [`processing-lab`](processing-lab/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
-| [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle** → `bin/ipmosflm`) |
-| `bin/ProcessingLab` | C++ CONTROL binary (default; `.exe` on Windows) |
-| `processing-lab/build/processinglab_dev` | Developer diagnostics (not installed) |
-| `bin/ipmosflm` | F77 oracle only (`make fortran-oracle`) |
+| [`processing-lab/`](processing-lab/) | C++ geometry, reflection prediction, integration, CONTROL execution and the CTest suite |
+| [`mosflm/`](mosflm/) | Amalgamated Fortran, built only as the optional reference `ipmosflm` |
+| `bin/ProcessingLab` | The processing executable (`ProcessingLab.exe` on Windows) |
+| `bin/ipmosflm` | Optional Fortran reference (`make fortran-oracle`) |
+| `processing-lab/build/processinglab_dev` | Developer diagnostics; not installed |
+
+## Documentation
+
+- [USAGE.md](USAGE.md): command-line options, run modes, metadata imports,
+  CONTROL keywords and outputs.
+- [DEVELOPMENT.md](DEVELOPMENT.md): direct CMake builds, the Fortran
+  reference implementation and test fixtures.
+- [processing-lab/README.md](processing-lab/README.md): the C++ library and
+  `processinglab_dev`.
 
 ## License
 
-BSD-style — see [`COPYING`](COPYING) (A.G.W. Leslie / MRC LMB).
+BSD-style; see [COPYING](COPYING) for the terms and attribution
+(A.G.W. Leslie / MRC LMB).
