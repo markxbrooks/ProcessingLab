@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-fs::path find_integrationlab() {
+fs::path find_processinglab() {
     if (const char* env = std::getenv("MOSFLM_PROCESSINGLAB")) {
         return env;
     }
@@ -77,7 +77,8 @@ std::string slurp(const fs::path& path) {
 }  // namespace
 
 int main() {
-    const fs::path bin = find_integrationlab();
+    // Absolute: commands run from a build-tree output directory.
+    const fs::path bin = fs::absolute(find_processinglab());
     CHECK_MSG(fs::exists(bin), "missing ProcessingLab binary in build/");
 
     // Empty stdin → Mosflm-like banner + NO RUN CARD + END OF PROCESSING.
@@ -85,7 +86,7 @@ int main() {
         const fs::path out =
             fs::temp_directory_path() / "mosflm_e0_empty.out";
         const std::string cmd =
-            bin.string() + " </dev/null >" + out.string() + " 2>/dev/null";
+            "cd " + mosflm_test::output_dir("ipmosflm_thin_run").string() + " && " + bin.string() + " </dev/null >" + out.string() + " 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         const std::string text = slurp(out);
         CHECK_MSG(text.find("Mosflm version 7.4.0") != std::string::npos,
@@ -107,7 +108,7 @@ int main() {
         }
         const fs::path out =
             fs::temp_directory_path() / "mosflm_e0_exit.out";
-        const std::string cmd = bin.string() + " " + script.string() + " >" +
+        const std::string cmd = "cd " + mosflm_test::output_dir("ipmosflm_thin_run").string() + " && " + bin.string() + " " + std::filesystem::absolute(script).string() + " >" +
                                 out.string() + " 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         const std::string text = slurp(out);
@@ -125,7 +126,7 @@ int main() {
         }
         const fs::path out =
             fs::temp_directory_path() / "mosflm_e3_strategy.out";
-        const std::string cmd = bin.string() + " " + script.string() + " >" +
+        const std::string cmd = "cd " + mosflm_test::output_dir("ipmosflm_thin_run").string() + " && " + bin.string() + " " + std::filesystem::absolute(script).string() + " >" +
                                 out.string() + " 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         const std::string text = slurp(out);
@@ -142,9 +143,9 @@ int main() {
         CHECK_MSG(fs::exists(script), "missing cpp_process.in");
         const fs::path mtz =
             fs::temp_directory_path() / "mosflm_d6_thin.mtz";
-        const std::string cmd = bin.string() + " HKLOUT " + mtz.string() +
+        const std::string cmd = "cd " + mosflm_test::output_dir("ipmosflm_thin_run").string() + " && " + bin.string() + " HKLOUT " + mtz.string() +
                                 " --image " + img.string() + " " +
-                                script.string() + " >/dev/null 2>/dev/null";
+                                std::filesystem::absolute(script).string() + " >/dev/null 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         CHECK_MSG(fs::exists(mtz) && fs::file_size(mtz) > 0,
                   "ProcessingLab did not write MTZ");

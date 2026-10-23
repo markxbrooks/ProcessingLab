@@ -23,6 +23,7 @@ int main() {
     CHECK_MSG(std::filesystem::exists(spt), "missing insulin_1.spt");
 
     ControlSession session;
+    session.set_output_directory(mosflm_test::output_dir("control_autoindex_25"));
     session.parse_line("DIRECTORY testdata/oracle/known_indexed");
     session.parse_line("DISTANCE 160.0");
     session.parse_line("WAVELENGTH 0.9790");
@@ -55,6 +56,7 @@ int main() {
             std::ofstream(dir / n) << "stub";
         }
         ControlSession s2;
+        s2.set_output_directory(mosflm_test::output_dir("control_autoindex_57"));
         const std::optional<fs::path> img = dir / "x_1_0001.cbf";
         CHECK(resolve_findspots_frame_path(s2.state(), img, 37) == dir / "x_1_0037.cbf");
         CHECK(resolve_findspots_frame_path(s2.state(), img, 1) == dir / "x_1_0001.cbf");

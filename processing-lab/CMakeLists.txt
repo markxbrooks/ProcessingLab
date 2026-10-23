@@ -247,6 +247,8 @@ set(MOSFLM_GEOMETRY_SOURCES
     src/io/ImportedSweepGeometry.cpp
     src/io/XinfoImporter.cpp
     src/io/ExperimentModel.cpp
+    src/io/Json.cpp
+    src/io/RunRecord.cpp
     src/io/XdsInpImporter.cpp
     src/io/XparmIO.cpp
     ${gemmi_SOURCE_DIR}/src/mtz.cpp
@@ -469,6 +471,9 @@ endif()
 if(BUILD_TESTING)
     # Shared assertion helpers (tests/test_util.hpp).
     include_directories(${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    # Test outputs go under the build tree (mosflm_test::output_dir), never
+    # into source, testdata or image directories.
+    add_compile_definitions(PL_TEST_OUTPUT_ROOT="${CMAKE_CURRENT_BINARY_DIR}/test_output")
 
     add_executable(test_unit_cell
         tests/unit/test_unit_cell.cpp
@@ -633,6 +638,16 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
+    add_executable(test_run_record
+        tests/unit/test_run_record.cpp
+    )
+    target_link_libraries(test_run_record PRIVATE mosflm_geometry)
+    add_test(
+        NAME run_record
+        COMMAND test_run_record
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
     add_executable(test_experiment_model
         tests/unit/test_experiment_model.cpp
     )
@@ -748,6 +763,21 @@ if(BUILD_TESTING)
 
     # F77 ipmosflm vs ProcessingLab CLI on known-indexed insulin SMV PROCESS.
     # Compares MTZ cell/SG + ASU-aware HKL recall (soft-skip if missing).
+    # ProcessingLab input modes (run / imports / script) on CCP4 insulin.
+    add_executable(test_run_modes
+        tests/differential/test_run_modes.cpp
+    )
+    target_link_libraries(test_run_modes PRIVATE mosflm_geometry)
+    target_compile_definitions(test_run_modes PRIVATE
+        PROCESSINGLAB_BIN="$<TARGET_FILE:ProcessingLab>"
+    )
+    add_dependencies(test_run_modes ProcessingLab)
+    add_test(
+        NAME run_modes
+        COMMAND test_run_modes
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
     add_executable(test_smv_process_compare
         tests/differential/test_smv_process_compare.cpp
     )

@@ -2746,7 +2746,13 @@ std::vector<ControlGoResult> ControlSession::run_stream(
             if (matrix_needed_ > 0) {
                 throw std::runtime_error("CONTROL: incomplete MATRIX before GO");
             }
+            if (go_observer_.before) {
+                go_observer_.before(state_);
+            }
             results.push_back(go(image_override));
+            if (go_observer_.after) {
+                go_observer_.after(results.back(), state_);
+            }
             continue;
         }
         parse_line(line);

@@ -14,6 +14,7 @@ using mosflm::control::ControlSession;
 int main() {
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_16"));
         s.parse_line("DISTANCE 160.0");
         s.parse_line("WAVELENGTH 0.9790");
         s.parse_line("PIXEL 0.0816 0.0816");
@@ -49,10 +50,12 @@ int main() {
     {
         // MOSFLM shorthand ``PROCESS 1 100`` and ``PROCESS 1 TO 5``.
         ControlSession a;
+        a.set_output_directory(mosflm_test::output_dir("control_session_51"));
         a.parse_line("PROCESS 1 100");
         CHECK_EQ(a.state().process_first, 1);
         CHECK_EQ(a.state().process_last, 100);
         ControlSession b;
+        b.set_output_directory(mosflm_test::output_dir("control_session_55"));
         b.parse_line("PROCESS 1 TO 5");
         CHECK_EQ(b.state().process_first, 1);
         CHECK_EQ(b.state().process_last, 5);
@@ -61,6 +64,7 @@ int main() {
 
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_63"));
         s.parse_line("AMAT -0.01 0 0  0 -0.01 0  0 0 -0.01");
         CHECK(s.state().has_matrix);
         CHECK(std::fabs(s.state().amat(1, 1) + 0.01) < 1e-12);
@@ -69,6 +73,7 @@ int main() {
     {
         // Unknown keywords warn; AUTOINDEX sets pending; EXIT sets flag.
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_71"));
         s.parse_line("GENFILE gen.dat");
         s.parse_line("autoindex dps threshold 20 file insulin_1.spt");
         CHECK(s.state().autoindex_pending);
@@ -80,6 +85,7 @@ int main() {
 
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_82"));
         bool threw = false;
         try {
             s.parse_line("REFIX");
@@ -91,6 +97,7 @@ int main() {
 
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_93"));
         s.parse_line("NMASKS 5 5");
         CHECK_EQ(s.state().nmasks_x, 5);
         CHECK_EQ(s.state().nmasks_y, 5);
@@ -100,6 +107,7 @@ int main() {
 
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_102"));
         CHECK(s.state().nproc >= 1);
         s.parse_line("NPROC 4");
         CHECK_EQ(s.state().nproc, 4);
@@ -111,6 +119,7 @@ int main() {
 
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_113"));
         CHECK(s.state().autoindex.use_fft3d);
         CHECK(s.state().autoindex.use_dps);
         s.parse_line("AUTOINDEX NOFFT FILE spots.spt");
@@ -133,6 +142,7 @@ int main() {
 
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_135"));
         CHECK(std::fabs(s.state().min_fractioncalc - 0.5) < 1e-12);
         s.parse_line("MINFRAC 0.25");
         CHECK(std::fabs(s.state().min_fractioncalc - 0.25) < 1e-12);
@@ -164,6 +174,7 @@ int main() {
     {
         // Real Fortran script parses CELL / PROCESS without throwing.
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_166"));
         s.parse_file("testdata/images/known_indexed/ipmosflm.in");
         CHECK(s.state().has_cell);
         CHECK(s.state().has_symmetry);
@@ -177,6 +188,7 @@ int main() {
 
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_179"));
         s.parse_file("testdata/images/known_indexed/cpp_process.in");
         CHECK(s.state().has_matrix);
         CHECK(s.state().has_cell);
@@ -188,6 +200,7 @@ int main() {
     {
         // RUN alias executes PROCESS via run_stream.
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_190"));
         std::istringstream in(
             "CELL 78 78 78 90 90 90\n"
             "SYMMETRY 1\n"
@@ -201,6 +214,7 @@ int main() {
     }
     {
         ControlSession s;
+        s.set_output_directory(mosflm_test::output_dir("control_session_203"));
         std::istringstream in("STRATEGY ANGLE 90\nRUN\nEXIT\n");
         const auto runs = s.run_stream(in);
         CHECK_EQ(static_cast<int>(runs.size()), 1);

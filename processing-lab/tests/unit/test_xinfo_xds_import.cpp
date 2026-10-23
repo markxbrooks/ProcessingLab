@@ -119,6 +119,7 @@ int main() {
     {
         // Merge order: XDS then xinfo — xinfo wins paths / range / λ.
         ControlSession session;
+        session.set_output_directory(mosflm_test::output_dir("xinfo_xds_import_121"));
         apply_imported_geometry(
             session, XdsInpImporter::parse_file("testdata/import/sample_xds.inp")
         );

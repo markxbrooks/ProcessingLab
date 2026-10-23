@@ -37,7 +37,7 @@ script. The image headers supply the experiment metadata; XDS.INP and
 
 **Metadata precedence**, per field, lowest to highest: image header, XDS.INP,
 `.xinfo`, command line. A source only overrides the fields it sets (an
-`.xinfo` without detector geometry keeps the header's). `Process.Log` starts
+`.xinfo` without detector geometry keeps the header's). `process.log` starts
 with the resolved values and their sources, and warns when sources disagree
 on a value (the higher-priority one is used):
 
@@ -51,8 +51,9 @@ on a value (the higher-priority one is used):
   *** WARNING: Distance: XDS.INP 384.99 mm overrides image header 395.00 mm
 ```
 
-Every output goes in the output directory: `Process.Log`, `process.mtz`,
-`spots.spt`, `XPARM.XDS`, `GXPARM.XDS`, `integrationlab_index.txt`. Spots
+Every output goes in the output directory: `input.json`, `process.json`,
+`process.md`, `process.log`, `process.mtz`,
+`spots.spt`, `XPARM.XDS`, `GXPARM.XDS`, `ProcessingLabIndex.txt`. Spots
 for indexing come from the first 50 frames of the range. With a known cell
 (from XDS.INP), `DMAX` is set to 1.7× its longest edge so a long axis is not
 lost in autoindexing. For anything else (fixed matrix, resolution limits,
@@ -78,7 +79,7 @@ the session.
 | `--xds-inp path` | Parse `XDS.INP` into CONTROL (see below). |
 | `--xinfo path` | Parse Xia2 `.xinfo` into CONTROL (first sweep and the wavelength it names). `run --sweep` selects another. |
 | `--xparm path` | Parse `XPARM.XDS` / `GXPARM.XDS` into `CELL`, `SYMMETRY`, geometry, and `MATRIX`. Alias `--gxparm`. |
-| `--output-dir DIR` | New directory (must not exist) for `Process.Log`, the MTZ, spot lists, `XPARM.XDS` and `GXPARM.XDS`. Relative paths in the script (`DIRECTORY`, `IMAGE`) still resolve against the current directory. |
+| `--output-dir DIR` | New directory (must not exist) for `process.log`, the MTZ, spot lists, `XPARM.XDS`, `GXPARM.XDS` and the run records (`input.json`, `process.json`, `process.md`). Relative paths in the script (`DIRECTORY`, `IMAGE`) still resolve against the current directory. |
 | `script.in` | CONTROL file. Lines starting with `!` are comments. |
 
 Apply order before the script: **`--xds-inp`, then `--xinfo`, then `--xparm`**.
@@ -306,15 +307,21 @@ the wrong lattice.
 
 ## Outputs
 
-All paths are relative to `DIRECTORY` (default `.`) unless absolute.
+With `--output-dir` (always, for `run`) every relative path is in the output
+directory. Otherwise the log and MTZ are relative to the current directory,
+and spot lists, `XPARM.XDS` and `GXPARM.XDS` to `DIRECTORY` (default `.`).
 
 | File | When | Contents |
 | ---- | ---- | -------- |
+| `input.json` | start (with an output directory) | Resolved inputs: images, imports, each experiment value as `{value, unit, source, overrides}`, effective FINDSPOTS / AUTOINDEX / integration / refinement settings, the CONTROL run. |
+| `process.json` | created at start, updated at every `GO` | `status` (`running` / `completed` / `failed`), `stages` with status and timing, `indexing.selected_solution`, `refinement` (after PROCESS), `integration`, `quality` (unscaled shells + total), `warnings`, `error`, `outputs`. Written atomically. |
+| `process.md` | with `process.json` | Report rendered from the two records. |
+| `process.log` | always (unless `--no-log`) | Everything printed to the terminal. |
 | `HKLOUT` (`process.mtz` if unset) | PROCESS `GO` | Unmerged MOSFLM-style MTZ. |
 | `spots.spt` (or `FINDSPOTS FILE`) | FINDSPOTS `GO` | MOSFLM spot list: header (nfast, nslow, pixel, yscale, omega; invflag; beam mm) then `x_mm y_mm φ_start φ_end I σ`. |
 | `XPARM.XDS` | successful AUTOINDEX | Bridge-format orientation + cell + detector (written next to `DIRECTORY`). |
 | `GXPARM.XDS` | PROCESS `GO` (unless `XPARMOUT OFF`) | Same layout after integration. Override the path with `XPARMOUT`. |
-| `integrationlab_index.txt` | successful AUTOINDEX | Sidecar `CELL` / `MATRIX` / `SYSTEM` / `CHARACTER` / `INDEXED` / `RMSD_HKL`. |
+| `ProcessingLabIndex.txt` | successful AUTOINDEX | Sidecar `CELL` / `MATRIX` / `SYSTEM` / `CHARACTER` / `INDEXED` / `RMSD_HKL`. |
 | stdout | always | Banner, import lines, COLSPOT/INDEXFIT/IDXREF/PROCESS log, `PROCESSINGLAB_*` dump. |
 
 ### MTZ columns

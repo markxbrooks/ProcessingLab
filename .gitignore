@@ -16,7 +16,8 @@
 *.mtz
 # Build directories
 build/
-_build/GXPARM.XDS
+_build/
+GXPARM.XDS
 XPARM.XDS
 test*cbf
 ANOMPLOT
@@ -27,3 +28,6 @@ ROGUES
 *.Log
 *spt
 *.cbf
+
+# ProcessingLab run: default output directories (processing_YYYYMMDD_HHMMSS)
+processing_*/

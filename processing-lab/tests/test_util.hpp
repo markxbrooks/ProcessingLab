@@ -3,10 +3,29 @@
 /// Minimal assertion helpers for standalone CTest executables (no framework).
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
+#include <system_error>
 
 namespace mosflm_test {
+
+/// Fresh, empty directory for one test's outputs: ``<build>/test_output/
+/// <name>`` (CMake ``PL_TEST_OUTPUT_ROOT``), so tests never write into the
+/// source tree, ``testdata`` or the image directories they read.
+inline std::filesystem::path output_dir(const std::string& name) {
+#ifdef PL_TEST_OUTPUT_ROOT
+    const std::filesystem::path root = PL_TEST_OUTPUT_ROOT;
+#else
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / "processinglab_tests";
+#endif
+    const std::filesystem::path dir = root / name;
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir);
+    return dir;
+}
 
 inline int& failures() {
     static int n = 0;

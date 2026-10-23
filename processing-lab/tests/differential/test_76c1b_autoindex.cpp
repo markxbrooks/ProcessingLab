@@ -56,6 +56,7 @@ int main() {
     std::filesystem::create_directories(work);
 
     ControlSession session;
+    session.set_output_directory(mosflm_test::output_dir("76c1b_autoindex_58"));
     session.parse_line("DIRECTORY " + dir.string());
     session.parse_line("TEMPLATE 76c1b_0002212_1_####.cbf");
     session.parse_line("DMAX 320");
@@ -170,6 +171,7 @@ int main() {
         dir / "xia2/DEFAULT/NATIVE/SWEEP1/index/XPARM.XDS";
     CHECK_MSG(std::filesystem::exists(xparm), "missing xia2 index XPARM.XDS");
     ControlSession seeded;
+    seeded.set_output_directory(mosflm_test::output_dir("76c1b_autoindex_172"));
     seeded.parse_line("DIRECTORY " + dir.string());
     seeded.parse_line("XPARM " + xparm.string());
     CHECK(seeded.state().has_cell);

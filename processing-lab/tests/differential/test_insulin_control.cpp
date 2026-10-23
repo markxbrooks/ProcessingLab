@@ -105,6 +105,7 @@ int main() {
     );
 
     ControlSession session;
+    session.set_output_directory(mosflm_test::output_dir("insulin_control"));
     const auto runs = session.run_script(script, img_path);
     CHECK_MSG(!runs.empty(), "expected at least one GO");
     CHECK(runs.back().ran_process);

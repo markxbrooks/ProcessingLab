@@ -10,6 +10,8 @@
 #include "mosflm/diffraction/ProcessPipeline.hpp"
 #include "mosflm/io/ExperimentModel.hpp"
 #include "mosflm/io/ImportedSweepGeometry.hpp"
+#include "mosflm/io/RunMode.hpp"
+#include "mosflm/io/RunRecord.hpp"
 #include "mosflm/io/XdsInpImporter.hpp"
 #include "mosflm/io/XinfoImporter.hpp"
 #include "mosflm/io/XparmIO.hpp"
@@ -19,6 +21,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <ctime>
 #include <cstdio>
@@ -52,7 +55,7 @@ std::string control_input_block(const std::string& text) {
 }
 
 /// Copies everything written to stdout / stderr (C++ streams, C ``printf``
-/// from the DPS indexer, …) into a log file (default ``Process.Log``) while
+/// from the DPS indexer, …) into a log file (default ``process.log``) while
 /// still showing it on the terminal.
 ///
 /// Descriptors 1 and 2 are redirected into pipes; one thread per pipe copies
@@ -331,12 +334,45 @@ void report_runs(
     }
 }
 
+/// Parse CONTROL into ``session`` without running any ``GO``, to record the
+/// effective settings before processing. ``XPARMOUT`` is skipped (it writes a
+/// file when parsed); parsing stops at ``EXIT``.
+void dry_parse(mosflm::control::ControlSession& session, const std::string& control) {
+    std::istringstream in(control);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream toks(line.substr(0, line.find('!')));
+        std::string key;
+        toks >> key;
+        for (auto& c : key) {
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        if (key.empty() || key == "GO" || key == "RUN" || key == "XPARMOUT") {
+            continue;
+        }
+        if (key == "EXIT" || key == "QUIT" || key == "END") {
+            break;
+        }
+        session.parse_line(line);
+    }
+}
+
+/// Wire ``record`` to every GO of ``session``.
+void observe(mosflm::control::ControlSession& session, mosflm::io::ProcessRecord& record) {
+    session.set_go_observer({
+        [&record](const mosflm::control::ControlState& st) { record.begin_stage(st); },
+        [&record](const mosflm::control::ControlGoResult& r, const mosflm::control::ControlState& st) {
+            record.end_stage(r, st);
+        },
+    });
+}
+
 void print_run_usage() {
     std::cout
         << "Usage: ProcessingLab run --image PATH [--image PATH ...]\n"
         << "         [--range FIRST:LAST] [--output-dir DIR]\n"
         << "         [--xds-inp XDS.INP] [--xinfo FILE.xinfo [--sweep NAME]]\n"
-        << "         [--help] [--version]\n"
+        << "         [--run-mode processinglab|xds|xia2] [--help] [--version]\n"
         << "\n"
         << "  Finds spots, autoindexes and integrates each sweep. Metadata comes\n"
         << "  from the image headers; XDS.INP, then .xinfo, then the command line\n"
@@ -347,15 +383,33 @@ void print_run_usage() {
         << "  --range      Inclusive frame range (default: every frame).\n"
         << "  --output-dir New directory for all outputs (must not exist). Default:\n"
         << "               processing_YYYYMMDD_HHMMSS in the current directory.\n"
-        << "  --sweep      Which .xinfo sweep, if it has several.\n";
+        << "               Holds input.json (resolved inputs and provenance),\n"
+        << "               process.json (stage status and results), process.md,\n"
+        << "               process.log, process.mtz, XPARM.XDS and GXPARM.XDS.\n"
+        << "  --sweep      Which .xinfo sweep, if it has several.\n"
+        << "  --run-mode   Where the parameters come from (recorded in the log and\n"
+        << "               input.json):\n"
+        << "                 processinglab  image headers, overridden by any imports\n"
+        << "                                (RunMode.PROCESSINGLAB, the default)\n"
+        << "                 xds            XDS.INP; needs --xds-inp, no --xinfo\n"
+        << "                                (RunMode.XDS)\n"
+        << "                 xia2           .xinfo; needs --xinfo, no --xds-inp\n"
+        << "                                (RunMode.XIA2)\n"
+        << "               mosflm (RunMode.MOSFLM) is a CONTROL script run:\n"
+        << "               ProcessingLab --run-mode mosflm [--image IMG] script.in\n";
 }
 
 /// ``ProcessingLab run``: image-first processing into a fresh directory.
 int run_command(int argc, char** argv) {
     namespace fs = std::filesystem;
+    std::vector<std::string> command_line{"ProcessingLab", "run"};
+    for (int i = 0; i < argc; ++i) {
+        command_line.emplace_back(argv[i]);
+    }
     mosflm::io::ExperimentInputs base;
     std::vector<fs::path> images;
     std::optional<fs::path> output_dir;
+    mosflm::io::RunMode run_mode = mosflm::io::RunMode::PROCESSINGLAB;
     const auto need = [&](int& i, std::string_view opt) -> const char* {
         if (i + 1 >= argc) {
             throw std::invalid_argument(std::string(opt) + " needs a value");
@@ -406,10 +460,19 @@ int run_command(int argc, char** argv) {
                 base.xinfo = fs::absolute(need(i, a));
             } else if (a == "--sweep") {
                 base.sweep = need(i, a);
+            } else if (a == "--run-mode") {
+                const std::string v = need(i, a);
+                const auto rm = mosflm::io::parse_run_mode(v);
+                if (!rm) {
+                    throw std::invalid_argument("--run-mode must be processinglab, xds, mosflm or xia2, got '" + v + "'");
+                }
+                run_mode = *rm;
             } else {
                 throw std::invalid_argument("unexpected argument '" + std::string(a) + "' (see run --help)");
             }
         }
+        mosflm::io::validate_run_mode(run_mode, /*script_mode=*/false, base.xds_inp.has_value(),
+                                      base.xinfo.has_value(), base.sweep.has_value());
     } catch (const std::exception& ex) {
         std::cerr << "ProcessingLab run: " << ex.what() << '\n';
         return 2;
@@ -474,15 +537,27 @@ int run_command(int argc, char** argv) {
         control << "\nGO\nEXIT\n";
 
         std::ostringstream header;
+        header << "\n Run mode:        " << mosflm::io::run_mode_name(run_mode) << "  (parameters from "
+               << mosflm::io::run_mode_parameter_source(run_mode) << ")\n";
         m.write_summary(header);
         header << "  Output:        " << dir.string() << '\n';
 
+        std::optional<mosflm::io::ProcessRecord> record;
         try {
-            ProcessLog plog(dir / "Process.Log", control_input_block(control.str()));
+            ProcessLog plog(dir / "process.log", control_input_block(control.str()));
             print_banner();
             std::cout << header.str();
+            // input.json: the effective inputs, settled before processing.
+            mosflm::control::ControlSession dry;
+            dry.set_output_directory(dir);
+            dry_parse(dry, control.str());
+            const mosflm::io::RunContext ctx{
+                "run", run_mode, command_line, control.str(), base.xds_inp, base.xinfo, std::nullopt, base.sweep};
+            record.emplace(dir, mosflm::io::input_record(m, dry.state(), ctx),
+                           mosflm::io::planned_stages(control.str()));
             mosflm::control::ControlSession session;
             session.set_output_directory(dir);
+            observe(session, *record);
             std::optional<fs::path> img_override;
             if (m.hdf5) {
                 img_override = m.image.value;
@@ -490,9 +565,16 @@ int run_command(int argc, char** argv) {
             std::istringstream in(control.str());
             const auto runs = session.run_stream(in, img_override, "");
             report_runs(session, runs, dir / "process.mtz");
+            record->add_output(dir / "process.mtz", "mtz");
+            record->add_output(dir / "ProcessingLabIndex.txt", "index_summary");
+            record->add_output(dir / "process.log", "log");
+            record->complete();
             print_end();
         } catch (const std::exception& ex) {
             std::cerr << "ProcessingLab run: " << ex.what() << '\n';
+            if (record) {
+                record->fail(ex.what());
+            }
             status = 1;
         }
     }
@@ -516,8 +598,10 @@ int main(int argc, char** argv) {
     std::optional<std::filesystem::path> xinfo_path;
     std::optional<std::filesystem::path> xds_inp_path;
     std::optional<std::filesystem::path> xparm_path;
-    std::optional<std::filesystem::path> log_path = "Process.Log";
+    std::optional<std::filesystem::path> log_path = "process.log";
     std::optional<std::filesystem::path> output_dir;
+    // CONTROL keywords are MOSFLM's: a script run is RunMode.MOSFLM.
+    mosflm::io::RunMode run_mode = mosflm::io::RunMode::MOSFLM;
     bool want_help = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -586,6 +670,22 @@ int main(int argc, char** argv) {
             output_dir = argv[++i];
             continue;
         }
+        if (a == "--run-mode") {
+            const auto rm = i + 1 < argc ? mosflm::io::parse_run_mode(argv[i + 1]) : std::nullopt;
+            if (!rm) {
+                std::cerr << "ProcessingLab: --run-mode must be processinglab, xds, mosflm or xia2\n";
+                return 2;
+            }
+            ++i;
+            try {
+                mosflm::io::validate_run_mode(*rm, /*script_mode=*/true, false, false, false);
+            } catch (const std::exception& ex) {
+                std::cerr << "ProcessingLab: " << ex.what() << '\n';
+                return 2;
+            }
+            run_mode = *rm;
+            continue;
+        }
         if (a == "version" || a == "--version") {
             print_banner();
             return 0;
@@ -603,12 +703,15 @@ int main(int argc, char** argv) {
             << "Usage: ProcessingLab run --image PATH ...   (see run --help)\n"
             << "       ProcessingLab [HKLOUT out.mtz] [--image img]\n"
             << "         [--xinfo file.xinfo] [--xds-inp XDS.INP]\n"
-            << "         [--xparm XPARM.XDS] [--log Process.Log | --no-log]\n"
-            << "         [--output-dir DIR] [script.in]\n"
+            << "         [--xparm XPARM.XDS] [--log process.log | --no-log]\n"
+            << "         [--output-dir DIR] [--run-mode mosflm] [script.in]\n"
+            << "  A CONTROL script run is RunMode.MOSFLM (parameters from MOSFLM\n"
+            << "  keywords); --run-mode mosflm states it explicitly.\n"
             << "  --output-dir: new directory (must not exist) for the log, MTZ,\n"
-            << "  spot list, XPARM.XDS and GXPARM.XDS; script paths stay relative\n"
-            << "  to the current directory.\n"
-            << "  Output is also written to Process.Log (--log path to rename,\n"
+            << "  spot list, XPARM.XDS, GXPARM.XDS and the run records input.json,\n"
+            << "  process.json and process.md; script paths stay relative to the\n"
+            << "  current directory.\n"
+            << "  Output is also written to process.log (--log path to rename,\n"
             << "  --no-log to disable), including the CONTROL input.\n"
             << "  Reads CONTROL from script or stdin (GO/RUN → C++ science).\n"
             << "  --xds-inp then --xinfo then --xparm fill CONTROL before script.\n"
@@ -646,7 +749,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Log file: everything on stdout/stderr is copied (Process.Log).
+    // Log file: everything on stdout/stderr is copied (process.log).
     std::optional<ProcessLog> plog;
     if (log_path) {
         try {
@@ -661,7 +764,10 @@ int main(int argc, char** argv) {
     }
 
     print_banner();
+    std::cout << " Run mode:        " << mosflm::io::run_mode_name(run_mode) << "  (parameters from "
+              << mosflm::io::run_mode_parameter_source(run_mode) << ")\n";
 
+    std::optional<mosflm::io::ProcessRecord> record;
     try {
         mosflm::control::ControlSession session;
         if (output_dir) {
@@ -702,6 +808,57 @@ int main(int argc, char** argv) {
             }
         }
 
+        // With --output-dir a script run gets the same records as ``run``:
+        // input.json (header, imports, --xparm and CONTROL, per field),
+        // process.json with stage lifecycle, process.md.
+        if (output_dir && !interactive) {
+            try {
+                std::string text = control_text;
+                if (script) {
+                    std::ifstream f(*script);
+                    std::ostringstream t;
+                    t << f.rdbuf();
+                    text = t.str();
+                }
+                const auto with_imports = [&](mosflm::control::ControlSession& d, bool xparm) {
+                    d.set_output_directory(*output_dir);
+                    if (xds_inp_path) {
+                        mosflm::io::apply_imported_geometry(d, mosflm::io::XdsInpImporter::parse_file(*xds_inp_path));
+                    }
+                    if (xinfo_path) {
+                        mosflm::io::apply_imported_geometry(d, mosflm::io::XinfoImporter::parse_file(*xinfo_path));
+                    }
+                    if (xparm && xparm_path) {
+                        mosflm::io::apply_xparm(d, mosflm::io::read_xparm(*xparm_path));
+                    }
+                };
+                mosflm::control::ControlSession imports_only;
+                with_imports(imports_only, true);
+                mosflm::control::ControlSession dry;
+                with_imports(dry, true);
+                dry_parse(dry, text);
+                mosflm::io::ExperimentInputs in;
+                in.image = img_override ? *img_override
+                                        : dry.resolve_image_path(std::nullopt, dry.state().process_first);
+                in.xds_inp = xds_inp_path;
+                in.xinfo = xinfo_path;
+                auto model = mosflm::io::resolve_experiment(in);
+                mosflm::io::apply_control_state(model, imports_only.state(), mosflm::io::MetadataSource::Xparm);
+                mosflm::io::apply_control_state(model, dry.state(), mosflm::io::MetadataSource::Control);
+                std::vector<std::string> cl;
+                for (int i = 0; i < argc; ++i) {
+                    cl.emplace_back(argv[i]);
+                }
+                const mosflm::io::RunContext ctx{"script", run_mode, cl, text, xds_inp_path, xinfo_path,
+                                                 xparm_path, std::nullopt};
+                record.emplace(*output_dir, mosflm::io::input_record(model, dry.state(), ctx),
+                               mosflm::io::planned_stages(text));
+                observe(session, *record);
+            } catch (const std::exception& ex) {
+                std::cerr << " *** WARNING **   input.json / process.json not written: " << ex.what() << '\n';
+            }
+        }
+
         std::vector<mosflm::control::ControlGoResult> runs;
         if (script) {
             runs = session.run_script(*script, img_override);
@@ -729,6 +886,14 @@ int main(int argc, char** argv) {
             out_mtz = *output_dir / out_mtz;
         }
         report_runs(session, runs, out_mtz);
+        if (record) {
+            record->add_output(out_mtz, "mtz");
+            record->add_output(*output_dir / "ProcessingLabIndex.txt", "index_summary");
+            if (log_path) {
+                record->add_output(*log_path, "log");
+            }
+            record->complete();
+        }
         if (output_dir) {
             std::cout << "  Output directory: " << output_dir->string() << '\n';
         }
@@ -741,6 +906,9 @@ int main(int argc, char** argv) {
         return 0;
     } catch (const std::exception& ex) {
         std::cerr << "ProcessingLab: " << ex.what() << '\n';
+        if (record) {
+            record->fail(ex.what());
+        }
         return 1;
     }
 }

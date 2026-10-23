@@ -76,8 +76,7 @@ void overlay(
             " overrides " + source_label(field.source, hdf5) + " " + shown_old
         );
     }
-    field.value = value;
-    field.source = source;
+    field.assign(value, source);
 }
 
 std::string cell_str(const std::array<double, 6>& c) {
@@ -180,10 +179,27 @@ const char* source_label(MetadataSource source, bool hdf5) {
             return "XDS.INP";
         case MetadataSource::Xinfo:
             return ".xinfo";
+        case MetadataSource::Xparm:
+            return "XPARM";
+        case MetadataSource::Control:
+            return "CONTROL";
         case MetadataSource::CommandLine:
             return "CLI";
         case MetadataSource::None:
             break;
+    }
+    return "unset";
+}
+
+const char* source_id(MetadataSource source) {
+    switch (source) {
+        case MetadataSource::ImageHeader: return "image_header";
+        case MetadataSource::XdsInp: return "xds_inp";
+        case MetadataSource::Xinfo: return "xinfo";
+        case MetadataSource::Xparm: return "xparm";
+        case MetadataSource::Control: return "control";
+        case MetadataSource::CommandLine: return "command_line";
+        case MetadataSource::None: break;
     }
     return "unset";
 }
@@ -296,7 +312,7 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
         if (b < a) {
             std::swap(a, b);
         }
-        m.frame_range = {{a, b}, MetadataSource::CommandLine};
+        m.frame_range.assign({a, b}, MetadataSource::CommandLine);
     }
     const auto [f0, f1] = m.frame_range.value;
     const int last_on_disk = first_on_disk + m.frames_available - 1;
@@ -369,6 +385,101 @@ void ExperimentModel::write_summary(std::ostream& os) const {
     for (const auto& w : warnings) {
         os << "  *** WARNING: " << w << '\n';
     }
+}
+
+void apply_control_state(
+    ExperimentModel& m, const control::ControlState& st, MetadataSource source
+) {
+    ImportedSweepGeometry g;
+    const auto differs = [](double a, double b) { return rel_differs(a, b, 1e-9); };
+    // Only values the script changed: imports already applied to ``st`` match.
+    if (st.has_wavelength && !(m.wavelength_A.set() && !differs(m.wavelength_A.value, st.wavelength_A))) {
+        g.has_wavelength = true;
+        g.wavelength_A = st.wavelength_A;
+    }
+    if (st.has_distance && !(m.distance_mm.set() && !differs(m.distance_mm.value, st.distance_mm))) {
+        g.has_distance = true;
+        g.distance_mm = st.distance_mm;
+    }
+    if (st.has_beam && !(m.beam_mm.set() && !differs(m.beam_mm.value.first, st.beam_x_mm) &&
+                         !differs(m.beam_mm.value.second, st.beam_y_mm))) {
+        g.has_beam = true;
+        g.beam_x_mm = st.beam_x_mm;
+        g.beam_y_mm = st.beam_y_mm;
+    }
+    if (st.has_pixel && !(m.pixel_mm.set() && !differs(m.pixel_mm.value.first, st.pixel_x_mm) &&
+                          !differs(m.pixel_mm.value.second, st.pixel_y_mm))) {
+        g.has_pixel = true;
+        g.pixel_x_mm = st.pixel_x_mm;
+        g.pixel_y_mm = st.pixel_y_mm;
+    }
+    const std::array<double, 6> cell{st.cell.a, st.cell.b, st.cell.c,
+                                     st.cell.alpha_deg, st.cell.beta_deg, st.cell.gamma_deg};
+    if (st.has_cell && !(m.cell.set() && m.cell.value == cell)) {
+        g.has_cell = true;
+        g.cell_a = cell[0];
+        g.cell_b = cell[1];
+        g.cell_c = cell[2];
+        g.cell_alpha = cell[3];
+        g.cell_beta = cell[4];
+        g.cell_gamma = cell[5];
+    }
+    if (st.has_symmetry && !(m.symmetry.set() && m.symmetry.value == st.symmetry_number)) {
+        g.has_symmetry = true;
+        g.symmetry_number = st.symmetry_number;
+    }
+    if (st.process_pending &&
+        m.frame_range.value != std::pair<int, int>{st.process_first, st.process_last}) {
+        g.has_process_range = true;
+        g.process_first = st.process_first;
+        g.process_last = st.process_last;
+    }
+    apply_import(m, g, source);
+}
+
+Json ExperimentModel::to_json() const {
+    const auto field = [](const auto& f, auto&& encode, const char* unit) {
+        Json j = Json::object();
+        j["value"] = f.set() ? encode(f.value) : Json();
+        if (unit != nullptr) {
+            j["unit"] = unit;
+        }
+        j["source"] = source_id(f.source);
+        Json ov = Json::array();
+        for (const auto& [v, src] : f.overrides) {
+            Json o = Json::object();
+            o["value"] = encode(v);
+            o["source"] = source_id(src);
+            ov.push_back(std::move(o));
+        }
+        j["overrides"] = std::move(ov);
+        return j;
+    };
+    const auto num = [](double v) { return Json(v); };
+    const auto pair = [](const std::pair<double, double>& v) {
+        return Json(Json::Array{Json(v.first), Json(v.second)});
+    };
+    Json e = Json::object();
+    e["wavelength"] = field(wavelength_A, num, "angstrom");
+    e["detector_distance"] = field(distance_mm, num, "mm");
+    e["beam_centre"] = field(beam_mm, pair, "mm");
+    e["pixel_size"] = field(pixel_mm, pair, "mm");
+    e["oscillation_width"] = field(oscillation_deg, num, "deg");
+    e["unit_cell"] = field(cell, [](const std::array<double, 6>& c) {
+        Json::Array a;
+        for (double v : c) {
+            a.emplace_back(v);
+        }
+        return Json(std::move(a));
+    }, "angstrom/deg");
+    e["space_group_number"] = field(symmetry, [](int v) { return Json(v); }, nullptr);
+    e["frame_range"] = field(frame_range, [](const std::pair<int, int>& r) {
+        Json j = Json::object();
+        j["first"] = r.first;
+        j["last"] = r.second;
+        return j;
+    }, nullptr);
+    return e;
 }
 
 std::filesystem::path create_output_directory(

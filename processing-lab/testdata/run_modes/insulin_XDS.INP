@@ -1,0 +1,10 @@
+! XDS.INP for the CCP4 insulin frame (ProcessingLab run --xds-inp).
+! @IMAGE_DIR@ is replaced by the test with the image's directory.
+NAME_TEMPLATE_OF_DATA_FRAMES=@IMAGE_DIR@/insulin_1_???.img
+DATA_RANGE=1 1
+X-RAY_WAVELENGTH=0.9790
+DETECTOR_DISTANCE=160.0
+QX=0.0816 QY=0.0816
+OSCILLATION_RANGE=1.0
+UNIT_CELL_CONSTANTS= 78.19 78.19 78.19 90.0 90.0 90.0
+SPACE_GROUP_NUMBER=197

@@ -14,7 +14,6 @@ PROCESS driver that does **not** link the Fortran amalgamation. Autotools
 | ---- | ---- |
 | [`processing-lab`](processing-lab/) | C++ geometry, PREDICT, integration, CONTROL, CTest |
 | [`mosflm/`](mosflm/) | Amalgamated Fortran (**opt-in oracle** → `bin/ipmosflm`) |
-| [`porting.md`](porting.md) | Migration roadmap and current status |
 | `bin/ProcessingLab` | C++ CONTROL binary (default; `.exe` on Windows) |
 | `bin/mosflm_cpp_cli` | Full C++ CLI |
 | `bin/ipmosflm` | F77 oracle only (`make fortran-oracle`) |
@@ -54,13 +53,73 @@ make fortran-oracle   # → bin/ipmosflm (F77; does not overwrite ProcessingLab)
 
 # Usage
 
-```commandline
-./bin/ProcessingLab --image ~/Downloads/thaumatin_9_1_master.h5 <<'EOF'
-NPROC 1
-DIRECTORY /tmp
-FINDSPOTS THRESHOLD 5.0 MAXSPOTS 300 FIND 1 PHI 0.0 0.15 FILE /tmp/thaumatin_cpp.spt
+There are two ways to run ProcessingLab:
+
+- **`ProcessingLab run`**: give it the images and it finds spots, autoindexes
+  and integrates, taking the experiment metadata from the image headers.
+- **CONTROL script**: MOSFLM-style keywords on stdin or in a file, for full
+  control of every step.
+
+`run` always writes into a new output directory, and a script does too with
+`--output-dir`. The full keyword and option reference is in
+[`USAGE.md`](USAGE.md).
+
+## `ProcessingLab run`
+
+```bash
+# Whole sweep from an Eiger HDF5 master
+./bin/ProcessingLab run --image ~/Downloads/thaumatin_9_1_master.h5
+
+# CBF sweep: name any one frame; its numbered siblings are the sweep
+./bin/ProcessingLab run --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf \
+    --range 1:900 --output-dir results/76c1b
+
+# Take the cell, symmetry and geometry from XDS.INP (or .xinfo)
+./bin/ProcessingLab run --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf \
+    --xds-inp XDS.INP --range 1:900
+
+# An .xinfo with several sweeps needs --sweep
+./bin/ProcessingLab run --xinfo automatic.xinfo --sweep SWEEP1
+```
+
+| Option | Role |
+| ------ | ---- |
+| `--image PATH` | HDF5/NeXus master, or one frame of a CBF/SMV sweep. Repeatable: each image is one sweep, processed in turn into `sweep_1/`, `sweep_2/`, … |
+| `--range FIRST:LAST` | Inclusive frame range. Default: every frame found. |
+| `--output-dir DIR` | Output directory; it must not exist yet. Default: a new `processing_YYYYMMDD_HHMMSS`. |
+| `--xds-inp PATH` | Import `XDS.INP`. |
+| `--xinfo PATH` | Import a Xia2 `.xinfo`. |
+| `--sweep NAME` | Which `.xinfo` sweep, when it has several. |
+
+Metadata precedence, per field, lowest to highest: image header, `XDS.INP`,
+`.xinfo`, command line. A source only overrides the fields it sets.
+`process.log` opens with each value and where it came from, and warns when
+sources disagree:
+
+```text
+ Experiment metadata
+  Image source:  .../76c1b_0002212_1_0001.cbf  [CLI]
+  Wavelength:    0.97949 Å  [XDS.INP]
+  Distance:      384.99 mm  [XDS.INP]
+  Beam:          214.28 207.96 mm  [image header]
+  Cell:          62.04 186.93 72.36 90.00 100.19 90.00  [XDS.INP]
+  Frame range:   1–900  [CLI]  (900 on disk)
+```
+
+Spots for indexing come from the first 50 frames of the range. If you import
+a cell, the longest cell edge allowed during autoindexing (`DMAX`) is set to
+1.7× its longest edge. Otherwise it stays at the 200 Å default, which is too
+short for very long axes (76c1b's 187 Å). For those, pass `--xds-inp` or use a
+script with `DMAX`.
+
+## CONTROL script
+
+```bash
+./bin/ProcessingLab --image ~/Downloads/thaumatin_9_1_master.h5 \
+    --output-dir thaumatin_run <<'EOF'
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 1500 FIND 1 FILE thaum.spt MULTIFRAME RANGE 1 50
 GO
-AUTOINDEX DPS THRESHOLD 20
+AUTOINDEX DPS THRESHOLD 15
 GO
 PROCESS 1 TO 999
 GO
@@ -68,12 +127,13 @@ EXIT
 EOF
 ```
 
-```commandline
-./bin/ProcessingLab --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf hklout test.mtz <<'EOF'
+```bash
+./bin/ProcessingLab --image ../test_xray_data_cbf/76c1b_0002212_1_0001.cbf \
+    --output-dir 76c1b_run <<'EOF'
 DIRECTORY ../test_xray_data_cbf
 TEMPLATE 76c1b_0002212_1_####.cbf
 DMAX 320
-FINDSPOTS THRESHOLD 5.0 MAXSPOTS 20000 FIND 1 FILE /tmp/testdata.spt MULTIFRAME RANGE 1 50
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 1500 FIND 1 FILE spots.spt MULTIFRAME RANGE 1 50
 GO
 AUTOINDEX DPS THRESHOLD 15 SEPMIN 6 CLUSTER_RADIUS 2
 GO
@@ -82,6 +142,60 @@ GO
 EXIT
 EOF
 ```
+
+- **Script source:** CONTROL is read from a file named on the command line,
+  otherwise from stdin; `GO` runs the pending step and `EXIT` ends the session.
+- **`--output-dir DIR`:** the directory must be new. Relative paths in the
+  script (`DIRECTORY`, `IMAGE`) still resolve against the current directory.
+  Without `--output-dir`, the log, MTZ and `ProcessingLabIndex.txt` go in
+  the current directory, and spot lists, `XPARM.XDS` and `GXPARM.XDS` go in
+  `DIRECTORY`.
+- **Imports:** `--xds-inp`, `--xinfo` and `--xparm XPARM.XDS` fill CONTROL
+  before the script runs, in that order, and the script's keywords override
+  them.
+- **Threads:** by default all cores are used. `NPROC n` sets the number of
+  threads; the log reports it as `USING n PROCESSORS`.
+- **CBF/SMV sweeps:** give `DIRECTORY` and `TEMPLATE` (`#` for the frame
+  digits). An HDF5 master needs only `--image`.
+
+## Outputs
+
+| File | Contents |
+| ---- | -------- |
+| `input.json` | What ProcessingLab was asked to process, resolved before it starts: images, imports, every experiment value with its source and what it overrode, and the effective settings |
+| `process.json` | What it found: stage status, the selected indexing solution, refined geometry, integration and resolution-shell statistics, warnings, errors and output paths |
+| `process.md` | A readable report generated from the two JSON files |
+| `process.log` | Everything printed, starting with the CONTROL input (and, for `run`, the resolved metadata) |
+| `process.mtz` | Unmerged MTZ, for POINTLESS/AIMLESS (`HKLOUT` renames it) |
+| `spots.spt` (or the `FILE` name) | Spot list from `FINDSPOTS` |
+| `XPARM.XDS` | Orientation, cell and detector after `AUTOINDEX` |
+| `GXPARM.XDS` | The same after `PROCESS` (refined) |
+| `ProcessingLabIndex.txt` | Autoindexing result in a simple text form |
+
+`run` always writes the three run records; a CONTROL script writes them when
+given `--output-dir`. Each value lives in one place: inputs and their sources
+in `input.json`, results in `process.json` (`process.md` is generated from
+them), per-image detail in `process.log`, reflections in `process.mtz`.
+
+`process.json` is created as `"status": "running"` with every stage
+`pending`. Each stage then goes `running` → `completed` or `failed`, and the
+run ends `completed` or `failed` with the error. Every update replaces the file
+atomically, so a reader never sees a partial file. A run that crashed is left
+at `running`, showing the stage it was in. Both files carry
+`"schema_version": 1`.
+
+## Test fixtures
+
+Some differential tests compare against `ipmosflm` runs on the CCP4 insulin
+example. The fixture MTZs are not in git. Regenerate them with
+`processing-lab/tools/capture_ipmosflm_oracle.sh`, which sets the macOS
+library path itself and prints the end of the `ipmosflm` log if a step fails:
+
+- `testdata/oracle/known_indexed/insulin_1_001.mtz`: run the script with
+  CCP4's `ipmosflm` (the default when `bin/ipmosflm` does not exist).
+- `testdata/oracle/known_indexed_cpp_predict/insulin_1_001.mtz`: build
+  `ipmosflm` with `MOSFLM_CPP_PREDICT=1` (see above), run the script with
+  `IPMOSFLM=` pointing at it, and copy the MTZ there.
 
 ## License
 

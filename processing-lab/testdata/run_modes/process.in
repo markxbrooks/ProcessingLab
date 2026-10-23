@@ -1,0 +1,9 @@
+! CONTROL script for script mode (ProcessingLab --image IMG --output-dir DIR process.in).
+! Relative FILE / HKLOUT paths go to the output directory.
+FINDSPOTS THRESHOLD 5.0 MAXSPOTS 1500 FIND 1 FILE insulin.spt
+GO
+AUTOINDEX DPS THRESHOLD 15
+GO
+PROCESS 1 TO 1
+GO
+EXIT

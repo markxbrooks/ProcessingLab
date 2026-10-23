@@ -135,6 +135,7 @@ int main() {
     }
 
     ControlSession s;
+    s.set_output_directory(mosflm_test::output_dir("thaumatin_profile3d_137"));
     s.parse_line("NPROC 1");
     s.parse_line("SYMMETRY 75");
     s.parse_line("WAVELENGTH 0.97949913");

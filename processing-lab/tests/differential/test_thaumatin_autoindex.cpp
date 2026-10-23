@@ -90,6 +90,7 @@ int main() {
         std::filesystem::temp_directory_path() / "thaumatin_autoindex.spt";
 
     ControlSession session;
+    session.set_output_directory(mosflm_test::output_dir("thaumatin_autoindex_92"));
     // Multi-frame FINDSPOTS loads frames under OpenMP; libhdf5 here is not
     // thread-safe, so this exercises Hdf5ImageReader's lock.
     session.parse_line("NPROC 4");

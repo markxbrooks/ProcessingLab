@@ -263,6 +263,14 @@ using FindSpotsRunner = std::function<void(
     const std::optional<std::filesystem::path>& image_override
 )>;
 
+/// Hooks around each ``GO`` in :meth:`ControlSession::run_stream`, for run
+/// records: ``before`` sees the state with the step still pending, ``after``
+/// the result. An exception from ``go`` propagates after ``before`` ran.
+struct GoObserver {
+    std::function<void(const ControlState&)> before;
+    std::function<void(const ControlGoResult&, const ControlState&)> after;
+};
+
 /// Pure-C++ CONTROL driver (Phase D subset + Phase E extensions).
 ///
 /// Supported: geometry keywords, ``PROCESS``, ``GO``/``RUN``, ``EXIT``,
@@ -305,6 +313,8 @@ public:
     [[nodiscard]] const ControlState& state() const { return state_; }
     /// Set :member:`ControlState::output_directory`.
     void set_output_directory(const std::filesystem::path& dir) { state_.output_directory = dir; }
+    /// Observe each ``GO`` run by :meth:`run_stream`.
+    void set_go_observer(GoObserver observer) { go_observer_ = std::move(observer); }
     [[nodiscard]] bool exit_requested() const { return state_.exit_requested; }
     [[nodiscard]] bool done_run() const { return state_.done_run; }
     [[nodiscard]] bool strategy_done() const { return state_.strategy_done; }
@@ -335,6 +345,7 @@ public:
 
 private:
     ControlState state_;
+    GoObserver go_observer_;
     int matrix_needed_{0};
     std::vector<double> matrix_buf_;
     std::set<std::string> warned_unknown_;

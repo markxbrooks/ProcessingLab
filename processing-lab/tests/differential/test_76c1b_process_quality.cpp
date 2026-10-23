@@ -76,6 +76,7 @@ int main() {
     // --- Short wedge I/σ gate (frames 1–10) ---
     {
         ControlSession session;
+        session.set_output_directory(mosflm_test::output_dir("76c1b_process_quality_78"));
         session.parse_line("DIRECTORY " + dir.string());
         session.parse_line("TEMPLATE 76c1b_0002212_1_####.cbf");
         // Geometry from the XPARM alone (a hand-set BEAM was a workaround
@@ -105,6 +106,7 @@ int main() {
     // --- Medium wedge CORRECT-lite tables (frames 1–50) ---
     {
         ControlSession session;
+        session.set_output_directory(mosflm_test::output_dir("76c1b_process_quality_107"));
         session.parse_line("DIRECTORY " + dir.string());
         session.parse_line("TEMPLATE 76c1b_0002212_1_####.cbf");
         // Geometry from the XPARM alone (a hand-set BEAM was a workaround

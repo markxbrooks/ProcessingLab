@@ -46,7 +46,7 @@ int run_cmd(const std::string& cmd) {
     return rc;
 }
 
-fs::path find_integrationlab() {
+fs::path find_processinglab() {
     if (const char* env = std::getenv("MOSFLM_PROCESSINGLAB")) {
         return env;
     }
@@ -171,7 +171,8 @@ double time_ms(const std::string& cmd) {
 }  // namespace
 
 int main() {
-    const fs::path cpp_bin = find_integrationlab();
+    // Absolute: commands run from a build-tree output directory.
+    const fs::path cpp_bin = fs::absolute(find_processinglab());
     const fs::path f77_bin = find_ipmosflm();
     const fs::path img = find_insulin_img();
     const fs::path cpp_script =
@@ -209,8 +210,8 @@ int main() {
             ("mosflm_perf_cpp_" + std::to_string(i) + ".mtz");
         fs::remove(mtz);
         const std::string cmd =
-            cpp_bin.string() + " HKLOUT " + mtz.string() + " --image " +
-            img.string() + " " + cpp_script.string() + " >/dev/null 2>/dev/null";
+            "cd " + mosflm_test::output_dir("ipmosflm_perf_run").string() + " && " + cpp_bin.string() + " HKLOUT " + mtz.string() + " --image " +
+            img.string() + " " + std::filesystem::absolute(cpp_script).string() + " >/dev/null 2>/dev/null";
         const double ms = time_ms(cmd);
         CHECK_MSG(fs::exists(mtz) && fs::file_size(mtz) > 0,
                   "C++ PROCESS produced no MTZ");

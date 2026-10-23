@@ -62,7 +62,7 @@ int run_cmd(const std::string& cmd) {
     return rc;
 }
 
-fs::path find_integrationlab() {
+fs::path find_processinglab() {
     if (const char* env = std::getenv("MOSFLM_PROCESSINGLAB")) {
         return env;
     }
@@ -247,7 +247,7 @@ const Spot* nearest_spot(const Spot& q, const std::vector<Spot>& cloud) {
 }  // namespace
 
 int main() {
-    const fs::path cpp_bin_raw = find_integrationlab();
+    const fs::path cpp_bin_raw = find_processinglab();
     const fs::path dials_bin_raw = find_dials_bin_dir();
     const fs::path img_raw = find_insulin_img();
     const fs::path cpp_script =
@@ -277,8 +277,8 @@ int main() {
     const fs::path cpp_mtz = work / "cpp.mtz";
     {
         const std::string cmd =
-            cpp_bin.string() + " HKLOUT " + cpp_mtz.string() + " --image " +
-            img.string() + " " + cpp_script.string() + " >" +
+            "cd " + mosflm_test::output_dir("smv_dials_compare_run").string() + " && " + cpp_bin.string() + " HKLOUT " + cpp_mtz.string() + " --image " +
+            img.string() + " " + std::filesystem::absolute(cpp_script).string() + " >" +
             (work / "cpp.log").string() + " 2>&1";
         CHECK_EQ(run_cmd(cmd), 0);
         CHECK_MSG(

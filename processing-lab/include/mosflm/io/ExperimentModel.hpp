@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mosflm/io/ImportedSweepGeometry.hpp"
+#include "mosflm/io/Json.hpp"
 
 #include <array>
 #include <ctime>
@@ -19,19 +20,34 @@ enum class MetadataSource {
     ImageHeader,
     XdsInp,
     Xinfo,
+    Xparm,    ///< ``--xparm`` XPARM.XDS / GXPARM.XDS (script mode)
+    Control,  ///< CONTROL script keyword (script mode)
     CommandLine,
 };
 
 /// Label for logs (``"HDF5 header"``, ``"XDS.INP"``, …).
 [[nodiscard]] const char* source_label(MetadataSource source, bool hdf5);
+/// Identifier for records (``"image_header"``, ``"xds_inp"``, …).
+[[nodiscard]] const char* source_id(MetadataSource source);
 
-/// A value with the source that set it.
+/// A value with the source that set it, and what it replaced.
 template <class T>
 struct Sourced {
     T value{};
     MetadataSource source{MetadataSource::None};
+    /// Earlier values, oldest first, each with its source: a later source
+    /// replaces the value but the record keeps what it overrode.
+    std::vector<std::pair<T, MetadataSource>> overrides;
 
     [[nodiscard]] bool set() const { return source != MetadataSource::None; }
+    /// Take ``v`` from ``src``, keeping the previous value in ``overrides``.
+    void assign(T v, MetadataSource src) {
+        if (set()) {
+            overrides.emplace_back(value, source);
+        }
+        value = std::move(v);
+        source = src;
+    }
 };
 
 /// Inputs for one sweep of ``ProcessingLab run``.
@@ -76,7 +92,20 @@ struct ExperimentModel {
     [[nodiscard]] std::vector<std::string> control_lines() const;
     /// "Experiment metadata" block for the log.
     void write_summary(std::ostream& os) const;
+    /// ``experiment`` section of ``input.json``: each field as
+    /// ``{value, unit, source, overrides: [{value, source}, …]}``.
+    [[nodiscard]] Json to_json() const;
 };
+
+/// Script mode: geometry set in a parsed (not run) CONTROL ``state`` that
+/// differs from ``model`` — from ``--xparm`` or the script's keywords —
+/// overrides it with provenance ``source``; differences are warned like
+/// imports. Values the imports already supplied are unchanged.
+void apply_control_state(
+    ExperimentModel& model,
+    const control::ControlState& state,
+    MetadataSource source = MetadataSource::Control
+);
 
 /// Merge image header, ``XDS.INP``, ``.xinfo`` and CLI values for one sweep.
 ///
