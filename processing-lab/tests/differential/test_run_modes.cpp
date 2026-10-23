@@ -7,6 +7,7 @@
  *   - ``run --xinfo`` (image named by the import)
  *   - ``run --xinfo`` with two sweeps (refused without ``--sweep``)
  *   - ``run --image --image`` (one ``sweep_N`` directory per image)
+ *   - ``run --from`` (refined geometry of an earlier run, no autoindexing)
  *   - ``run`` refusals: existing output directory, frames not on disk
  *   - CONTROL script mode with ``--output-dir``
  *   - run records: input.json provenance, process.json lifecycle (completed
@@ -91,11 +92,16 @@ bool contains(const std::string& text, const std::string& what) {
     return text.find(what) != std::string::npos;
 }
 
-/// The six standard outputs, with an MTZ of usable size.
-void check_outputs(const fs::path& dir, const std::string& spots, const std::string& label) {
-    for (const std::string& f : std::vector<std::string>{"process.log", "process.mtz", "XPARM.XDS",
-                                                         "GXPARM.XDS", "index.log", spots,
-                                                         "input.json", "process.json", "process.md"}) {
+/// The standard outputs, with an MTZ of usable size. Without autoindexing
+/// (``run --from``) there is no ``XPARM.XDS`` or ``index.log``.
+void check_outputs(const fs::path& dir, const std::string& spots, const std::string& label,
+                   bool autoindexed = true) {
+    std::vector<std::string> files{"process.log", "process.mtz", "GXPARM.XDS", spots,
+                                   "input.json", "process.json", "process.md"};
+    if (autoindexed) {
+        files.insert(files.end(), {"XPARM.XDS", "index.log"});
+    }
+    for (const auto& f : files) {
         CHECK_MSG(fs::exists(dir / f), label + ": missing " + f);
     }
     // Lifecycle finished, no temporary files left by the atomic writes.
@@ -244,6 +250,30 @@ int main() {
         CHECK_EQ(run(work, "run --run-mode mosflm --image " + img + " --output-dir mode_refused",
                      "mode_mosflm.out"), 2);
         CHECK(!fs::exists(work / "mode_refused"));
+    }
+
+    // 11. run --from: re-process with the refined cell, geometry and
+    //     orientation of an earlier run; no autoindexing.
+    {
+        CHECK_EQ(run(work, "run --from xds --output-dir from_xds", "from.out"), 0);
+        check_outputs(work / "from_xds", "spots.spt", "run --from", /*autoindexed=*/false);
+        const std::string log = slurp(work / "from_xds" / "process.log");
+        CHECK(contains(log, "Image source:  " + image.string()));  // from input.json
+        CHECK(contains(log, "Cell:          78.42 78.42 78.42 90.00 90.00 90.00  [previous run]"));
+        CHECK(contains(log, "Distance:      160.00 mm  [previous run]"));
+        CHECK(contains(log, "Orientation:   refined matrix, no autoindexing  [previous run]"));
+        const std::string pj = slurp(work / "from_xds" / "process.json");
+        CHECK(!contains(pj, "\"name\": \"autoindex\""));
+        const std::string ij = slurp(work / "from_xds" / "input.json");
+        CHECK(contains(ij, "\"previous_run\": \"" + (work / "xds").string() + "\""));
+        CHECK(contains(ij, "\"source\": \"previous_run\""));
+        // Refused: --from with --xparm, and a run that did not complete.
+        CHECK_EQ(run(work, "run --from xds --xparm xds/GXPARM.XDS --output-dir from_refused",
+                     "from_xparm.out"), 2);
+        CHECK(contains(slurp(work / "from_xparm.out"), "drop --xparm"));
+        CHECK_EQ(run(work, "run --from failed --output-dir from_refused", "from_failed.out"), 2);
+        CHECK(contains(slurp(work / "from_failed.out"), "the run is failed"));
+        CHECK(!fs::exists(work / "from_refused"));
     }
 
     // Nothing written into the fixtures or next to the image.

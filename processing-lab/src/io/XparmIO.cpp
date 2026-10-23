@@ -325,7 +325,9 @@ XparmGeometry read_xparm(const std::filesystem::path& path) {
             const double dist = std::stod(r[4]);
             const double qx = std::stod(r[5]);
             const double qy = std::stod(r[6]);
-            if (nx > 10 && ny > 10 && dist > 10.0 && qx > 0.01 && qx < 1.0 &&
+            // ProcessingLab's bridge GXPARM writes NX NY as 0 0 (unknown).
+            const bool size_ok = (nx == 0 && ny == 0) || (nx > 10 && ny > 10);
+            if (size_ok && dist > 10.0 && qx > 0.01 && qx < 1.0 &&
                 qy > 0.01 && qy < 1.0) {
                 g.nfast = nx;
                 g.nslow = ny;

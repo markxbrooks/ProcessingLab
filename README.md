@@ -93,6 +93,9 @@ There are two ways to run ProcessingLab:
 
 # State where the parameters come from: here, only XDS.INP
 ./bin/ProcessingLab run --run-mode xds --xds-inp XDS.INP
+
+# Re-process with the refined cell, geometry and orientation of a run
+./bin/ProcessingLab run --from processing_20261022_235027
 ```
 
 | Option | Role |
@@ -103,6 +106,8 @@ There are two ways to run ProcessingLab:
 | `--xds-inp PATH` | Import `XDS.INP`. |
 | `--xinfo PATH` | Import a Xia2 `.xinfo`. |
 | `--sweep NAME` | Which `.xinfo` sweep, when it has several. |
+| `--xparm PATH` | Import `XPARM.XDS` / `GXPARM.XDS`: cell, space group, geometry and orientation. With an orientation, autoindexing is skipped. |
+| `--from RUN` | Re-process from a completed run (its directory or `process.json`), with its refined parameters; see below. |
 | `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
 
 ### Run modes (`--run-mode`)
@@ -112,9 +117,9 @@ shows it at a glance. ProcessingLab refuses inputs that contradict the mode.
 
 | Mode | Shown as | Parameters from | Requires |
 | ---- | -------- | --------------- | -------- |
-| `processinglab` | `RunMode.PROCESSINGLAB` | Image headers, overridden per field by any `--xds-inp` / `--xinfo` | Nothing (default for `run`) |
-| `xds` | `RunMode.XDS` | `XDS.INP`; headers fill unset fields | `--xds-inp`; no `--xinfo` / `--sweep` |
-| `xia2` | `RunMode.XIA2` | Xia2 `.xinfo`; headers fill unset fields | `--xinfo`; no `--xds-inp` |
+| `processinglab` | `RunMode.PROCESSINGLAB` | Image headers, overridden per field by any `--xds-inp` / `--xinfo` / `--xparm` / `--from` | Nothing (default for `run`) |
+| `xds` | `RunMode.XDS` | `XDS.INP`; headers fill unset fields | `--xds-inp`; no `--xinfo` / `--sweep` / `--xparm` / `--from` |
+| `xia2` | `RunMode.XIA2` | Xia2 `.xinfo`; headers fill unset fields | `--xinfo`; no `--xds-inp` / `--xparm` / `--from` |
 | `mosflm` | `RunMode.MOSFLM` | MOSFLM CONTROL keywords | A CONTROL script, not `run` (default for scripts) |
 
 ```bash
@@ -136,7 +141,8 @@ ProcessingLab: RunMode.XDS is for 'ProcessingLab run'; a CONTROL script is RunMo
 ### Metadata precedence
 
 Metadata precedence, per field, lowest to highest: image header, `XDS.INP`,
-`.xinfo`, command line. A source only overrides the fields it sets.
+`.xinfo`, XPARM (`--xparm`, or `--from`'s refined values), command line. A
+source only overrides the fields it sets.
 `process.log` opens with each value and where it came from, and warns when
 sources disagree:
 
@@ -155,6 +161,34 @@ a cell, the longest cell edge allowed during autoindexing (`DMAX`) is set to
 1.7× its longest edge. Otherwise it stays at the 200 Å default, which is too
 short for very long axes (76c1b's 187 Å). For those, pass `--xds-inp` or use a
 script with `DMAX`.
+
+### Re-processing with refined parameters (`--from`)
+
+After a run has refined the cell and geometry, process again starting from
+them with `--from`. It takes a finished run directory, or its `process.json`:
+
+```bash
+./bin/ProcessingLab run --image ~/Downloads/thaumatin_9_1_master.h5 --range 1:900
+./bin/ProcessingLab run --from processing_20261022_235027 --output-dir thaumatin_rerun
+```
+
+- **What `--from` takes:** the refined cell, space group, wavelength,
+  distance, beam, pixel size and orientation from that run's `GXPARM.XDS`,
+  and the refined detector tilt/twist from its `process.json`. `GXPARM.XDS`
+  doesn't carry tilt/twist. Without them, thaumatin's positional residual
+  rose from 0.5 to 2 px.
+- **Images and frame range:** taken from its `input.json`, unless
+  `--image` or `--range` names others.
+- **No autoindexing:** the orientation is known, so `AUTOINDEX` is skipped
+  and only the orientation is refined. The cell, distance and beam stay at
+  their refined values.
+- **Provenance:** each value is tagged `[previous run]` in `process.log`,
+  and `input.json` records the run in `inputs.imports.previous_run`.
+- **What it refuses:** a run that failed, is still running or never reached
+  `PROCESS`. For a multi-sweep run, give one `sweep_N` directory.
+
+`--xparm GXPARM.XDS` does the same from an XPARM file alone (for example,
+one from XDS). It leaves out the tilt/twist that only `process.json` holds.
 
 ## CONTROL script
 

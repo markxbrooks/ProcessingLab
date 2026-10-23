@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mosflm::io {
@@ -25,6 +26,7 @@ struct RunContext {
     std::optional<std::filesystem::path> xinfo;
     std::optional<std::filesystem::path> xparm;
     std::optional<std::string> sweep;
+    std::optional<std::filesystem::path> previous_run;  ///< ``run --from``
 };
 
 /// Stage name for the step a ``GO`` will run (``"findspots"``,
@@ -85,6 +87,27 @@ private:
     Json doc_;
     std::string running_;
 };
+
+/// What ``run --from`` takes from an earlier run.
+struct PreviousRun {
+    std::filesystem::path directory;  ///< The run (or ``sweep_N``) directory.
+    std::filesystem::path image;      ///< Its first image (``input.json``).
+    std::pair<int, int> frame_range;  ///< Its frame range (``input.json``).
+    std::filesystem::path gxparm;     ///< Refined cell, geometry, orientation.
+    /// Refined detector tilt / twist (mrad) from ``process.json``; GXPARM.XDS
+    /// does not carry them.
+    std::optional<std::pair<double, double>> tilt_twist_mrad;
+};
+
+/// Read an earlier run for ``run --from``.
+///
+/// :param path: A run directory, or its ``process.json``.
+/// :return: Its image, frame range, refined ``GXPARM.XDS`` and refined
+///     detector tilt / twist.
+/// :raises std::runtime_error: If the run did not complete, has no refined
+///     geometry, or a record or ``GXPARM.XDS`` is missing; a multi-sweep
+///     directory names its ``sweep_N`` subdirectories.
+[[nodiscard]] PreviousRun read_previous_run(const std::filesystem::path& path);
 
 /// ``process.md`` from the two records; outputs inside ``dir`` are shown by
 /// file name.

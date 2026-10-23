@@ -9,6 +9,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
 #include <system_error>
 
 namespace mosflm::io {
@@ -234,6 +235,7 @@ Json input_record(
     imp["xinfo"] = ctx.xinfo ? Json(ctx.xinfo->string()) : Json();
     imp["xinfo_sweep"] = ctx.sweep ? Json(*ctx.sweep) : Json();
     imp["xparm"] = ctx.xparm ? Json(ctx.xparm->string()) : Json();
+    imp["previous_run"] = ctx.previous_run ? Json(ctx.previous_run->string()) : Json();
     inputs["imports"] = std::move(imp);
     j["inputs"] = std::move(inputs);
     j["experiment"] = m.to_json();
@@ -569,6 +571,75 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
     }
     md << "\nStructured records: `input.json`, `process.json`. Full diagnostics: `process.log`.\n";
     return md.str();
+}
+
+PreviousRun read_previous_run(const std::filesystem::path& path) {
+    namespace fs = std::filesystem;
+    PreviousRun prev;
+    prev.directory = fs::is_directory(path) ? path : path.parent_path();
+    prev.directory = fs::absolute(prev.directory).lexically_normal();
+    const fs::path pj = prev.directory / "process.json";
+    if (!fs::exists(pj)) {
+        std::string sweeps;
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(prev.directory, ec)) {
+            const std::string n = e.path().filename().string();
+            if (e.is_directory() && n.rfind("sweep_", 0) == 0 && fs::exists(e.path() / "process.json")) {
+                sweeps += (sweeps.empty() ? "" : ", ") + n;
+            }
+        }
+        if (!sweeps.empty()) {
+            throw std::runtime_error(prev.directory.string() + " holds several sweeps (" + sweeps +
+                                     "); give one, e.g. --from " + (prev.directory / "sweep_1").string());
+        }
+        throw std::runtime_error("no process.json in " + prev.directory.string());
+    }
+    const Json process = read_json_file(pj);
+    const auto* status = process.find("status");
+    if (status == nullptr || status->string() != "completed") {
+        throw std::runtime_error(pj.string() + ": the run is " +
+                                 (status != nullptr ? status->string() : std::string("unrecorded")) +
+                                 "; --from needs a completed run");
+    }
+    const auto* refinement = process.find("refinement");
+    if (refinement == nullptr || refinement->is_null()) {
+        throw std::runtime_error(pj.string() + ": no refined geometry (PROCESS did not run)");
+    }
+    if (const auto* tt = refinement->find("tilt_twist_mrad"); tt != nullptr && tt->items().size() == 2) {
+        prev.tilt_twist_mrad = std::pair{tt->items()[0].number(), tt->items()[1].number()};
+    }
+    for (const auto& o : process.find("outputs") != nullptr ? process.find("outputs")->items() : Json::Array{}) {
+        const auto* kind = o.find("kind");
+        const auto* p = o.find("path");
+        if (kind != nullptr && p != nullptr && kind->string() == "gxparm") {
+            prev.gxparm = fs::path(p->string()).is_absolute() ? fs::path(p->string())
+                                                               : prev.directory / p->string();
+        }
+    }
+    if (prev.gxparm.empty()) {
+        prev.gxparm = prev.directory / "GXPARM.XDS";
+    }
+    if (!fs::exists(prev.gxparm)) {
+        throw std::runtime_error("refined geometry not found: " + prev.gxparm.string());
+    }
+
+    const fs::path ij = prev.directory / "input.json";
+    const Json input = read_json_file(ij);
+    const auto* inputs = input.find("inputs");
+    const auto* images = inputs != nullptr ? inputs->find("images") : nullptr;
+    if (images == nullptr || images->items().empty() || images->items()[0].find("path") == nullptr) {
+        throw std::runtime_error(ij.string() + ": no image recorded");
+    }
+    prev.image = images->items()[0].find("path")->string();
+    const auto* experiment = input.find("experiment");
+    const auto* range = experiment != nullptr ? experiment->find("frame_range") : nullptr;
+    const auto* value = range != nullptr ? range->find("value") : nullptr;
+    if (value == nullptr || value->find("first") == nullptr || value->find("last") == nullptr) {
+        throw std::runtime_error(ij.string() + ": no frame range recorded");
+    }
+    prev.frame_range = {static_cast<int>(value->find("first")->number()),
+                        static_cast<int>(value->find("last")->number())};
+    return prev;
 }
 
 }  // namespace mosflm::io

@@ -66,6 +66,9 @@ struct ExperimentInputs {
     std::optional<std::filesystem::path> xparm;
     /// Provenance of ``xparm``: ``Xparm``, or ``PreviousRun`` for ``--from``.
     MetadataSource xparm_source{MetadataSource::Xparm};
+    /// Detector tilt and twist (mrad) from ``--from``'s ``process.json``
+    /// (XPARM files do not carry them); provenance ``xparm_source``.
+    std::optional<std::pair<double, double>> tilt_twist_mrad;
 };
 
 /// The experiment once every source is merged, with per-field provenance.
@@ -89,6 +92,8 @@ struct ExperimentModel {
     /// Orientation matrix (row-major) from an XPARM; when set, ``run`` skips
     /// autoindexing and refines only the orientation.
     Sourced<std::array<double, 9>> orientation;
+    /// Detector tilt / twist (mrad), when an earlier run refined them.
+    Sourced<std::pair<double, double>> tilt_twist_mrad;
     int frames_available{0};  ///< Frames found on disk / in the master.
     /// Scientifically meaningful disagreements between sources (the higher
     /// priority value is used; nothing is reconciled silently).

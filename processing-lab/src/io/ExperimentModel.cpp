@@ -325,6 +325,9 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
             m.orientation_control = xparm_orientation_lines(g);
         }
     }
+    if (in.tilt_twist_mrad) {
+        m.tilt_twist_mrad = {*in.tilt_twist_mrad, in.xparm_source};
+    }
     if (in.range) {
         auto [a, b] = *in.range;
         if (b < a) {
@@ -356,6 +359,10 @@ std::vector<std::string> ExperimentModel::control_lines() const {
     g.has_directory = g.has_image = g.has_template = g.has_process_range = false;
     for (auto& l : g.to_control_lines()) {
         lines.push_back(std::move(l));
+    }
+    if (tilt_twist_mrad.set()) {
+        lines.push_back("TILT " + fmt(tilt_twist_mrad.value.first, 4));
+        lines.push_back("TWIST " + fmt(tilt_twist_mrad.value.second, 4));
     }
     lines.insert(lines.end(), orientation_control.begin(), orientation_control.end());
     return lines;
@@ -398,6 +405,10 @@ void ExperimentModel::write_summary(std::ostream& os) const {
     }
     if (symmetry.set()) {
         os << "  Space group:   " << symmetry.value << tag(symmetry.source) << '\n';
+    }
+    if (tilt_twist_mrad.set()) {
+        os << "  Tilt/twist:    " << fmt(tilt_twist_mrad.value.first, 2) << " " << fmt(tilt_twist_mrad.value.second, 2)
+           << " mrad" << tag(tilt_twist_mrad.source) << '\n';
     }
     if (orientation.set()) {
         os << "  Orientation:   refined matrix, no autoindexing" << tag(orientation.source) << '\n';
@@ -495,6 +506,7 @@ Json ExperimentModel::to_json() const {
         return Json(std::move(a));
     }, "angstrom/deg");
     e["space_group_number"] = field(symmetry, [](int v) { return Json(v); }, nullptr);
+    e["detector_tilt_twist"] = field(tilt_twist_mrad, pair, "mrad");
     e["orientation_matrix"] = field(orientation, [](const std::array<double, 9>& a) {
         Json::Array rows;
         for (std::size_t r = 0; r < 3; ++r) {

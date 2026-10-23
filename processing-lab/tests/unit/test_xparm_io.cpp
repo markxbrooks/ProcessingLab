@@ -1,4 +1,5 @@
 #include "mosflm/control/ControlSession.hpp"
+#include "mosflm/io/ImportedSweepGeometry.hpp"
 #include "mosflm/io/XparmIO.hpp"
 #include "test_util.hpp"
 
@@ -104,6 +105,38 @@ int main() {
     CHECK(s2.state().postrefine_period > 0);
     // XDS-frame AMAT has ProcessingLab's handedness (det < 0, as autoindex).
     CHECK(s2.state().amat.determinant() < 0.0);
+
+    // ProcessingLab's own GXPARM writes NX NY as 0 0: the detector line must
+    // still be read, or distance, pixel and beam fall back to defaults.
+    {
+        XparmGeometry own = g;
+        own.nfast = 0;
+        own.nslow = 0;
+        own.distance_mm = 160.0;
+        own.qx_mm = own.qy_mm = 0.0816;
+        own.orgx_px = 1153.92;
+        own.orgy_px = 1157.11;
+        const auto path = std::filesystem::temp_directory_path() / "pl_test_own_gxparm.xds";
+        write_xparm(path, own);
+        const XparmGeometry back = read_xparm(path);
+        CHECK_MSG(std::fabs(back.distance_mm - 160.0) < 1e-6, "own GXPARM distance");
+        CHECK_MSG(std::fabs(back.qx_mm - 0.0816) < 1e-9, "own GXPARM pixel");
+        CHECK_MSG(std::fabs(back.orgx_px - 1153.92) < 1e-3, "own GXPARM orgx");
+
+        // Import fields (for provenance) and the orientation CONTROL lines.
+        const auto im = mosflm::io::imported_from_xparm(back);
+        CHECK(im.has_cell && im.has_symmetry && im.has_distance && im.has_pixel && im.has_beam);
+        CHECK_MSG(std::fabs(im.beam_x_mm - 1153.92 * 0.0816) < 1e-3, "import beam x");
+        const auto lines = mosflm::io::xparm_orientation_lines(back);
+        CHECK_EQ(lines.size(), std::size_t{3});
+        CHECK(lines[0] == "INVERTX OFF" && lines[1] == "REFINE ORIENTATION");
+        CHECK(lines[2].rfind("MATRIX ", 0) == 0);
+        XparmGeometry no_matrix = back;
+        no_matrix.has_amat = false;
+        CHECK(mosflm::io::xparm_orientation_lines(no_matrix).empty());
+        std::error_code e;
+        std::filesystem::remove(path, e);
+    }
 
     std::error_code ec;
     std::filesystem::remove(tmp, ec);

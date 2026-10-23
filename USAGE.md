@@ -42,11 +42,13 @@ script. The image headers supply the experiment metadata; XDS.INP and
 | `--xds-inp PATH` | Import XDS.INP. |
 | `--xinfo PATH` | Import Xia2 `.xinfo`. |
 | `--sweep NAME` | Which `.xinfo` sweep, when it has several (required then). |
+| `--xparm PATH` | Import `XPARM.XDS` / `GXPARM.XDS`: cell, space group, geometry and orientation. With an orientation, autoindexing is skipped and only the orientation is refined. |
+| `--from RUN` | Re-process from a completed run: its directory or `process.json`. See [Re-processing](#re-processing-with-refined-parameters-run---from). |
 | `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
 | `--help`, `--version` | Usage, build version. |
 
 **Metadata precedence**, per field, lowest to highest: image header, XDS.INP,
-`.xinfo`, command line. A source only overrides the fields it sets (an
+`.xinfo`, XPARM (`--xparm`, or the refined values of `--from`), command line. A source only overrides the fields it sets (an
 `.xinfo` without detector geometry keeps the header's). `process.log` starts
 with the resolved values and their sources, and warns when sources disagree
 on a value (the higher-priority one is used):
@@ -69,6 +71,44 @@ for indexing come from the first 50 frames of the range. With a known cell
 lost in autoindexing. For anything else (fixed matrix, resolution limits,
 `NPROC`, …) use a CONTROL script as below.
 
+## Re-processing with refined parameters (`run --from`)
+
+```bash
+ProcessingLab run --from processing_20261022_235027 --output-dir rerun
+ProcessingLab run --from processing_20261022_235027/process.json --range 1:450
+```
+
+`--from` takes a completed run directory, or its `process.json`, and
+processes again from its refined parameters:
+
+| From | Values |
+| ---- | ------ |
+| `GXPARM.XDS` (the `gxparm` output listed in `process.json`) | Cell, space group, wavelength, distance, beam, pixel size, orientation matrix |
+| `process.json` (`refinement.tilt_twist_mrad`) | Detector tilt and twist; `GXPARM.XDS` doesn't carry them |
+| `input.json` | First image and frame range, unless `--image` / `--range` are given |
+
+Each value is tagged `[previous run]` in `process.log` (`previous_run` in
+`input.json`, which also records the run under `inputs.imports`). With the
+orientation known, `AUTOINDEX` is skipped: `FINDSPOTS` still runs to size
+the measurement box, and `PROCESS` refines the orientation only, keeping
+the refined cell, distance and beam. There is no `XPARM.XDS` or `index.log`
+in the output.
+
+```text
+  Cell:          57.94 57.94 150.24 90.00 90.00 90.00  [previous run]
+  Tilt/twist:    9.39 -8.43 mrad  [previous run]
+  Orientation:   refined matrix, no autoindexing  [previous run]
+```
+
+Refused, before anything is created: a run whose `process.json` is
+`failed` or `running` or has no `refinement`, a multi-sweep run directory
+(give its `sweep_N`), and `--from` together with `--xparm`.
+`--run-mode xds` / `xia2` refuse both options, as they name a single
+parameter source.
+
+`run --xparm PATH` imports an `XPARM.XDS` / `GXPARM.XDS` the same way, at
+the same precedence, without the tilt/twist from `process.json`.
+
 ## Run modes (`--run-mode`)
 
 Every run has a run mode: where its parameters come from. It is written to
@@ -78,9 +118,9 @@ processing.
 
 | `--run-mode` | Shown as | Parameters from | Requires |
 | ------------ | -------- | --------------- | -------- |
-| `processinglab` | `RunMode.PROCESSINGLAB` | Image headers, overridden per field by any `--xds-inp` / `--xinfo` | Nothing. Default for `run`. |
-| `xds` | `RunMode.XDS` | `XDS.INP`; headers fill unset fields | `run` with `--xds-inp`; no `--xinfo` / `--sweep` |
-| `xia2` | `RunMode.XIA2` | Xia2 `.xinfo`; headers fill unset fields | `run` with `--xinfo`; no `--xds-inp` |
+| `processinglab` | `RunMode.PROCESSINGLAB` | Image headers, overridden per field by any `--xds-inp` / `--xinfo` / `--xparm` / `--from` | Nothing. Default for `run`. |
+| `xds` | `RunMode.XDS` | `XDS.INP`; headers fill unset fields | `run` with `--xds-inp`; no `--xinfo` / `--sweep` / `--xparm` / `--from` |
+| `xia2` | `RunMode.XIA2` | Xia2 `.xinfo`; headers fill unset fields | `run` with `--xinfo`; no `--xds-inp` / `--xparm` / `--from` |
 | `mosflm` | `RunMode.MOSFLM` | MOSFLM CONTROL keywords | A CONTROL script (no `run`). Default for scripts. |
 
 Values are case-insensitive.
@@ -340,7 +380,7 @@ with `--xds-inp` and/or `--xparm`, or let the image header fill geometry.
 
 ## `XPARM.XDS` / `GXPARM.XDS`
 
-`--xparm` (or CONTROL `XPARM` / `GXPARM`) seeds:
+`--xparm` (script mode or `run`; or CONTROL `XPARM` / `GXPARM`) seeds:
 
 - `CELL`, `SYMMETRY`, `WAVELENGTH`, `DISTANCE`, `PIXEL`, `BEAM` (from `ORGX`/`ORGY` × pixel size)
 - `MATRIX` when the file contains an orientation, with `INVERTX OFF` and

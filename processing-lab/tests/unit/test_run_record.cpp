@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using mosflm::io::Json;
@@ -53,6 +54,30 @@ int main() {
     CHECK(d.find("\"text\"") < d.find("\"int\""));  // insertion order kept
     CHECK(j.find("int") != nullptr && j.find("int")->number() == 3.0);
     CHECK(j.find("missing") == nullptr);
+
+    // Parse: what dump writes reads back the same; escapes and errors.
+    CHECK(Json::parse(d).dump() == j.dump());
+    {
+        const Json p = Json::parse(R"({"s": "caf\u00e9 \"q\" \ud83d\ude00", "n": -1.5e2, "i": 42,
+                                      "a": [true, false, null], "o": {}})");
+        CHECK(p.find("s")->string() == "caf\xc3\xa9 \"q\" \xf0\x9f\x98\x80");
+        CHECK(p.find("n")->number() == -150.0);
+        CHECK(p.find("i")->number() == 42.0);
+        CHECK(p.find("a")->items().size() == 3 && p.find("a")->items()[0].boolean());
+        CHECK(p.find("a")->items()[2].is_null() && p.find("o")->is_object());
+        const auto bad = [](const char* text) {
+            try {
+                (void)Json::parse(text);
+            } catch (const std::runtime_error&) {
+                return true;
+            }
+            return false;
+        };
+        CHECK(bad("{\"a\": 1,}"));
+        CHECK(bad("[1 2]"));
+        CHECK(bad("{\"a\": 1} x"));
+        CHECK(bad("\"open"));
+    }
 
     // Atomic write: content in place, no temporary left.
     const fs::path dir = mosflm_test::output_dir("run_record");
@@ -118,6 +143,44 @@ int main() {
         CHECK(contains(pj, "\"status\": \"skipped\""));
     }
 
+    // run --from: a completed run's image, range and refined GXPARM.XDS.
+    {
+        using mosflm::io::read_previous_run;
+        const fs::path prev = mosflm_test::output_dir("run_record_previous");
+        const auto refused = [](const fs::path& p, const std::string& what) {
+            try {
+                (void)read_previous_run(p);
+            } catch (const std::runtime_error& ex) {
+                return std::string(ex.what()).find(what) != std::string::npos;
+            }
+            return false;
+        };
+        CHECK(refused(prev, "no process.json"));
+        mosflm::io::write_file_atomic(prev / "input.json", R"({"inputs": {"images": [{"path": "/data/x_0001.cbf"}]},
+  "experiment": {"frame_range": {"value": {"first": 2, "last": 90}}}})");
+        mosflm::io::write_file_atomic(prev / "process.json", R"({"status": "failed", "refinement": null})");
+        CHECK(refused(prev, "the run is failed"));
+        mosflm::io::write_file_atomic(prev / "process.json", R"({"status": "completed", "refinement": null})");
+        CHECK(refused(prev, "no refined geometry"));
+        mosflm::io::write_file_atomic(prev / "process.json",
+                                      R"({"status": "completed", "refinement": {"tilt_twist_mrad": [9.4, -8.4]},
+  "outputs": [{"kind": "gxparm", "path": "GXPARM.XDS"}]})");
+        CHECK(refused(prev, "refined geometry not found"));
+        mosflm::io::write_file_atomic(prev / "GXPARM.XDS", "! placeholder\n");
+        const auto pr = read_previous_run(prev / "process.json");  // file or directory
+        CHECK(pr.directory == fs::absolute(prev).lexically_normal());
+        CHECK(pr.image == fs::path("/data/x_0001.cbf"));
+        CHECK(pr.frame_range == std::pair(2, 90));
+        CHECK(pr.gxparm == pr.directory / "GXPARM.XDS");
+        CHECK(pr.tilt_twist_mrad == std::pair(9.4, -8.4));
+
+        // A multi-sweep run names its sweep directories.
+        const fs::path multi = mosflm_test::output_dir("run_record_multi");
+        fs::create_directories(multi / "sweep_1");
+        mosflm::io::write_file_atomic(multi / "sweep_1" / "process.json", "{}");
+        CHECK(refused(multi, "holds several sweeps (sweep_1)"));
+    }
+
     // --run-mode: names, parsing, and inputs that must match the mode.
     {
         using mosflm::io::RunMode;
@@ -149,6 +212,19 @@ int main() {
         CHECK(!refused(RunMode::MOSFLM, true, false, false, false));
         CHECK(refused(RunMode::MOSFLM, false, false, false, false));  // not with 'run'
         CHECK(refused(RunMode::XDS, true, true, false, false));       // not a script run
+        // --xparm / --from: an import like --xds-inp, refused where the mode
+        // names a single source.
+        const auto refused_xparm = [](RunMode m) {
+            try {
+                validate_run_mode(m, false, m == RunMode::XDS, m == RunMode::XIA2, false, true);
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+        CHECK(!refused_xparm(RunMode::PROCESSINGLAB));
+        CHECK(refused_xparm(RunMode::XDS));
+        CHECK(refused_xparm(RunMode::XIA2));
     }
 
     return mosflm_test::finish("run_record");

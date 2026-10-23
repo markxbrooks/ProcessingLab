@@ -372,11 +372,13 @@ void print_run_usage() {
         << "Usage: ProcessingLab run --image PATH [--image PATH ...]\n"
         << "         [--range FIRST:LAST] [--output-dir DIR]\n"
         << "         [--xds-inp XDS.INP] [--xinfo FILE.xinfo [--sweep NAME]]\n"
+        << "         [--xparm GXPARM.XDS | --from RUN_DIR|process.json]\n"
         << "         [--run-mode processinglab|xds|xia2] [--help] [--version]\n"
         << "\n"
         << "  Finds spots, autoindexes and integrates each sweep. Metadata comes\n"
-        << "  from the image headers; XDS.INP, then .xinfo, then the command line\n"
-        << "  override it field by field, and the log shows each value's source.\n"
+        << "  from the image headers; XDS.INP, then .xinfo, then XPARM, then the\n"
+        << "  command line override it field by field, and the log shows each\n"
+        << "  value's source.\n"
         << "  --image      HDF5/NeXus master, or one frame of a CBF/SMV sweep\n"
         << "               (repeatable: one sweep per image, processed in turn).\n"
         << "               Optional when --xinfo or --xds-inp names the images.\n"
@@ -387,6 +389,13 @@ void print_run_usage() {
         << "               process.json (stage status and results), process.md,\n"
         << "               process.log, process.mtz, XPARM.XDS and GXPARM.XDS.\n"
         << "  --sweep      Which .xinfo sweep, if it has several.\n"
+        << "  --xparm      XPARM.XDS / GXPARM.XDS: cell, space group, geometry\n"
+        << "               and orientation. With an orientation, autoindexing is\n"
+        << "               skipped and only the orientation is refined.\n"
+        << "  --from       Re-process from a completed run: its refined\n"
+        << "               GXPARM.XDS, plus its images and frame range unless\n"
+        << "               --image / --range are given. A run directory or its\n"
+        << "               process.json (multi-sweep: one sweep_N directory).\n"
         << "  --run-mode   Where the parameters come from (recorded in the log and\n"
         << "               input.json):\n"
         << "                 processinglab  image headers, overridden by any imports\n"
@@ -409,6 +418,7 @@ int run_command(int argc, char** argv) {
     mosflm::io::ExperimentInputs base;
     std::vector<fs::path> images;
     std::optional<fs::path> output_dir;
+    std::optional<fs::path> from;
     mosflm::io::RunMode run_mode = mosflm::io::RunMode::PROCESSINGLAB;
     const auto need = [&](int& i, std::string_view opt) -> const char* {
         if (i + 1 >= argc) {
@@ -460,6 +470,10 @@ int run_command(int argc, char** argv) {
                 base.xinfo = fs::absolute(need(i, a));
             } else if (a == "--sweep") {
                 base.sweep = need(i, a);
+            } else if (a == "--xparm" || a == "--gxparm") {
+                base.xparm = fs::absolute(need(i, a));
+            } else if (a == "--from") {
+                from = fs::absolute(need(i, a));
             } else if (a == "--run-mode") {
                 const std::string v = need(i, a);
                 const auto rm = mosflm::io::parse_run_mode(v);
@@ -471,8 +485,27 @@ int run_command(int argc, char** argv) {
                 throw std::invalid_argument("unexpected argument '" + std::string(a) + "' (see run --help)");
             }
         }
+        if (from && base.xparm) {
+            throw std::invalid_argument("--from already takes the refined GXPARM.XDS of that run; drop --xparm");
+        }
         mosflm::io::validate_run_mode(run_mode, /*script_mode=*/false, base.xds_inp.has_value(),
-                                      base.xinfo.has_value(), base.sweep.has_value());
+                                      base.xinfo.has_value(), base.sweep.has_value(),
+                                      base.xparm.has_value() || from.has_value());
+        if (from) {
+            // The earlier run's refined geometry; its images and range unless
+            // the command line names others.
+            const auto prev = mosflm::io::read_previous_run(*from);
+            from = prev.directory;
+            base.xparm = prev.gxparm;
+            base.xparm_source = mosflm::io::MetadataSource::PreviousRun;
+            base.tilt_twist_mrad = prev.tilt_twist_mrad;
+            if (images.empty() && !base.xds_inp && !base.xinfo) {
+                images.push_back(prev.image);
+            }
+            if (!base.range) {
+                base.range = prev.frame_range;
+            }
+        }
     } catch (const std::exception& ex) {
         std::cerr << "ProcessingLab run: " << ex.what() << '\n';
         return 2;
@@ -517,7 +550,8 @@ int run_command(int argc, char** argv) {
         for (const auto& line : m.control_lines()) {
             control << line << '\n';
         }
-        if (m.cell.set()) {
+        const bool indexed = m.orientation.set();
+        if (m.cell.set() && !indexed) {
             // DMAX also bounds the autoindexing search: the 200 Å default lost
             // 76c1b's 187 Å axis, while 320 Å skewed thaumatin's cell. With a
             // known cell, allow 1.7× its longest edge.
@@ -527,10 +561,14 @@ int run_command(int argc, char** argv) {
         control << "HKLOUT " << (dir / "process.mtz").string() << '\n'
                 << "FINDSPOTS THRESHOLD 5.0 MAXSPOTS 1500 FIND " << f0
                 << " FILE spots.spt MULTIFRAME RANGE " << f0 << ' ' << std::min(f0 + 49, f1) << '\n'
-                << "GO\n"
-                << "AUTOINDEX DPS THRESHOLD 15\n"
-                << "GO\n"
-                << "PROCESS " << f0 << " TO " << f1;
+                << "GO\n";
+        if (!indexed) {
+            // A known orientation (--xparm / --from) needs no autoindexing;
+            // FINDSPOTS still sizes the measurement box from the spots.
+            control << "AUTOINDEX DPS THRESHOLD 15\n"
+                    << "GO\n";
+        }
+        control << "PROCESS " << f0 << " TO " << f1;
         if (m.oscillation_deg.set() && m.oscillation_deg.source != mosflm::io::MetadataSource::ImageHeader) {
             control << " ANGLE " << m.oscillation_deg.value;
         }
@@ -552,7 +590,8 @@ int run_command(int argc, char** argv) {
             dry.set_output_directory(dir);
             dry_parse(dry, control.str());
             const mosflm::io::RunContext ctx{
-                "run", run_mode, command_line, control.str(), base.xds_inp, base.xinfo, std::nullopt, base.sweep};
+                "run", run_mode, command_line, control.str(), base.xds_inp, base.xinfo, base.xparm, base.sweep,
+                from};
             record.emplace(dir, mosflm::io::input_record(m, dry.state(), ctx),
                            mosflm::io::planned_stages(control.str()));
             mosflm::control::ControlSession session;

@@ -10,7 +10,8 @@ namespace mosflm::io {
 /// Where a run's parameters come from (CLI ``--run-mode``).
 ///
 /// - ``PROCESSINGLAB`` (default for ``ProcessingLab run``): image headers,
-///   overridden per field by any ``--xds-inp`` / ``--xinfo`` imports.
+///   overridden per field by any ``--xds-inp`` / ``--xinfo`` / ``--xparm``
+///   / ``--from`` imports.
 /// - ``XDS``: an ``XDS.INP`` (``--xds-inp``, required); headers fill gaps.
 /// - ``XIA2``: a Xia2 ``.xinfo`` (``--xinfo``, required); headers fill gaps.
 /// - ``MOSFLM``: a MOSFLM-style CONTROL script (script mode, the default
@@ -53,7 +54,7 @@ enum class RunMode {
         case RunMode::XIA2: return "Xia2 .xinfo (--xinfo); image headers fill unset fields";
         case RunMode::PROCESSINGLAB: break;
     }
-    return "image headers, overridden per field by any --xds-inp / --xinfo";
+    return "image headers, overridden per field by any --xds-inp / --xinfo / --xparm / --from";
 }
 
 /// Parse a ``--run-mode`` value (case-insensitive).
@@ -76,9 +77,11 @@ enum class RunMode {
 /// :param has_xds_inp: ``--xds-inp`` given.
 /// :param has_xinfo: ``--xinfo`` given.
 /// :param has_sweep: ``--sweep`` given.
+/// :param has_xparm: ``run --xparm`` or ``run --from`` given.
 /// :raises std::invalid_argument: With what to change, if they conflict.
 inline void validate_run_mode(
-    RunMode mode, bool script_mode, bool has_xds_inp, bool has_xinfo, bool has_sweep
+    RunMode mode, bool script_mode, bool has_xds_inp, bool has_xinfo, bool has_sweep,
+    bool has_xparm = false
 ) {
     const std::string name = run_mode_name(mode);
     switch (mode) {
@@ -102,6 +105,10 @@ inline void validate_run_mode(
                 throw std::invalid_argument(name + " takes parameters from XDS.INP only; drop --xinfo/--sweep "
                                             "or use --run-mode xia2");
             }
+            if (has_xparm) {
+                throw std::invalid_argument(name + " takes parameters from XDS.INP only; drop --xparm/--from "
+                                            "or use --run-mode processinglab");
+            }
             return;
         case RunMode::XIA2:
             if (script_mode) {
@@ -114,6 +121,10 @@ inline void validate_run_mode(
             if (has_xds_inp) {
                 throw std::invalid_argument(name + " takes parameters from the .xinfo only; drop --xds-inp "
                                             "or use --run-mode xds");
+            }
+            if (has_xparm) {
+                throw std::invalid_argument(name + " takes parameters from the .xinfo only; drop --xparm/--from "
+                                            "or use --run-mode processinglab");
             }
             return;
         case RunMode::PROCESSINGLAB:
