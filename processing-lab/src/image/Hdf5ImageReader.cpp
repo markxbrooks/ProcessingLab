@@ -628,6 +628,7 @@ DiffractionImage Hdf5ImageReader::read(
             meta.osc_range_deg > 0.0 ? meta.osc_range_deg : 0.0;
         out.metadata.rotation_axis_omega_deg = meta.rotation_axis_omega_deg;
         out.metadata.detector_id = meta.detector_id;
+        out.metadata.saturation_counts = meta.error_val;
 
         read_frame_pixels(
             layout, frame, meta.width, meta.height, meta.error_val, out.pixels

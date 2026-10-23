@@ -248,6 +248,7 @@ set(MOSFLM_GEOMETRY_SOURCES
     src/io/XinfoImporter.cpp
     src/io/ExperimentModel.cpp
     src/io/Json.cpp
+    src/io/RepeatInputs.cpp
     src/io/RunRecord.cpp
     src/io/XdsInpImporter.cpp
     src/io/XparmIO.cpp

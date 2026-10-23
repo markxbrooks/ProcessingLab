@@ -1,5 +1,8 @@
 #include "mosflm/io/ExperimentModel.hpp"
 
+#include "mosflm/crystal/SpaceGroupInfo.hpp"
+#include "mosflm/geometry/LabFrame.hpp"
+#include "mosflm/geometry/OrientationMatrix.hpp"
 #include "mosflm/image/ImageIO.hpp"
 #include "mosflm/io/XdsInpImporter.hpp"
 #include "mosflm/io/XinfoImporter.hpp"
@@ -157,6 +160,54 @@ void apply_import(
     m.imported.merge_from(g);
 }
 
+/// Refuse a cell that the space group's crystal system does not allow
+/// (e.g. a ≠ b for a tetragonal group): the run would predict nonsense.
+void check_cell_fits_spacegroup(const std::array<double, 6>& c, int number) {
+    const auto* sg = crystal::SpaceGroupInfo::find_by_number(number);
+    if (sg == nullptr) {
+        throw std::runtime_error("unknown space group number " + std::to_string(number));
+    }
+    const auto eq = [](double x, double y) { return std::fabs(x - y) <= 1e-3 * std::max(x, y); };
+    const auto deg = [](double x, double y) { return std::fabs(x - y) <= 0.1; };
+    const bool right = deg(c[3], 90.0) && deg(c[4], 90.0) && deg(c[5], 90.0);
+    bool ok = true;
+    std::string rule;
+    switch (sg->crystal_system()) {
+        case gemmi::CrystalSystem::Triclinic:
+            break;
+        case gemmi::CrystalSystem::Monoclinic:
+            ok = deg(c[3], 90.0) && deg(c[5], 90.0);
+            rule = "α = γ = 90°";
+            break;
+        case gemmi::CrystalSystem::Orthorhombic:
+            ok = right;
+            rule = "α = β = γ = 90°";
+            break;
+        case gemmi::CrystalSystem::Tetragonal:
+            ok = right && eq(c[0], c[1]);
+            rule = "a = b, α = β = γ = 90°";
+            break;
+        case gemmi::CrystalSystem::Trigonal:
+        case gemmi::CrystalSystem::Hexagonal:
+            if (sg->ext == 'R') {
+                ok = eq(c[0], c[1]) && eq(c[1], c[2]) && deg(c[3], c[4]) && deg(c[4], c[5]);
+                rule = "a = b = c, α = β = γ";
+            } else {
+                ok = eq(c[0], c[1]) && deg(c[3], 90.0) && deg(c[4], 90.0) && deg(c[5], 120.0);
+                rule = "a = b, α = β = 90°, γ = 120°";
+            }
+            break;
+        case gemmi::CrystalSystem::Cubic:
+            ok = right && eq(c[0], c[1]) && eq(c[1], c[2]);
+            rule = "a = b = c, α = β = γ = 90°";
+            break;
+    }
+    if (!ok) {
+        throw std::runtime_error("cell " + cell_str(c) + " does not fit space group " + std::to_string(number) +
+                                 " (" + sg->hm + ": " + rule + ")");
+    }
+}
+
 /// Image source from an import (directory + image or template).
 std::optional<std::filesystem::path> image_from_import(const ImportedSweepGeometry& g) {
     const std::filesystem::path dir = g.has_directory ? g.directory : std::filesystem::path(".");
@@ -286,6 +337,13 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
     // Lowest priority: the first frame's header.
     const auto img = image::read_diffraction_image(m.image.value, m.hdf5 ? 1 : first_on_disk);
     const auto& md = img.metadata;
+    m.first_frame = first_on_disk;
+    m.detector_nx = md.width;
+    m.detector_ny = md.height;
+    m.detector_id = md.detector_id;
+    m.saturation_counts = md.saturation_counts;
+    m.phi_start_deg = md.oscillation_start_deg;
+    m.rotation_axis_omega_deg = md.rotation_axis_omega_deg;
     if (md.wavelength_angstrom > 0.0) {
         m.wavelength_A = {md.wavelength_angstrom, MetadataSource::ImageHeader};
     }
@@ -311,8 +369,10 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
     if (xinfo) {
         apply_import(m, *xinfo, MetadataSource::Xinfo);
     }
+    std::optional<XparmGeometry> xparm;
     if (in.xparm) {
-        const auto g = read_xparm(*in.xparm);
+        xparm = read_xparm(*in.xparm);
+        const auto& g = *xparm;
         apply_import(m, imported_from_xparm(g), in.xparm_source);
         if (g.has_amat) {
             std::array<double, 9> a{};
@@ -327,6 +387,45 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
     }
     if (in.tilt_twist_mrad) {
         m.tilt_twist_mrad = {*in.tilt_twist_mrad, in.xparm_source};
+    }
+    if (in.cell || in.symmetry) {
+        ImportedSweepGeometry cli;
+        if (in.cell) {
+            const auto& c = *in.cell;
+            cli.has_cell = true;
+            cli.cell_a = c[0];
+            cli.cell_b = c[1];
+            cli.cell_c = c[2];
+            cli.cell_alpha = c[3];
+            cli.cell_beta = c[4];
+            cli.cell_gamma = c[5];
+        }
+        if (in.symmetry) {
+            cli.has_symmetry = true;
+            cli.symmetry_number = *in.symmetry;
+        }
+        apply_import(m, cli, MetadataSource::CommandLine);
+        if (m.cell.set() && m.symmetry.set()) {
+            check_cell_fits_spacegroup(m.cell.value, m.symmetry.value);
+        }
+        // The matrix carries the cell too (UB = U·B): keep the orientation,
+        // use the given cell, or predictions keep the old one.
+        if (in.cell && xparm && xparm->has_amat) {
+            XparmGeometry g = *xparm;
+            const double lam = g.wavelength_A > 0.1 ? g.wavelength_A : m.wavelength_A.value;
+            const UnitCell cell{(*in.cell)[0], (*in.cell)[1], (*in.cell)[2],
+                                (*in.cell)[3], (*in.cell)[4], (*in.cell)[5]};
+            const auto ub = OrientationMatrix::from_mosflm_orientation_matrix(g.amat, lam).with_cell(cell);
+            g.amat = cpp_ub_to_mosflm_amat(ub.ub(), lam);
+            std::array<double, 9> a{};
+            for (int r = 0; r < 3; ++r) {
+                for (int k = 0; k < 3; ++k) {
+                    a[static_cast<std::size_t>(3 * r + k)] = g.amat(r, k);
+                }
+            }
+            m.orientation.assign(a, MetadataSource::CommandLine);
+            m.orientation_control = xparm_orientation_lines(g);
+        }
     }
     if (in.range) {
         auto [a, b] = *in.range;
@@ -346,62 +445,6 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
         );
     }
     return m;
-}
-
-void write_xds_inp(const std::filesystem::path& path, const ExperimentModel& model) {
-    std::ostringstream out;
-    out << "! XDS.INP written by ProcessingLab from the resolved run options.\n";
-    if (model.hdf5) {
-        if (model.image.set()) {
-            out << "NAME_TEMPLATE_OF_DATA_FRAMES=" << model.image.value.string() << '\n';
-        }
-    } else if (!model.image_template.empty()) {
-        std::string tmpl = model.image_template;
-        for (char& c : tmpl) {
-            if (c == '#') {
-                c = '?';
-            }
-        }
-        const std::filesystem::path full =
-            model.directory.empty() ? std::filesystem::path(tmpl) : model.directory / tmpl;
-        out << "NAME_TEMPLATE_OF_DATA_FRAMES=" << full.string() << '\n';
-    } else if (model.image.set()) {
-        out << "NAME_TEMPLATE_OF_DATA_FRAMES=" << model.image.value.string() << '\n';
-    }
-    if (model.frame_range.set()) {
-        out << "DATA_RANGE=" << model.frame_range.value.first << ' '
-            << model.frame_range.value.second << '\n';
-    }
-    if (model.wavelength_A.set()) {
-        out << "X-RAY_WAVELENGTH=" << fmt(model.wavelength_A.value, 6) << '\n';
-    }
-    if (model.distance_mm.set()) {
-        out << "DETECTOR_DISTANCE=" << fmt(model.distance_mm.value, 3) << '\n';
-    }
-    if (model.pixel_mm.set()) {
-        out << "QX=" << fmt(model.pixel_mm.value.first, 6)
-            << " QY=" << fmt(model.pixel_mm.value.second, 6) << '\n';
-    }
-    if (model.beam_mm.set() && model.pixel_mm.set() &&
-        model.pixel_mm.value.first > 0.0 && model.pixel_mm.value.second > 0.0) {
-        const double orgx = model.beam_mm.value.first / model.pixel_mm.value.first;
-        const double orgy = model.beam_mm.value.second / model.pixel_mm.value.second;
-        out << "ORGX=" << fmt(orgx, 4) << " ORGY=" << fmt(orgy, 4) << '\n';
-    }
-    if (model.oscillation_deg.set()) {
-        out << "OSCILLATION_RANGE=" << fmt(model.oscillation_deg.value, 4) << '\n';
-    }
-    if (model.cell.set()) {
-        out << "UNIT_CELL_CONSTANTS=";
-        for (double v : model.cell.value) {
-            out << ' ' << fmt(v, 2);
-        }
-        out << '\n';
-    }
-    if (model.symmetry.set()) {
-        out << "SPACE_GROUP_NUMBER=" << model.symmetry.value << '\n';
-    }
-    write_file_atomic(path, out.str());
 }
 
 std::vector<std::string> ExperimentModel::control_lines() const {

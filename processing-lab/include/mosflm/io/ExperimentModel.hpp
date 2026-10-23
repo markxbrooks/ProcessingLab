@@ -69,6 +69,11 @@ struct ExperimentInputs {
     /// Detector tilt and twist (mrad) from ``--from``'s ``process.json``
     /// (XPARM files do not carry them); provenance ``xparm_source``.
     std::optional<std::pair<double, double>> tilt_twist_mrad;
+    /// ``--cell`` and ``--spacegroup``: the command line wins over every
+    /// import and ``--from``. With a known orientation the matrix is rebuilt
+    /// for this cell (same crystal orientation).
+    std::optional<std::array<double, 6>> cell;
+    std::optional<int> symmetry;
 };
 
 /// The experiment once every source is merged, with per-field provenance.
@@ -95,6 +100,16 @@ struct ExperimentModel {
     /// Detector tilt / twist (mrad), when an earlier run refined them.
     Sourced<std::pair<double, double>> tilt_twist_mrad;
     int frames_available{0};  ///< Frames found on disk / in the master.
+    int first_frame{1};       ///< First frame number on disk (CBF/SMV).
+    /// First frame's header, for XDS.INP: detector size (px), detector id,
+    /// overload (counts, 0 if unknown), φ start (°) and rotation-axis omega
+    /// (°: 0 = axis along slow, 270 = along fast).
+    int detector_nx{0};
+    int detector_ny{0};
+    std::string detector_id;
+    double saturation_counts{0.0};
+    double phi_start_deg{0.0};
+    double rotation_axis_omega_deg{0.0};
     /// Scientifically meaningful disagreements between sources (the higher
     /// priority value is used; nothing is reconciled silently).
     std::vector<std::string> warnings;
@@ -131,17 +146,6 @@ void apply_control_state(
 /// :raises std::runtime_error: If no image source is given, the ``.xinfo``
 ///     sweep is ambiguous or missing, or the image cannot be read.
 [[nodiscard]] ExperimentModel resolve_experiment(const ExperimentInputs& inputs);
-
-/// Write ``path`` as an XDS ``XDS.INP`` of the resolved options, at the
-/// start of a run. Only fields that are set are written, so a later
-/// ``--xds-inp`` of this file reproduces them. CBF/SMV ``#`` placeholders
-/// become ``?``. An HDF5 master is named as ``NAME_TEMPLATE_OF_DATA_FRAMES``.
-/// Orientation is omitted (that belongs in ``XPARM.XDS``).
-///
-/// :param path: Destination, usually ``<output>/XDS.INP``.
-/// :param model: The experiment after every source has been merged.
-/// :raises std::runtime_error: If the file cannot be written.
-void write_xds_inp(const std::filesystem::path& path, const ExperimentModel& model);
 
 /// Create a fresh output directory and return it.
 ///

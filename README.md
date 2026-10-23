@@ -108,6 +108,8 @@ There are two ways to run ProcessingLab:
 | `--sweep NAME` | Which `.xinfo` sweep, when it has several. |
 | `--xparm PATH` | Import `XPARM.XDS` / `GXPARM.XDS`: cell, space group, geometry and orientation. With an orientation, autoindexing is skipped. |
 | `--from RUN` | Re-process from a completed run (its directory or `process.json`), with its refined parameters; see below. |
+| `--spacegroup N` | Space group number or symbol, over every import and `--from`. |
+| `--cell A B C α β γ` | Unit cell, over every import and `--from`; must fit the space group. |
 | `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
 
 ### Run modes (`--run-mode`)
@@ -161,6 +163,71 @@ a cell, the longest cell edge allowed during autoindexing (`DMAX`) is set to
 1.7× its longest edge. Otherwise it stays at the 200 Å default, which is too
 short for very long axes (76c1b's 187 Å). For those, pass `--xds-inp` or use a
 script with `DMAX`.
+
+### Overriding the space group and cell (`--spacegroup`, `--cell`)
+
+To use a space group or cell you've determined yourself, give them on the
+command line. They win over every other source, `--from` included:
+
+```bash
+# Thaumatin is P4₁2₁2 (92), not P4₁ (76): keep the refined cell, change the symmetry
+./bin/ProcessingLab run --from processing_20261022_235027 --spacegroup 92
+
+# A cell of your own as well (six numbers, or one quoted list)
+./bin/ProcessingLab run --from processing_20261022_235027 --spacegroup P41212 \
+    --cell 57.898 57.898 150.952 90 90 90
+```
+
+- **`--spacegroup`:** takes a number or a symbol (`92`, `P41212`).
+- **`--cell`:** must fit the space group's crystal system (tetragonal:
+  a = b, α = β = γ = 90°). A cell that doesn't fit is refused before
+  anything runs.
+- **With `--from` or `--xparm`:** the orientation matrix also encodes the
+  cell, so it's rebuilt with your cell and the refined orientation kept;
+  otherwise predictions would keep the old cell. The cell then stays fixed
+  during integration, as the orientation alone is refined.
+- **In the records:** each override is tagged `[CLI]` in `process.log` and
+  `input.json`, with a warning naming the value it replaced. It also goes
+  into the repeat inputs (`xds/`, `xia2/`, `mosflm/`).
+
+Changing only the space group within the same lattice (P4₁ → P4₁2₁2) leaves
+the predictions untouched. On thaumatin frames 1–100 the residual stays at
+0.44–0.55 px. A cell from another source, such as a PDB `CRYST1`, may not
+match this dataset at the refined distance. With 57.898, 57.898, 150.952 Å
+against the refined 57.938, 57.938, 150.244 Å, the residual rose from 0.47
+to 1.12 px. Prefer `--spacegroup` alone, and keep a reference cell for
+scaling or refinement unless the data agree with it.
+
+### Repeat inputs (`xds/`, `xia2/`, `mosflm/`)
+
+At the start of every run, ProcessingLab writes the resolved experiment as
+input for each run mode, so the run can be repeated, or handed to XDS or
+xia2:
+
+| Directory | Files | Repeat with |
+| --------- | ----- | ----------- |
+| `xds/` | `XDS.INP`; after the run, copies of `XPARM.XDS` and `GXPARM.XDS` | `ProcessingLab run --run-mode xds --xds-inp RUN/xds/XDS.INP` |
+| `xia2/` | `automatic.xinfo`, `run_xia2.sh` | `ProcessingLab run --run-mode xia2 --xinfo RUN/xia2/automatic.xinfo` |
+| `mosflm/` | `mosflm.in`: the run's CONTROL script, without `HKLOUT` | `ProcessingLab --run-mode mosflm --output-dir NEW RUN/mosflm/mosflm.in` |
+
+Each reproduces the original run. Insulin (1 frame) and thaumatin
+(20 frames) give the same reflections and statistics in all three modes.
+CONTROL script runs with `--output-dir` write the same three directories.
+
+- **`XDS.INP`:** for XDS itself, it is a complete starting point:
+  - `JOB`, `DETECTOR` and `OVERLOAD` come from the header;
+  - the spot and background ranges match the run;
+  - an Eiger sweep appears as `x_??????.h5`, and needs XDS's HDF5 `LIB=`
+    plugin;
+  - check `DETECTOR`, `ROTATION_AXIS` and the trusted region for your
+    beamline.
+- **The copied `XPARM.XDS` and `GXPARM.XDS`:** these use ProcessingLab's
+  own layout. Use them with `--xparm`, not with XDS.
+- **`automatic.xinfo`:** it holds `USER_CELL` and `USER_SPACEGROUP` when the
+  run knew them. `BEAM` and `DISTANCE` appear only where the run overrode
+  the image header; xia2 reads the header for the rest.
+- **Refined values:** these files hold the values at the start of the run.
+  To re-process from the refined values, use `--from` (above).
 
 ### Re-processing with refined parameters (`--from`)
 
@@ -252,6 +319,7 @@ EOF
 | `XPARM.XDS` | Orientation, cell and detector after `AUTOINDEX` |
 | `GXPARM.XDS` | The same after `PROCESS` (refined) |
 | `ProcessingLabIndex.txt` | Autoindexing result in a simple text form |
+| `xds/`, `xia2/`, `mosflm/` | Inputs to repeat the run in each run mode (see [Repeat inputs](#repeat-inputs-xds-xia2-mosflm)) |
 
 `run` always writes the three run records; a CONTROL script writes them when
 given `--output-dir`. Each value lives in one place: inputs and their sources

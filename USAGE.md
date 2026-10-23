@@ -44,6 +44,8 @@ script. The image headers supply the experiment metadata; XDS.INP and
 | `--sweep NAME` | Which `.xinfo` sweep, when it has several (required then). |
 | `--xparm PATH` | Import `XPARM.XDS` / `GXPARM.XDS`: cell, space group, geometry and orientation. With an orientation, autoindexing is skipped and only the orientation is refined. |
 | `--from RUN` | Re-process from a completed run: its directory or `process.json`. See [Re-processing](#re-processing-with-refined-parameters-run---from). |
+| `--spacegroup N` | Space group number or symbol (`92`, `P41212`), over every import and `--from`. See [Overriding](#overriding-the-space-group-and-cell-run---spacegroup-run---cell). |
+| `--cell A B C α β γ` | Unit cell, over every import and `--from`; must fit the space group. |
 | `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
 | `--help`, `--version` | Usage, build version. |
 
@@ -65,11 +67,41 @@ on a value (the higher-priority one is used):
 
 Every output goes in the output directory: `input.json`, `process.json`,
 `process.md`, `process.log`, `process.mtz`,
-`spots.spt`, `XPARM.XDS`, `GXPARM.XDS`, `ProcessingLabIndex.txt`. Spots
+`spots.spt`, `XPARM.XDS`, `GXPARM.XDS`, `ProcessingLabIndex.txt`, and the
+[repeat inputs](#repeat-inputs-xds-xia2-mosflm) `xds/`, `xia2/` and
+`mosflm/`. Spots
 for indexing come from the first 50 frames of the range. With a known cell
 (from XDS.INP), `DMAX` is set to 1.7× its longest edge so a long axis is not
 lost in autoindexing. For anything else (fixed matrix, resolution limits,
 `NPROC`, …) use a CONTROL script as below.
+
+## Repeat inputs (`xds/`, `xia2/`, `mosflm/`)
+
+Every run, and every CONTROL script run with `--output-dir`, starts by
+writing its resolved experiment as input for the other run modes:
+
+```text
+RUN/xds/XDS.INP            run --run-mode xds --xds-inp RUN/xds/XDS.INP
+RUN/xds/XPARM.XDS          copied after AUTOINDEX (for --xparm)
+RUN/xds/GXPARM.XDS         copied after PROCESS (for --xparm)
+RUN/xia2/automatic.xinfo   run --run-mode xia2 --xinfo RUN/xia2/automatic.xinfo
+RUN/xia2/run_xia2.sh       xia2 xinfo=automatic.xinfo
+RUN/mosflm/mosflm.in       --run-mode mosflm --output-dir NEW RUN/mosflm/mosflm.in
+```
+
+| File | Contents |
+| ---- | -------- |
+| `XDS.INP` | `JOB`, `DETECTOR` / `OVERLOAD` (from the header id and saturation value), `NAME_TEMPLATE_OF_DATA_FRAMES` (`?` for frame digits; an Eiger master as `x_??????.h5`), `DATA_RANGE`, `SPOT_RANGE` (first 50 frames, as `run`), `BACKGROUND_RANGE`, `OSCILLATION_RANGE`, `STARTING_ANGLE`, wavelength, distance, `NX NY QX QY`, `ORGX ORGY`, `ROTATION_AXIS` (from the header axis), beam and detector directions, polarisation, and `SPACE_GROUP_NUMBER` / `UNIT_CELL_CONSTANTS` when known. |
+| `automatic.xinfo` | One crystal and sweep: `USER_SPACEGROUP` / `USER_CELL` when known, the wavelength, `DIRECTORY`, `IMAGE`, `START_END`, and `BEAM` / `DISTANCE` only where the run overrode the image header. |
+| `run_xia2.sh` | `xia2 xinfo=automatic.xinfo`, run from `xia2/`; extra arguments are passed on. |
+| `mosflm.in` | The run's CONTROL, self-contained (`IMAGE` names an HDF5 master) and without `HKLOUT`, so outputs go to the new `--output-dir`. |
+
+Read back by ProcessingLab, each reproduces the run it came from. The
+`.xinfo` reader understands xia2's `USER_CELL`, `USER_SPACEGROUP`, `BEAM`
+and `DISTANCE`, and the XDS.INP reader maps `x_??????.h5` to `x_master.h5`.
+The files hold the values at the start of the run. For the refined values
+use `run --from`; the copied `XPARM.XDS` / `GXPARM.XDS` are in
+ProcessingLab's own layout, for `--xparm`.
 
 ## Re-processing with refined parameters (`run --from`)
 
@@ -108,6 +140,28 @@ parameter source.
 
 `run --xparm PATH` imports an `XPARM.XDS` / `GXPARM.XDS` the same way, at
 the same precedence, without the tilt/twist from `process.json`.
+
+## Overriding the space group and cell (`run --spacegroup`, `run --cell`)
+
+```bash
+ProcessingLab run --from RUN --spacegroup 92
+ProcessingLab run --from RUN --spacegroup P41212 --cell 57.898 57.898 150.952 90 90 90
+ProcessingLab run --image /data/x_0001.cbf --spacegroup 19 --cell "62.0,186.9,72.4,90,90,90"
+```
+
+| Option | Values | Effect |
+| ------ | ------ | ------ |
+| `--spacegroup` (alias `--symmetry`) | Number or symbol | `SYMMETRY`, tagged `[CLI]`, over header, imports and `--from`. |
+| `--cell` | Six numbers (Å, °), separate or one comma/space list | `CELL`, tagged `[CLI]`. With an orientation from `--from` / `--xparm`, the matrix is rebuilt as U·B(cell): the same crystal orientation (handedness kept) with the new cell. |
+
+The cell must fit the space group's crystal system (monoclinic α = γ = 90°;
+orthorhombic all 90°; tetragonal also a = b; hexagonal/trigonal a = b,
+γ = 120°; rhombohedral R a = b = c, α = β = γ; cubic a = b = c). Otherwise
+the run is refused with the rule it broke. With `--from` only the
+orientation is refined, so a given cell stays fixed; if it doesn't match the
+data at the refined distance, the positional residual in `process.log`
+rises. Changing only the space group within one lattice doesn't alter the
+predictions.
 
 ## Run modes (`--run-mode`)
 
@@ -407,6 +461,7 @@ and spot lists, `XPARM.XDS` and `GXPARM.XDS` to `DIRECTORY` (default `.`).
 | `XPARM.XDS` | successful AUTOINDEX | Bridge-format orientation + cell + detector (written next to `DIRECTORY`). |
 | `GXPARM.XDS` | PROCESS `GO` (unless `XPARMOUT OFF`) | Same layout after integration. Override the path with `XPARMOUT`. |
 | `ProcessingLabIndex.txt` | successful AUTOINDEX | Sidecar `CELL` / `MATRIX` / `SYSTEM` / `CHARACTER` / `INDEXED` / `RMSD_HKL`. |
+| `xds/`, `xia2/`, `mosflm/` | start (with an output directory); `xds/` gets the XPARMs after the run | [Repeat inputs](#repeat-inputs-xds-xia2-mosflm) for each run mode. |
 | stdout | always | Banner, import lines, COLSPOT/INDEXFIT/IDXREF/PROCESS log, `PROCESSINGLAB_*` dump. |
 
 ### MTZ columns

@@ -35,6 +35,9 @@ struct ImageMetadata {
 
     std::string detector_id;
 
+    /// Overload threshold (counts) from the header; 0 if unknown.
+    double saturation_counts{0.0};
+
     /// Map into the geometry layer used by prediction / integration.
     [[nodiscard]] DetectorGeometry to_detector_geometry() const {
         DetectorGeometry g;

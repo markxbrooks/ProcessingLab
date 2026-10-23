@@ -5,6 +5,7 @@
 #include "mosflm/control/ControlSession.hpp"
 #include "mosflm/io/ExperimentModel.hpp"
 #include "mosflm/io/ImportedSweepGeometry.hpp"
+#include "mosflm/io/RepeatInputs.hpp"
 #include "mosflm/io/XdsInpImporter.hpp"
 #include "mosflm/io/XinfoImporter.hpp"
 #include "test_util.hpp"
@@ -205,6 +206,62 @@ int main() {
         CHECK(std::fabs(g.cell_a - 78.19) < 1e-6);
         CHECK(g.has_symmetry);
         CHECK_EQ(g.symmetry_number, 197);
+    }
+
+    {
+        // Repeat inputs: .xinfo with xia2's USER_CELL / USER_SPACEGROUP and
+        // the sweep's BEAM / DISTANCE (only where the header was overridden).
+        ExperimentModel m;
+        m.image.assign("/data/sweep/insulin_1_001.img", MetadataSource::CommandLine);
+        m.directory = "/data/sweep";
+        m.image_template = "insulin_1_###.img";
+        m.frame_range.assign({1, 10}, MetadataSource::CommandLine);
+        m.wavelength_A.assign(0.979, MetadataSource::ImageHeader);
+        m.distance_mm.assign(160.0, MetadataSource::ImageHeader);
+        m.distance_mm.assign(161.5, MetadataSource::XdsInp);
+        m.beam_mm.assign({94.0, 94.7}, MetadataSource::ImageHeader);
+        m.cell.assign({78.19, 78.19, 78.19, 90.0, 90.0, 90.0}, MetadataSource::XdsInp);
+        m.symmetry.assign(197, MetadataSource::XdsInp);
+        const std::string xinfo = mosflm::io::xinfo_text(m);
+        CHECK(xinfo.find("USER_SPACEGROUP I23\n") != std::string::npos);
+        CHECK(xinfo.find("DISTANCE 161.500\n") != std::string::npos);
+        CHECK(xinfo.find("\nBEAM ") == std::string::npos);  // header beam: xia2 reads it
+        const auto g = XinfoImporter::parse_string(xinfo);
+        CHECK(g.has_cell && std::fabs(g.cell_a - 78.19) < 1e-6);
+        CHECK(g.has_symmetry && g.symmetry_number == 197);
+        CHECK(g.has_distance && std::fabs(g.distance_mm - 161.5) < 1e-6);
+        CHECK(g.has_wavelength && std::fabs(g.wavelength_A - 0.979) < 1e-6);
+        CHECK(g.has_process_range && g.process_first == 1 && g.process_last == 10);
+        CHECK(g.has_template && g.image_template == "insulin_1_###.img");
+        // xia2 BEAM in a sweep.
+        const auto b = XinfoImporter::parse_string(
+            "BEGIN PROJECT P\nBEGIN CRYSTAL X\nBEGIN SWEEP S\nBEAM 100.5 99.25\nEND SWEEP S\n"
+            "END CRYSTAL X\nEND PROJECT P\nBEGIN WAVELENGTH W\nWAVELENGTH 1.0\nEND WAVELENGTH W\n");
+        CHECK(b.has_beam && std::fabs(b.beam_x_mm - 100.5) < 1e-9 && std::fabs(b.beam_y_mm - 99.25) < 1e-9);
+
+        // mosflm.in: the run's CONTROL without HKLOUT.
+        const std::string script = mosflm::io::mosflm_script_text(m, "HKLOUT /old/run/process.mtz\nPROCESS 1 TO 10\nGO\n");
+        CHECK(script.find("HKLOUT") == std::string::npos);
+        CHECK(script.find("PROCESS 1 TO 10\nGO\n") != std::string::npos);
+    }
+
+    {
+        // HDF5: XDS names the sweep x_??????.h5 and reads x_master.h5; the
+        // importer maps it back, and mosflm.in names the master.
+        ExperimentModel m;
+        m.image.assign("/data/thaumatin_9_1_master.h5", MetadataSource::CommandLine);
+        m.hdf5 = true;
+        m.frame_range.assign({1, 900}, MetadataSource::CommandLine);
+        m.detector_id = "Dectris EIGER2 XE 16M";
+        const std::string text = mosflm::io::xds_inp_text(m);
+        CHECK(text.find("NAME_TEMPLATE_OF_DATA_FRAMES=/data/thaumatin_9_1_??????.h5\n") != std::string::npos);
+        CHECK(text.find("DETECTOR=EIGER ") != std::string::npos);
+        CHECK(text.find("SPOT_RANGE=1 50\n") != std::string::npos);
+        const auto g = XdsInpImporter::parse_string(text);
+        CHECK(g.has_image && !g.has_template);
+        CHECK((g.directory / g.image_path).string() == "/data/thaumatin_9_1_master.h5");
+        CHECK(mosflm::io::mosflm_script_text(m, "GO\n").find("\nIMAGE /data/thaumatin_9_1_master.h5\n") !=
+              std::string::npos);
     }
 
     return mosflm_test::finish("xinfo_xds_import");

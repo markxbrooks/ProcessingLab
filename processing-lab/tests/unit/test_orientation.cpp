@@ -48,5 +48,33 @@ int main() {
     CHECK_CLOSE(ra.x(), 0.0, 1e-8);
     CHECK_CLOSE(ra.y(), 1.0 / 58.0, 1e-12);
 
+    // cell(): the cell a UB implies; with_cell(): same orientation, new cell.
+    {
+        const UnitCell mono{60.0, 70.0, 80.0, 90.0, 105.0, 90.0};
+        const Eigen::Matrix3d R =
+            (Eigen::AngleAxisd(0.4, Eigen::Vector3d(1, 2, 3).normalized())).toRotationMatrix();
+        const auto ub = OrientationMatrix::from_cell_and_rotation(mono, R);
+        const UnitCell c = ub.cell();
+        CHECK_CLOSE(c.a, 60.0, 1e-9);
+        CHECK_CLOSE(c.b, 70.0, 1e-9);
+        CHECK_CLOSE(c.c, 80.0, 1e-9);
+        CHECK_CLOSE(c.beta_deg, 105.0, 1e-9);
+        CHECK_CLOSE(c.alpha_deg, 90.0, 1e-9);
+
+        const UnitCell other{61.0, 69.5, 81.0, 90.0, 104.0, 90.0};
+        const auto moved = ub.with_cell(other);
+        const auto want = OrientationMatrix::from_cell_and_rotation(other, R);
+        CHECK((moved.ub() - want.ub()).norm() < 1e-12);
+        CHECK_CLOSE(moved.cell().c, 81.0, 1e-9);
+
+        // Improper (ProcessingLab's XDS-frame handedness) stays improper.
+        Eigen::Matrix3d flip = R;
+        flip.row(0) *= -1.0;
+        const auto improper = OrientationMatrix::from_cell_and_rotation(mono, flip);
+        const auto improper_moved = improper.with_cell(other);
+        CHECK(improper_moved.ub().determinant() < 0.0);
+        CHECK((improper_moved.ub() - OrientationMatrix::from_cell_and_rotation(other, flip).ub()).norm() < 1e-12);
+    }
+
     return mosflm_test::finish("orientation");
 }

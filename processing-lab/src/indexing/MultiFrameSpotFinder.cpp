@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <utility>
 
 namespace mosflm::indexing {
@@ -40,12 +41,16 @@ SpotList find_spots_multiframe(
         static_cast<std::size_t>(n_frames)
     );
     std::vector<SpotListHeader> headers(static_cast<std::size_t>(n_frames));
+    // An exception must not leave an OpenMP region (std::terminate): keep
+    // the first and rethrow it after the loop.
+    std::exception_ptr error;
 
 #if defined(PROCESSINGLAB_HAS_OPENMP) && PROCESSINGLAB_HAS_OPENMP
 #pragma omp parallel for num_threads(nproc) schedule(dynamic, 1) \
     if (nproc > 1 && n_frames > 1)
 #endif
     for (int f = first_frame; f <= last_frame; ++f) {
+      try {
         const auto image = load(f);
         SpotFindSettings fs = settings.per_frame;
         fs.max_spots = std::min(fs.max_spots, per_frame_cap);
@@ -61,6 +66,17 @@ SpotList find_spots_multiframe(
             static_cast<std::size_t>(f - first_frame);
         headers[idx] = list.header;
         by_frame[idx] = std::move(list.spots);
+      } catch (...) {
+#if defined(PROCESSINGLAB_HAS_OPENMP) && PROCESSINGLAB_HAS_OPENMP
+#pragma omp critical(multiframe_spot_error)
+#endif
+        if (!error) {
+            error = std::current_exception();
+        }
+      }
+    }
+    if (error) {
+        std::rethrow_exception(error);
     }
 
     std::size_t n_raw = 0;

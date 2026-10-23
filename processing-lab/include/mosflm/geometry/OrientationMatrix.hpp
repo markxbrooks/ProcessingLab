@@ -28,6 +28,14 @@ public:
     );
 
     [[nodiscard]] const Eigen::Matrix3d& ub() const { return ub_; }
+
+    /// The direct cell this UB implies (from its metric ``UBᵀ·UB``).
+    [[nodiscard]] UnitCell cell() const;
+
+    /// The same crystal orientation with another cell: ``U·B(cell)``, where
+    /// ``U = UB·B(cell())⁻¹`` is made exactly orthogonal (its handedness is
+    /// kept). For a cell or space group known better than the one refined.
+    [[nodiscard]] OrientationMatrix with_cell(const UnitCell& cell) const;
     [[nodiscard]] Eigen::Matrix3d ub_inverse() const;
 
     /// Laboratory reciprocal vector for (h,k,l).

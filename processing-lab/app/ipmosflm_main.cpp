@@ -7,9 +7,11 @@
  */
 
 #include "mosflm/control/ControlSession.hpp"
+#include "mosflm/crystal/SpaceGroupInfo.hpp"
 #include "mosflm/diffraction/ProcessPipeline.hpp"
 #include "mosflm/io/ExperimentModel.hpp"
 #include "mosflm/io/ImportedSweepGeometry.hpp"
+#include "mosflm/io/RepeatInputs.hpp"
 #include "mosflm/io/RunMode.hpp"
 #include "mosflm/io/RunRecord.hpp"
 #include "mosflm/io/XdsInpImporter.hpp"
@@ -21,6 +23,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <ctime>
@@ -357,6 +360,17 @@ void dry_parse(mosflm::control::ControlSession& session, const std::string& cont
     }
 }
 
+/// List the repeat inputs (and the XPARMs copied into ``xds/``) as outputs.
+void add_repeat_outputs(mosflm::io::ProcessRecord& record, const std::filesystem::path& dir,
+                        const mosflm::io::RepeatInputs& repeat) {
+    record.add_output(repeat.xds_inp, "xds_inp");
+    record.add_output(dir / "xds" / "XPARM.XDS", "xds_xparm");
+    record.add_output(dir / "xds" / "GXPARM.XDS", "xds_gxparm");
+    record.add_output(repeat.xinfo, "xinfo");
+    record.add_output(repeat.xia2_script, "xia2_script");
+    record.add_output(repeat.mosflm_script, "mosflm_script");
+}
+
 /// Wire ``record`` to every GO of ``session``.
 void observe(mosflm::control::ControlSession& session, mosflm::io::ProcessRecord& record) {
     session.set_go_observer({
@@ -373,6 +387,7 @@ void print_run_usage() {
         << "         [--range FIRST:LAST] [--output-dir DIR]\n"
         << "         [--xds-inp XDS.INP] [--xinfo FILE.xinfo [--sweep NAME]]\n"
         << "         [--xparm GXPARM.XDS | --from RUN_DIR|process.json]\n"
+        << "         [--cell A B C ALPHA BETA GAMMA] [--spacegroup N|SYMBOL]\n"
         << "         [--run-mode processinglab|xds|xia2] [--help] [--version]\n"
         << "\n"
         << "  Finds spots, autoindexes and integrates each sweep. Metadata comes\n"
@@ -387,9 +402,10 @@ void print_run_usage() {
         << "               processing_YYYYMMDD_HHMMSS in the current directory.\n"
         << "               Holds input.json (resolved inputs and provenance),\n"
         << "               process.json (stage status and results), process.md,\n"
-        << "               process.log, process.mtz, XDS.INP (written at the\n"
-        << "               start from the resolved options), XPARM.XDS and\n"
-        << "               GXPARM.XDS.\n"
+        << "               process.log, process.mtz, XPARM.XDS and GXPARM.XDS,\n"
+        << "               and, written at the start to repeat the run:\n"
+        << "               xds/ (XDS.INP; XPARM.XDS, GXPARM.XDS after the run),\n"
+        << "               xia2/ (automatic.xinfo, run_xia2.sh), mosflm/mosflm.in.\n"
         << "  --sweep      Which .xinfo sweep, if it has several.\n"
         << "  --xparm      XPARM.XDS / GXPARM.XDS: cell, space group, geometry\n"
         << "               and orientation. With an orientation, autoindexing is\n"
@@ -398,6 +414,10 @@ void print_run_usage() {
         << "               GXPARM.XDS, plus its images and frame range unless\n"
         << "               --image / --range are given. A run directory or its\n"
         << "               process.json (multi-sweep: one sweep_N directory).\n"
+        << "  --cell       Unit cell (Å, °), over every import and --from; with a\n"
+        << "               known orientation the matrix is rebuilt for it.\n"
+        << "  --spacegroup Space group number or symbol (92, P41212), likewise.\n"
+        << "               The cell must fit its crystal system.\n"
         << "  --run-mode   Where the parameters come from (recorded in the log and\n"
         << "               input.json):\n"
         << "                 processinglab  image headers, overridden by any imports\n"
@@ -476,6 +496,40 @@ int run_command(int argc, char** argv) {
                 base.xparm = fs::absolute(need(i, a));
             } else if (a == "--from") {
                 from = fs::absolute(need(i, a));
+            } else if (a == "--cell") {
+                // Six numbers, as separate arguments or one quoted list.
+                std::string v = need(i, a);
+                while (i + 1 < argc && std::string_view(argv[i + 1]).rfind("--", 0) != 0) {
+                    v += ' ';
+                    v += argv[++i];
+                }
+                std::replace(v.begin(), v.end(), ',', ' ');
+                std::istringstream s(v);
+                std::array<double, 6> c{};
+                std::string extra;
+                for (auto& x : c) {
+                    if (!(s >> x) || x <= 0.0) {
+                        throw std::invalid_argument("--cell needs A B C ALPHA BETA GAMMA, got '" + v + "'");
+                    }
+                }
+                if (s >> extra) {
+                    throw std::invalid_argument("--cell needs 6 values, got '" + v + "'");
+                }
+                base.cell = c;
+            } else if (a == "--spacegroup" || a == "--symmetry") {
+                const std::string v = need(i, a);
+                const gemmi::SpaceGroup* sg = nullptr;
+                try {
+                    std::size_t used = 0;
+                    const int n = std::stoi(v, &used);
+                    sg = used == v.size() ? mosflm::crystal::SpaceGroupInfo::find_by_number(n) : nullptr;
+                } catch (const std::exception&) {
+                    sg = mosflm::crystal::SpaceGroupInfo::find_by_name(v.c_str());
+                }
+                if (sg == nullptr) {
+                    throw std::invalid_argument("--spacegroup: unknown space group '" + v + "'");
+                }
+                base.symmetry = sg->number;
             } else if (a == "--run-mode") {
                 const std::string v = need(i, a);
                 const auto rm = mosflm::io::parse_run_mode(v);
@@ -580,12 +634,13 @@ int run_command(int argc, char** argv) {
         header << "\n Run mode:        " << mosflm::io::run_mode_name(run_mode) << "  (parameters from "
                << mosflm::io::run_mode_parameter_source(run_mode) << ")\n";
         m.write_summary(header);
-        header << "  XDS.INP:       " << (dir / "XDS.INP").string() << '\n';
+        header << "  Repeat inputs: xds/XDS.INP  xia2/automatic.xinfo  mosflm/mosflm.in\n";
         header << "  Output:        " << dir.string() << '\n';
 
         std::optional<mosflm::io::ProcessRecord> record;
         try {
-            mosflm::io::write_xds_inp(dir / "XDS.INP", m);
+            // Inputs to repeat this run in another run mode, written first.
+            const auto repeat = mosflm::io::write_repeat_inputs(dir, m, control.str());
             ProcessLog plog(dir / "process.log", control_input_block(control.str()));
             print_banner();
             std::cout << header.str();
@@ -608,7 +663,8 @@ int run_command(int argc, char** argv) {
             std::istringstream in(control.str());
             const auto runs = session.run_stream(in, img_override, "");
             report_runs(session, runs, dir / "process.mtz");
-            record->add_output(dir / "XDS.INP", "xds_inp");
+            mosflm::io::copy_repeat_geometry(dir);
+            add_repeat_outputs(*record, dir, repeat);
             record->add_output(dir / "process.mtz", "mtz");
             record->add_output(dir / "index.log", "index_summary");
             record->add_output(dir / "process.log", "log");
@@ -752,8 +808,8 @@ int main(int argc, char** argv) {
             << "  A CONTROL script run is RunMode.MOSFLM (parameters from MOSFLM\n"
             << "  keywords); --run-mode mosflm states it explicitly.\n"
             << "  --output-dir: new directory (must not exist) for the log, MTZ,\n"
-            << "  spot list, XDS.INP (written at the start from the resolved\n"
-            << "  options), XPARM.XDS, GXPARM.XDS and the run records input.json,\n"
+            << "  spot list, XPARM.XDS, GXPARM.XDS, the repeat inputs xds/,\n"
+            << "  xia2/ and mosflm/, and the run records input.json,\n"
             << "  process.json and process.md; script paths stay relative to the\n"
             << "  current directory.\n"
             << "  Output is also written to process.log (--log path to rename,\n"
@@ -813,6 +869,7 @@ int main(int argc, char** argv) {
               << mosflm::io::run_mode_parameter_source(run_mode) << ")\n";
 
     std::optional<mosflm::io::ProcessRecord> record;
+    std::optional<mosflm::io::RepeatInputs> repeat;
     try {
         mosflm::control::ControlSession session;
         if (output_dir) {
@@ -843,7 +900,17 @@ int main(int argc, char** argv) {
         }
 
         std::optional<std::filesystem::path> img_override = image;
-        const bool imported_images = xinfo_path || xds_inp_path ||
+        // Images named by the script itself (IMAGE / TEMPLATE) also rule out
+        // the insulin fallback, which would otherwise override them.
+        bool script_images = false;
+        try {
+            mosflm::control::ControlSession probe;
+            dry_parse(probe, control_text);
+            script_images = !probe.state().image_path.empty() || !probe.state().image_template.empty();
+        } catch (const std::exception&) {
+            // The real run reports the bad keyword.
+        }
+        const bool imported_images = xinfo_path || xds_inp_path || script_images ||
             !session.state().image_path.empty() ||
             !session.state().image_template.empty();
         if (!img_override && !imported_images) {
@@ -896,11 +963,10 @@ int main(int argc, char** argv) {
                 }
                 const mosflm::io::RunContext ctx{"script", run_mode, cl, text, xds_inp_path, xinfo_path,
                                                  xparm_path, std::nullopt};
-                mosflm::io::write_xds_inp(*output_dir / "XDS.INP", model);
-                std::cout << "  Wrote XDS.INP: " << (*output_dir / "XDS.INP").string() << '\n';
+                repeat = mosflm::io::write_repeat_inputs(*output_dir, model, text);
+                std::cout << "  Repeat inputs: xds/XDS.INP  xia2/automatic.xinfo  mosflm/mosflm.in\n";
                 record.emplace(*output_dir, mosflm::io::input_record(model, dry.state(), ctx),
                                mosflm::io::planned_stages(text));
-                record->add_output(*output_dir / "XDS.INP", "xds_inp");
                 observe(session, *record);
             } catch (const std::exception& ex) {
                 std::cerr << " *** WARNING **   input.json / process.json not written: " << ex.what() << '\n';
@@ -935,6 +1001,10 @@ int main(int argc, char** argv) {
         }
         report_runs(session, runs, out_mtz);
         if (record) {
+            mosflm::io::copy_repeat_geometry(*output_dir);
+            if (repeat) {
+                add_repeat_outputs(*record, *output_dir, *repeat);
+            }
             record->add_output(out_mtz, "mtz");
             record->add_output(*output_dir / "index.log", "index_summary");
             if (log_path) {

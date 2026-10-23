@@ -1,5 +1,7 @@
 #include "mosflm/io/XinfoImporter.hpp"
 
+#include "mosflm/crystal/SpaceGroupInfo.hpp"
+
 #include <cctype>
 #include <fstream>
 #include <optional>
@@ -48,10 +50,13 @@ struct SweepBlock {
     std::string name;
     std::string wavelength_ref;  ///< ``WAVELENGTH <name>`` inside the sweep.
     ImportedSweepGeometry geometry;
+    std::size_t crystal{0};  ///< Index into ``XinfoContents::crystals``.
 };
 
 struct XinfoContents {
     std::vector<std::pair<std::string, double>> wavelengths;  ///< name, Å
+    /// Per ``BEGIN CRYSTAL`` block: ``USER_CELL`` / ``USER_SPACEGROUP``.
+    std::vector<ImportedSweepGeometry> crystals{ImportedSweepGeometry{}};
     std::vector<SweepBlock> sweeps;
 };
 
@@ -60,6 +65,7 @@ XinfoContents read_contents(std::string_view text) {
     std::string wl_name;
     bool in_wavelength = false;
     SweepBlock* sweep = nullptr;
+    std::size_t crystal = 0;
 
     std::istringstream stream{std::string(text)};
     std::string raw;
@@ -77,8 +83,11 @@ XinfoContents read_contents(std::string_view text) {
                 in_wavelength = true;
                 wl_name = name;
             } else if (block == "SWEEP") {
-                out.sweeps.push_back({name, {}, {}});
+                out.sweeps.push_back({name, {}, {}, crystal});
                 sweep = &out.sweeps.back();
+            } else if (block == "CRYSTAL") {
+                out.crystals.emplace_back();
+                crystal = out.crystals.size() - 1;
             }
             continue;
         }
@@ -96,6 +105,29 @@ XinfoContents read_contents(std::string_view text) {
             continue;
         }
         if (sweep == nullptr) {
+            // Crystal-level user constraints (xia2 ``USER_CELL``,
+            // ``USER_SPACEGROUP``).
+            auto& c = out.crystals[crystal];
+            if (key == "USER_CELL" && toks.size() >= 7) {
+                c.has_cell = true;
+                c.cell_a = std::stod(toks[1]);
+                c.cell_b = std::stod(toks[2]);
+                c.cell_c = std::stod(toks[3]);
+                c.cell_alpha = std::stod(toks[4]);
+                c.cell_beta = std::stod(toks[5]);
+                c.cell_gamma = std::stod(toks[6]);
+            } else if (key == "USER_SPACEGROUP" && toks.size() >= 2) {
+                std::string symbol = toks[1];
+                for (std::size_t i = 2; i < toks.size(); ++i) {
+                    symbol += " " + toks[i];
+                }
+                const auto* sg = crystal::SpaceGroupInfo::find_by_name(symbol.c_str());
+                if (sg == nullptr) {
+                    throw std::runtime_error("XinfoImporter: unknown USER_SPACEGROUP '" + symbol + "'");
+                }
+                c.has_symmetry = true;
+                c.symmetry_number = sg->number;
+            }
             continue;
         }
         auto& g = sweep->geometry;
@@ -114,6 +146,13 @@ XinfoContents read_contents(std::string_view text) {
             for (std::size_t i = 2; i < toks.size(); ++i) {
                 g.image_path += toks[i];
             }
+        } else if (key == "BEAM" && toks.size() >= 3) {
+            g.has_beam = true;
+            g.beam_x_mm = std::stod(toks[1]);
+            g.beam_y_mm = std::stod(toks[2]);
+        } else if (key == "DISTANCE" && toks.size() >= 2) {
+            g.has_distance = true;
+            g.distance_mm = std::stod(toks[1]);
         } else if (key == "START_END" && toks.size() >= 3) {
             g.has_process_range = true;
             g.process_first = std::stoi(toks[1]);
@@ -159,7 +198,8 @@ ImportedSweepGeometry select_sweep(
         sweep = &c.sweeps.front();
     }
     if (sweep != nullptr) {
-        out = sweep->geometry;
+        out = c.crystals[sweep->crystal];
+        out.merge_from(sweep->geometry);
     }
     // The sweep's named wavelength, else the first wavelength block.
     for (const auto& [name, lambda] : c.wavelengths) {

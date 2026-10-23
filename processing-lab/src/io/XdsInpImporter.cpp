@@ -131,9 +131,17 @@ ImportedSweepGeometry XdsInpImporter::parse_string(std::string_view text) {
             const std::filesystem::path tmpl_path(toks[0]);
             out.has_directory = true;
             out.directory = tmpl_path.parent_path();
-            out.has_template = true;
-            out.image_template =
-                xds_question_marks_to_hash(tmpl_path.filename().string());
+            // XDS names an Eiger sweep by its data files, ``x_??????.h5``;
+            // the frames are read through ``x_master.h5``.
+            const std::string name = tmpl_path.filename().string();
+            const auto q = name.find('?');
+            if (q != std::string::npos && tmpl_path.extension() == ".h5") {
+                out.has_image = true;
+                out.image_path = name.substr(0, q) + "master.h5";
+            } else {
+                out.has_template = true;
+                out.image_template = xds_question_marks_to_hash(name);
+            }
         }
 
         // XDS packs several keys on one line, e.g.

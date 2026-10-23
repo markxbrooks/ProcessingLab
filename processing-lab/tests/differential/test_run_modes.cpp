@@ -8,6 +8,8 @@
  *   - ``run --xinfo`` with two sweeps (refused without ``--sweep``)
  *   - ``run --image --image`` (one ``sweep_N`` directory per image)
  *   - ``run --from`` (refined geometry of an earlier run, no autoindexing)
+ *   - the repeat inputs (``xds/``, ``xia2/``, ``mosflm/``) reproduce a run
+ *     in each run mode
  *   - ``run`` refusals: existing output directory, frames not on disk
  *   - CONTROL script mode with ``--output-dir``
  *   - run records: input.json provenance, process.json lifecycle (completed
@@ -96,10 +98,13 @@ bool contains(const std::string& text, const std::string& what) {
 /// (``run --from``) there is no ``XPARM.XDS`` or ``index.log``.
 void check_outputs(const fs::path& dir, const std::string& spots, const std::string& label,
                    bool autoindexed = true) {
-    std::vector<std::string> files{"process.log", "process.mtz", "XDS.INP", "GXPARM.XDS", spots,
-                                   "input.json", "process.json", "process.md"};
+    std::vector<std::string> files{"process.log", "process.mtz", "GXPARM.XDS", spots,
+                                   "input.json", "process.json", "process.md",
+                                   // Repeat inputs for the other run modes.
+                                   "xds/XDS.INP", "xds/GXPARM.XDS", "xia2/automatic.xinfo",
+                                   "xia2/run_xia2.sh", "mosflm/mosflm.in"};
     if (autoindexed) {
-        files.insert(files.end(), {"XPARM.XDS", "index.log"});
+        files.insert(files.end(), {"XPARM.XDS", "index.log", "xds/XPARM.XDS"});
     }
     for (const auto& f : files) {
         CHECK_MSG(fs::exists(dir / f), label + ": missing " + f);
@@ -274,6 +279,53 @@ int main() {
         CHECK_EQ(run(work, "run --from failed --output-dir from_refused", "from_failed.out"), 2);
         CHECK(contains(slurp(work / "from_failed.out"), "the run is failed"));
         CHECK(!fs::exists(work / "from_refused"));
+    }
+
+    // 12. Repeat inputs: xds/XDS.INP, xia2/automatic.xinfo and
+    //     mosflm/mosflm.in each reproduce the run they came from.
+    {
+        const auto integrated = [&](const fs::path& dir) {
+            const std::string pj = slurp(dir / "process.json");
+            const auto at = pj.find("\"reflections\": ");
+            return at == std::string::npos ? std::string() : pj.substr(at, pj.find(',', at) - at);
+        };
+        const std::string want = integrated(work / "xds");
+        CHECK(!want.empty());
+        CHECK_EQ(run(work, "run --run-mode xds --xds-inp xds/xds/XDS.INP --output-dir rep_xds", "rep_xds.out"), 0);
+        CHECK_EQ(run(work, "run --run-mode xia2 --xinfo xds/xia2/automatic.xinfo --output-dir rep_xia2",
+                     "rep_xia2.out"), 0);
+        CHECK_EQ(run(work, "--run-mode mosflm --output-dir rep_mosflm xds/mosflm/mosflm.in", "rep_mosflm.out"), 0);
+        for (const char* rep : {"rep_xds", "rep_xia2", "rep_mosflm"}) {
+            CHECK_MSG(integrated(work / rep) == want, std::string(rep) + ": " + integrated(work / rep) +
+                                                          " vs " + want);
+        }
+        // The cell and space group survive the .xinfo (USER_CELL, USER_SPACEGROUP I23).
+        CHECK(contains(slurp(work / "rep_xia2" / "process.log"),
+                       "Cell:          78.19 78.19 78.19 90.00 90.00 90.00  [.xinfo]"));
+        CHECK(contains(slurp(work / "rep_xia2" / "process.log"), "Space group:   197  [.xinfo]"));
+        // mosflm.in leaves HKLOUT to the new run's --output-dir.
+        CHECK(!contains(slurp(work / "xds" / "mosflm" / "mosflm.in"), "HKLOUT"));
+        CHECK(fs::exists(work / "rep_mosflm" / "process.mtz"));
+    }
+
+    // 13. --cell / --spacegroup override everything, --from included; the
+    //     matrix is rebuilt for the given cell. Bad combinations are refused.
+    {
+        CHECK_EQ(run(work, "run --from xds --spacegroup I213 --cell 78.5 78.5 78.5 90 90 90 --output-dir user_cell",
+                     "user_cell.out"), 0);
+        const std::string log = slurp(work / "user_cell" / "process.log");
+        CHECK(contains(log, "Cell:          78.50 78.50 78.50 90.00 90.00 90.00  [CLI]"));
+        CHECK(contains(log, "Space group:   199  [CLI]"));
+        CHECK(contains(log, "Orientation:   refined matrix, no autoindexing  [CLI]"));
+        CHECK(contains(log, "WARNING: Space group: CLI 199 overrides previous run 197"));
+        CHECK(contains(slurp(work / "user_cell" / "process.md"), "- Cell: 78.500 78.500 78.500"));
+        CHECK(contains(slurp(work / "user_cell" / "mosflm" / "mosflm.in"), "SYMMETRY 199"));
+        CHECK_EQ(run(work, "run --from xds --cell 78 79 78 90 90 90 --output-dir cell_refused", "cell_bad.out"), 2);
+        CHECK(contains(slurp(work / "cell_bad.out"), "does not fit space group 197"));
+        CHECK_EQ(run(work, "run --from xds --spacegroup P99999 --output-dir cell_refused", "sg_bad.out"), 2);
+        CHECK(contains(slurp(work / "sg_bad.out"), "unknown space group 'P99999'"));
+        CHECK_EQ(run(work, "run --from xds --cell 78 78 --output-dir cell_refused", "cell_short.out"), 2);
+        CHECK(!fs::exists(work / "cell_refused"));
     }
 
     // Nothing written into the fixtures or next to the image.
