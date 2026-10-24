@@ -1,6 +1,7 @@
 #include "mosflm/io/RepeatInputs.hpp"
 
 #include "mosflm/crystal/SpaceGroupInfo.hpp"
+#include "mosflm/diffraction/Defpix.hpp"
 #include "mosflm/io/Json.hpp"
 
 #include <algorithm>
@@ -141,6 +142,26 @@ std::string xds_inp_text(const ExperimentModel& m) {
             o << ' ' << num(v, 3);
         }
         o << '\n';
+    }
+    // The run's untrusted regions and excluded resolution (CONTROL → XDS).
+    for (const auto& line : m.imported.trusted_region_control) {
+        std::istringstream s(line);
+        std::string key;
+        std::string what;
+        s >> key >> what;
+        std::string rest;
+        std::getline(s, rest);
+        if (key == "UNTRUSTED") {
+            o << "UNTRUSTED_" << what << '=' << rest << '\n';
+        } else if (key == "EXCLUDE" && what == "ICE") {
+            for (const auto& r : diffraction::ice_ring_ranges()) {
+                o << "EXCLUDE_RESOLUTION_RANGE= " << num(r.d1_A, 3) << ' ' << num(r.d2_A, 3) << '\n';
+            }
+        } else if (key == "EXCLUDE") {
+            o << "EXCLUDE_RESOLUTION_RANGE=" << rest << '\n';
+        } else if (key == "DEFPIX" && what == "VALUE_RANGE") {
+            o << "VALUE_RANGE_FOR_TRUSTED_DETECTOR_PIXELS=" << rest << '\n';
+        }
     }
     return o.str();
 }

@@ -124,6 +124,17 @@ ImportedSweepGeometry XdsInpImporter::parse_string(std::string_view text) {
             if (out.process_last < out.process_first) {
                 std::swap(out.process_last, out.process_first);
             }
+        } else if (key.rfind("UNTRUSTED_", 0) == 0 && !toks.empty()) {
+            // UNTRUSTED_RECTANGLE= / _ELLIPSE= / _QUADRILATERAL= → CONTROL UNTRUSTED.
+            std::string l = "UNTRUSTED " + key.substr(10);
+            for (const auto& v : toks) {
+                l += ' ' + v;
+            }
+            out.trusted_region_control.push_back(l);
+        } else if (key == "EXCLUDE_RESOLUTION_RANGE" && toks.size() >= 2) {
+            out.trusted_region_control.push_back("EXCLUDE RESOLUTION " + toks[0] + ' ' + toks[1]);
+        } else if (key == "VALUE_RANGE_FOR_TRUSTED_DETECTOR_PIXELS" && toks.size() >= 2) {
+            out.trusted_region_control.push_back("DEFPIX VALUE_RANGE " + toks[0] + ' ' + toks[1]);
         } else if (key == "OSCILLATION_RANGE" && !toks.empty()) {
             out.has_oscillation = true;
             out.oscillation_deg = std::stod(toks[0]);

@@ -421,6 +421,11 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
         }
         seed = Seed{a, p.matrix_wavelength_A, p.invertx, MetadataSource::PreviousRun};
     }
+    if (!in.trusted_region_control.empty()) {
+        ImportedSweepGeometry cli;
+        cli.trusted_region_control = in.trusted_region_control;
+        apply_import(m, cli, MetadataSource::CommandLine);
+    }
     if (in.cell || in.symmetry) {
         ImportedSweepGeometry cli;
         if (in.cell) {

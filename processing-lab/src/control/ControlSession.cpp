@@ -2,6 +2,7 @@
 
 #include "mosflm/crystal/SpaceGroupInfo.hpp"
 #include "mosflm/diffraction/DataQualityStats.hpp"
+#include "mosflm/diffraction/Defpix.hpp"
 #include "mosflm/diffraction/DetectorInit.hpp"
 #include "mosflm/diffraction/PartialSummation.hpp"
 #include "mosflm/diffraction/Profile3d.hpp"
@@ -950,6 +951,72 @@ void ControlSession::apply_keyword(
         state_.extra_lattices.push_back(m);
         return;
     }
+    if (key == "UNTRUSTED") {
+        // UNTRUSTED RECTANGLE|ELLIPSE x1 x2 y1 y2, UNTRUSTED QUADRILATERAL
+        // x1 y1 … x4 y4 (XDS pixels), UNTRUSTED CLEAR.
+        if (!args.empty() && upper(args[0]) == "CLEAR") {
+            state_.defpix.untrusted.clear();
+        } else {
+            state_.defpix.untrusted.push_back(diffraction::parse_untrusted_region(args));
+        }
+        return;
+    }
+    if (key == "EXCLUDE") {
+        // EXCLUDE RESOLUTION d1 d2, EXCLUDE ICE, EXCLUDE CLEAR.
+        const std::string what = args.empty() ? std::string() : upper(args[0]);
+        auto& ranges = state_.defpix.excluded_resolution;
+        if (what == "CLEAR") {
+            ranges.clear();
+        } else if (what == "ICE") {
+            const auto ice = diffraction::ice_ring_ranges();
+            ranges.insert(ranges.end(), ice.begin(), ice.end());
+        } else if (what.rfind("RES", 0) == 0 && args.size() == 3) {
+            ranges.push_back({require_double(args[1], "EXCLUDE RESOLUTION"),
+                              require_double(args[2], "EXCLUDE RESOLUTION")});
+        } else {
+            throw std::invalid_argument("CONTROL EXCLUDE needs RESOLUTION d1 d2, ICE or CLEAR");
+        }
+        return;
+    }
+    if (key == "DEFPIX") {
+        // DEFPIX [ON|OFF] [FRAMES n] [VALUE_RANGE lo hi] [SHADOWS ON|OFF]
+        //        [DEFECTS ON|OFF] [FILE name|OFF]
+        auto& d = state_.defpix;
+        const auto on = [&](std::size_t i) {
+            if (i >= args.size()) {
+                throw std::invalid_argument("CONTROL DEFPIX " + upper(args[i - 1]) + " needs ON or OFF");
+            }
+            const std::string v = upper(args[i]);
+            return v == "ON" || v == "YES" || v == "1";
+        };
+        if (args.empty()) {
+            d.enabled = true;
+        }
+        for (std::size_t i = 0; i < args.size(); ++i) {
+            const std::string a = upper(args[i]);
+            if (a == "ON" || a == "OFF") {
+                d.enabled = a == "ON";
+            } else if (a == "FRAMES" && i + 1 < args.size()) {
+                d.frames = std::clamp(require_int(args[++i], "DEFPIX FRAMES"), 1, 50);
+            } else if (a == "VALUE_RANGE" && i + 2 < args.size()) {
+                d.value_range_low = require_double(args[++i], "DEFPIX VALUE_RANGE");
+                d.value_range_high = require_double(args[++i], "DEFPIX VALUE_RANGE");
+            } else if (a == "SHADOWS") {
+                d.find_shadows = on(++i);
+            } else if (a == "DEFECTS") {
+                d.find_defects = on(++i);
+            } else if (a == "FILE" && i + 1 < args.size()) {
+                const std::string f = args[++i];
+                state_.defpix_file = upper(f) == "OFF" ? std::filesystem::path() : std::filesystem::path(f);
+            } else {
+                throw std::invalid_argument(
+                    "CONTROL DEFPIX: unexpected '" + args[i] +
+                    "' (ON, OFF, FRAMES n, VALUE_RANGE lo hi, SHADOWS ON|OFF, DEFECTS ON|OFF, FILE name|OFF)"
+                );
+            }
+        }
+        return;
+    }
     if (key == "GO" || key == "RUN") {
         return;
     }
@@ -1895,6 +1962,124 @@ std::filesystem::path ControlSession::resolve_image_path(
     );
 }
 
+std::optional<DefpixSummary> ControlSession::run_defpix_stage(
+    const std::optional<std::filesystem::path>& image_override,
+    const image::DiffractionImage& image0,
+    int first,
+    int last,
+    double osc_deg
+) {
+    defpix_mask_.reset();
+    defpix_width_ = 0;
+    if (!state_.defpix.enabled) {
+        return std::nullopt;
+    }
+    // Over a few degrees a low-resolution spot stays bright, or saturated,
+    // in every sampled frame: only look for defective / hot pixels when the
+    // frames span more than a spot's rocking curve.
+    constexpr double kDefectMinSpanDeg = 5.0;
+    auto settings = state_.defpix;
+    const double span_deg = (last - first + 1) * osc_deg;
+    const bool defects_skipped = settings.find_defects && osc_deg > 0.0 && span_deg < kDefectMinSpanDeg;
+    if (defects_skipped) {
+        settings.find_defects = false;
+    }
+    const DetectorGeometry det = process_limit_detector(state_, image0.metadata);
+    double beam_x = 0.0;
+    double beam_y = 0.0;
+    process_panel_beam(state_, image0.metadata, det, beam_x, beam_y);
+    const auto frames = diffraction::defpix_frames(first, last, settings.frames);
+    const auto read = [&](int f) {
+        return f == first ? image0 : image::read_diffraction_image(resolve_image_path(image_override, f), f);
+    };
+    const auto res = diffraction::run_defpix(read, frames, det, beam_x, beam_y, settings);
+
+    using diffraction::PixelStatus;
+    DefpixSummary s;
+    s.frames = res.frames_used;
+    s.trusted = res.count(PixelStatus::Trusted);
+    s.detector_masked = res.count(PixelStatus::DetectorMasked);
+    s.untrusted_region = res.count(PixelStatus::UntrustedRegion);
+    s.excluded_resolution = res.count(PixelStatus::ExcludedResolution);
+    s.shaded = res.count(PixelStatus::Shaded);
+    s.defective = res.count(PixelStatus::Defective);
+    s.hot = res.count(PixelStatus::Hot);
+    s.shadow_block_px = res.shadow_block_px;
+    s.defects_skipped = defects_skipped;
+    if (res.n_rejected() > 0) {
+        defpix_mask_ = std::make_shared<const std::vector<std::uint8_t>>(res.trusted_mask());
+        defpix_width_ = res.width;
+    }
+
+    // Numbers as given (2400, 3.93), whatever the log stream's format.
+    const auto g = [](double v) {
+        std::ostringstream o;
+        o << std::setprecision(10) << v;
+        return o.str();
+    };
+    std::cout << "\n ***** DEFPIX *****  pixels ignored in integration\n"
+              << "  Background from " << s.frames.size() << " frame(s):";
+    for (const int f : s.frames) {
+        std::cout << ' ' << f;
+    }
+    std::cout << '\n';
+    for (const auto& u : settings.untrusted) {
+        std::cout << "  UNTRUSTED " << u.shape_name();
+        for (const double v : u.values) {
+            std::cout << ' ' << g(v);
+        }
+        std::cout << '\n';
+    }
+    for (const auto& r : settings.excluded_resolution) {
+        std::cout << "  EXCLUDE RESOLUTION " << g(r.d1_A) << ' ' << g(r.d2_A) << '\n';
+    }
+    if (s.shadow_block_px > 0) {
+        std::cout << "  VALUE_RANGE " << g(settings.value_range_low) << ' ' << g(settings.value_range_high)
+                  << " (" << s.shadow_block_px << "x" << s.shadow_block_px << " px blocks vs. their resolution ring)\n";
+    } else if (s.frames.size() < 3) {
+        std::cout << "  Shaded / defective / hot pixels not looked for (needs 3 or more frames)\n";
+    }
+    if (defects_skipped) {
+        std::cout << "  Defective / hot pixels not looked for: the frames span " << g(span_deg) << "°, under "
+                  << g(kDefectMinSpanDeg) << "° (a spot could stay bright throughout)\n";
+    }
+    const auto row = [](const char* what, std::size_t n) {
+        std::cout << "    " << std::left << std::setw(28) << what << std::right << std::setw(10) << n << '\n';
+    };
+    std::cout << "  Pixels\n";
+    row("masked by the detector", s.detector_masked);
+    row("in untrusted regions", s.untrusted_region);
+    row("in excluded resolution", s.excluded_resolution);
+    row("shaded", s.shaded);
+    row("defective (overloaded)", s.defective);
+    row("hot", s.hot);
+    row("trusted", s.trusted);
+    int listed = 0;
+    for (std::size_t i = 0; i < res.status.size() && listed < 10; ++i) {
+        const auto st = static_cast<PixelStatus>(res.status[i]);
+        if (st == PixelStatus::Defective || st == PixelStatus::Hot) {
+            std::cout << (listed == 0 ? "  Defective / hot pixels (XDS x, y):" : "") << " ("
+                      << i % static_cast<std::size_t>(res.width) + 1 << ", "
+                      << i / static_cast<std::size_t>(res.width) + 1 << ")";
+            ++listed;
+        }
+    }
+    if (listed > 0) {
+        std::cout << (s.defective + s.hot > 10 ? " …" : "") << '\n';
+    }
+    if (!state_.defpix_file.empty()) {
+        const auto path = output_path(state_, state_.defpix_file);
+        try {
+            diffraction::write_defpix_cbf(path, res);
+            s.image = path;
+            std::cout << "  Control image: " << path.string() << '\n';
+        } catch (const std::exception& ex) {
+            std::cerr << " *** WARNING **   DEFPIX: " << ex.what() << '\n';
+        }
+    }
+    return s;
+}
+
 diffraction::ProcessRequest ControlSession::make_process_request(
     const image::DiffractionImage& image,
     int frame
@@ -2110,6 +2295,15 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         measurement.trusted_mask =
             diffraction::build_trusted_mask(image, det, tr);
         measurement.trusted_width = image.metadata.width;
+        // DEFPIX: its rejected pixels are neither background nor peak.
+        if (defpix_mask_ && defpix_width_ == image.metadata.width &&
+            defpix_mask_->size() == measurement.trusted_mask.size()) {
+            auto& tm = measurement.trusted_mask;
+            for (std::size_t i = 0; i < tm.size(); ++i) {
+                tm[i] &= (*defpix_mask_)[i];
+            }
+            measurement.defpix_mask = defpix_mask_;
+        }
     }
 
     diffraction::StandardProfileSettings profile;
@@ -2337,6 +2531,7 @@ ControlGoResult ControlSession::go(
     print_process_integrate_header(
         state_, first, last, path0, osc_log, start_log, image0.metadata
     );
+    out.defpix = run_defpix_stage(image_override, image0, first, last, osc_log);
     // φ range actually integrated (rocking mode drops reflections centred
     // outside it after partials summation).
     double scan_lo = std::numeric_limits<double>::infinity();

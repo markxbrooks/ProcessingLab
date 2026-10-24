@@ -784,6 +784,12 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
                     rr >= image.metadata.height) {
                     continue;
                 }
+                if (box.defpix_mask &&
+                    (*box.defpix_mask)[static_cast<std::size_t>(rr) * static_cast<std::size_t>(tw) +
+                                       static_cast<std::size_t>(c)] == 0) {
+                    ++r.n_masked;  // untrusted (DEFPIX)
+                    continue;
+                }
                 const std::int32_t raw = pixel_at(image, c, rr);
                 if (raw < 0) {
                     // −1 masked (gap / bad pixel), −2 overloaded.

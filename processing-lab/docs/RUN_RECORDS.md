@@ -208,6 +208,13 @@ through `refinement.tilt_twist_mrad`, as before.
 | `frames` | `{first, last}` integrated |
 | `peak_box_px` | Measurement box width (px) |
 | `counts` | See below |
+| `defpix` | Pixels DEFPIX classified before integrating, or `null` with `DEFPIX OFF`: `frames_sampled`, `block_px` (shadow-test block edge; `null` with fewer than 3 frames), `defects_checked` (false when the frames span under 5°, too little to tell a defective or hot pixel from a spot) and `pixels` |
+
+`defpix.pixels` counts every pixel once: `trusted`, `detector_masked` (gaps
+and the detector's bad-pixel mask), `untrusted_region`, `excluded_resolution`,
+`shaded`, `defective` and `hot`. Integration ignores all but `trusted`.
+Its control image is listed in `outputs` with kind `defpix_image`; the
+settings are in `input.json` `settings.integration.defpix`.
 
 The `counts` come from two populations, which shouldn't be compared
 directly:

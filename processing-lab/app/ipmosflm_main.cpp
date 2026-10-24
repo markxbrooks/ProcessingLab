@@ -8,6 +8,7 @@
 
 #include "mosflm/control/ControlSession.hpp"
 #include "mosflm/crystal/SpaceGroupInfo.hpp"
+#include "mosflm/diffraction/Defpix.hpp"
 #include "mosflm/diffraction/ProcessPipeline.hpp"
 #include "mosflm/io/ExperimentModel.hpp"
 #include "mosflm/io/ImportedSweepGeometry.hpp"
@@ -33,6 +34,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -389,6 +391,7 @@ void print_run_usage() {
         << "         [--xparm GXPARM.XDS | --from RUN_DIR|process.json]\n"
         << "         [--cell A B C ALPHA BETA GAMMA] [--spacegroup N|SYMBOL]\n"
         << "         [--refine PARAM,... | all | none]\n"
+        << "         [--untrusted SHAPE V...] [--exclude-resolution D1 D2] [--exclude-ice]\n"
         << "         [--run-mode processinglab|xds|xia2] [--help] [--version]\n"
         << "\n"
         << "  Finds spots, autoindexes and integrates each sweep. Metadata comes\n"
@@ -423,6 +426,14 @@ void print_run_usage() {
         << "               tilt_twist, mosaicity (re-estimated), or all / none; the\n"
         << "               rest are held fixed. Default: orientation,mosaicity with\n"
         << "               --from / --xparm, else all. A fixed mosaicity needs --from.\n"
+        << "  --untrusted  Detector region to ignore, in XDS pixels (repeatable):\n"
+        << "               RECTANGLE X1 X2 Y1 Y2, ELLIPSE X1 X2 Y1 Y2 (its bounding\n"
+        << "               box) or QUADRILATERAL X1 Y1 X2 Y2 X3 Y3 X4 Y4. Added to\n"
+        << "               any UNTRUSTED_*= of --xds-inp; written to xds/XDS.INP.\n"
+        << "  --exclude-resolution  Resolution range to ignore, Å (repeatable).\n"
+        << "  --exclude-ice  Ignore the usual ice-ring ranges.\n"
+        << "               DEFPIX also finds shaded, defective and hot pixels itself;\n"
+        << "               it writes defpix.cbf (-3 = ignored) in the output directory.\n"
         << "  --run-mode   Where the parameters come from (recorded in the log and\n"
         << "               input.json):\n"
         << "                 processinglab  image headers, overridden by any imports\n"
@@ -521,6 +532,37 @@ int run_command(int argc, char** argv) {
                     throw std::invalid_argument("--cell needs 6 values, got '" + v + "'");
                 }
                 base.cell = c;
+            } else if (a == "--untrusted") {
+                // SHAPE and its values, as separate arguments or one quoted list.
+                std::string v = need(i, a);
+                while (i + 1 < argc && std::string_view(argv[i + 1]).rfind("--", 0) != 0) {
+                    v += ' ';
+                    v += argv[++i];
+                }
+                std::replace(v.begin(), v.end(), ',', ' ');
+                std::istringstream s(v);
+                std::vector<std::string> words{std::istream_iterator<std::string>(s), {}};
+                const auto region = mosflm::diffraction::parse_untrusted_region(words);
+                std::ostringstream line;
+                line << "UNTRUSTED " << region.shape_name();
+                for (const double x : region.values) {
+                    line << ' ' << x;
+                }
+                base.trusted_region_control.push_back(line.str());
+            } else if (a == "--exclude-resolution") {
+                const std::string d1 = need(i, a);
+                const std::string d2 = need(i, a);
+                try {
+                    if (std::stod(d1) <= 0.0 || std::stod(d2) <= 0.0) {
+                        throw std::invalid_argument("not positive");
+                    }
+                } catch (const std::exception&) {
+                    throw std::invalid_argument("--exclude-resolution needs two resolutions in Å, got '" + d1 +
+                                                "' '" + d2 + "'");
+                }
+                base.trusted_region_control.push_back("EXCLUDE RESOLUTION " + d1 + ' ' + d2);
+            } else if (a == "--exclude-ice") {
+                base.trusted_region_control.emplace_back("EXCLUDE ICE");
             } else if (a == "--refine") {
                 std::string v = need(i, a);
                 std::replace(v.begin(), v.end(), ',', ' ');

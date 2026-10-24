@@ -186,6 +186,7 @@ processing_20261023_094808/
 ├── index.log             autoindexing result (cell, matrix, lattice, indexed %)
 ├── XPARM.XDS             orientation, cell and detector after AUTOINDEX
 ├── GXPARM.XDS            the same after PROCESS (refined)
+├── defpix.cbf            pixels ignored in integration (-3), see DEFPIX below
 ├── xds/                  XDS.INP, XPARM.XDS, GXPARM.XDS
 ├── xia2/                 automatic.xinfo, run_xia2.sh
 └── mosflm/               mosflm.in
@@ -241,6 +242,9 @@ the integration went, not the final data quality, which comes from scaling.
 | `--spacegroup N` | Override the space group, by number or symbol. |
 | `--cell A B C α β γ` | Override the unit cell; it must fit the space group. |
 | `--refine LIST` | What integration refines: `orientation`, `cell`, `distance`, `beam`, `tilt_twist`, `mosaicity`, `all` or `none`; the rest stay fixed. |
+| `--untrusted SHAPE V…` | A detector region to ignore, in XDS pixels: `RECTANGLE x1 x2 y1 y2`, `ELLIPSE x1 x2 y1 y2` or `QUADRILATERAL x1 y1 … x4 y4`. Repeatable. |
+| `--exclude-resolution D1 D2` | A resolution range (Å) to ignore. Repeatable. |
+| `--exclude-ice` | Ignore the usual ice-ring ranges. |
 | `--run-mode MODE` | State where the parameters come from (see below). |
 
 Without `--output-dir`, each run creates a new `processing_YYYYMMDD_HHMMSS`
@@ -330,6 +334,33 @@ supply the cell with `--xds-inp`, or set `DMAX` in a CONTROL script.
 A search bound doesn't make an indexing solution correct. Check the selected
 lattice and cell against the fraction of spots indexed, the positional
 residuals and the symmetry evidence.
+
+### Untrusted pixels (DEFPIX)
+
+Before integrating, PROCESS decides which pixels to ignore, as XDS's DEFPIX
+step does. It samples 10 frames spread over the sweep and ignores:
+
+- **untrusted regions and resolution ranges** you give (`--untrusted`,
+  `--exclude-resolution`, `--exclude-ice`, or `UNTRUSTED_*=` and
+  `EXCLUDE_RESOLUTION_RANGE=` in an imported `XDS.INP`);
+- **shaded regions**, such as the beamstop and its arm: blocks of pixels
+  whose background is outside 0.7–3× that of their resolution ring (XDS's
+  `VALUE_RANGE_FOR_TRUSTED_DETECTOR_PIXELS= 7000 30000`);
+- **defective pixels**: overloaded in at least half the frames, or
+  flickering between background and saturation;
+- **hot pixels**: far above their ring's background in every frame.
+
+Ignored pixels are left out of the background, and a reflection with one
+under its peak is rejected. The log's `DEFPIX` block and `process.json`
+(`integration.defpix`) give the counts, and `defpix.cbf` shows them as −3
+(view it like any CBF). Sampling the whole 900-frame 76c1b test sweep,
+DEFPIX finds the beamstop arm (146,355 pixels; XDS: 146,012), and a stuck
+pixel at the counter's maximum and a flickering one, both next to the beam.
+
+Images also say which pixels are not measurements: module gaps and the
+detector's bad-pixel mask (Pilatus −1 and −2, Eiger 2ⁿ−1) are masked, and
+pixels at or above the overload (CBF `Count_cutoff`, HDF5
+`saturation_value`) are overloaded.
 
 ## Processing records
 

@@ -105,6 +105,9 @@ struct ExperimentInputs {
     /// known orientation refines ``orientation`` and re-estimates
     /// ``mosaicity``; otherwise everything is refined.
     std::optional<std::vector<std::string>> refine;
+    /// ``--untrusted`` / ``--exclude-resolution`` / ``--exclude-ice`` as
+    /// CONTROL lines, added to any from XDS.INP.
+    std::vector<std::string> trusted_region_control;
 };
 
 /// The experiment once every source is merged, with per-field provenance.

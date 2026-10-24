@@ -70,6 +70,7 @@ void parse_minicbf_comment_header(const std::string& text, ImageMetadata& meta) 
         }
     }
 
+    grab(R"(#\s*Count_cutoff\s+([0-9.eE+-]+))", meta.saturation_counts);
     grab(R"(#\s*Start_angle\s+([0-9.eE+-]+)\s*deg)", meta.oscillation_start_deg);
     grab(R"(#\s*Angle_increment\s+([0-9.eE+-]+)\s*deg)", meta.oscillation_range_deg);
 
@@ -232,7 +233,65 @@ DiffractionImage CbfImageReader::read(const std::filesystem::path& path) const {
         // Metadata stays best-effort.
     }
 
+    // Pilatus marks module gaps −1 and bad pixels −2 (its Excluded_pixels
+    // mask): both are masked here, where −2 means overloaded. Counts at or
+    // above Count_cutoff are overloaded, as the HDF5 reader marks
+    // saturation_value; a stuck pixel at the counter's 2²⁰−1 is too.
+    const auto cutoff = static_cast<std::int64_t>(meta.saturation_counts);
+    for (auto& p : image.pixels) {
+        if (p < 0) {
+            p = kPixelMasked;
+        } else if (cutoff > 0 && p >= cutoff) {
+            p = kPixelOverloaded;
+        }
+    }
     return image;
+}
+
+void write_minicbf(
+    const std::filesystem::path& path,
+    const DiffractionImage& image,
+    const std::string& header_contents
+) {
+    const int w = image.metadata.width;
+    const int h = image.metadata.height;
+    if (w <= 0 || h <= 0 || image.pixels.size() != static_cast<std::size_t>(w) * static_cast<std::size_t>(h)) {
+        throw std::runtime_error("write_minicbf: pixels do not match the image size");
+    }
+    cbf_handle cbf = nullptr;
+    if (cbf_make_handle(&cbf) != 0) {
+        throw std::runtime_error("write_minicbf: cbf_make_handle failed");
+    }
+    const std::string name = path.stem().string();
+    int err = cbf_new_datablock(cbf, name.empty() ? "image" : name.c_str());
+    err |= cbf_new_category(cbf, "array_data");
+    if (!header_contents.empty()) {
+        err |= cbf_new_column(cbf, "header_convention");
+        err |= cbf_set_value(cbf, "PILATUS_1.2");
+        err |= cbf_new_column(cbf, "header_contents");
+        err |= cbf_set_value(cbf, header_contents.c_str());
+    }
+    err |= cbf_new_column(cbf, "data");
+    // CBFlib reads the data back as (slow, fast) = (height, width).
+    err |= cbf_set_integerarray_wdims_fs(
+        cbf, CBF_BYTE_OFFSET, 1, const_cast<std::int32_t*>(image.pixels.data()), sizeof(std::int32_t), 1,
+        image.pixels.size(), "little_endian", static_cast<std::size_t>(w), static_cast<std::size_t>(h), 0, 0
+    );
+    if (err != 0) {
+        cbf_free_handle(cbf);
+        throw std::runtime_error("write_minicbf: CBFlib could not build " + path.string());
+    }
+    FILE* fp = std::fopen(path.c_str(), "wb");
+    if (fp == nullptr) {
+        cbf_free_handle(cbf);
+        throw std::runtime_error("write_minicbf: cannot open " + path.string());
+    }
+    // cbf_write_file closes fp (readable = 0: not kept for re-reading).
+    err = cbf_write_file(cbf, fp, 0, CBF, MSG_DIGEST | MIME_HEADERS | PAD_4K, 0);
+    cbf_free_handle(cbf);
+    if (err != 0) {
+        throw std::runtime_error("write_minicbf: cbf_write_file failed (" + std::to_string(err) + ")");
+    }
 }
 
 }  // namespace mosflm::image

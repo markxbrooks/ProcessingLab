@@ -44,8 +44,13 @@ struct ImportedSweepGeometry {
     std::filesystem::path directory;
     std::filesystem::path image_path;
     std::string image_template;
+    /// Untrusted regions and excluded resolution as CONTROL lines
+    /// (``UNTRUSTED …``, ``EXCLUDE …``, ``DEFPIX VALUE_RANGE …``), from
+    /// XDS.INP ``UNTRUSTED_*=`` etc. or ``run --untrusted``.
+    std::vector<std::string> trusted_region_control;
 
-    /// Overlay non-empty fields from ``other`` onto ``*this`` (other wins).
+    /// Overlay non-empty fields from ``other`` onto ``*this`` (other wins;
+    /// ``trusted_region_control`` is appended).
     void merge_from(const ImportedSweepGeometry& other);
 
     /// Emit CONTROL lines for fields that are set.

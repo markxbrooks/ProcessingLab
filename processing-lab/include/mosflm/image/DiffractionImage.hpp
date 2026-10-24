@@ -10,6 +10,13 @@
 
 namespace mosflm::image {
 
+/// Pixel values below 0 are not measurements. Every reader maps its
+/// detector's own markers onto these two; integration skips both.
+/// Masked: module gap, bad or untrusted pixel (Pilatus CBF −1 and −2, Eiger
+/// 2ⁿ−1). Overloaded: at or above ``ImageMetadata::saturation_counts``.
+inline constexpr std::int32_t kPixelMasked = -1;
+inline constexpr std::int32_t kPixelOverloaded = -2;
+
 /// Experiment metadata normalized for MOSFLM-style processing.
 struct ImageMetadata {
     int width{};
@@ -67,6 +74,21 @@ class CbfImageReader {
 public:
     [[nodiscard]] DiffractionImage read(const std::filesystem::path& path) const;
 };
+
+/// Write ``image`` as a miniCBF (byte-offset compressed, as Pilatus /
+/// Eiger CBFs are), readable by :class:`CbfImageReader`, XDS-Viewer, adxv
+/// and fabio.
+///
+/// :param path: Destination file.
+/// :param image: Pixels (row-major, ``width`` × ``height``) and size.
+/// :param header_contents: ``_array_data.header_contents`` text (``# Key
+///     value`` lines), or empty.
+/// :raises std::runtime_error: If the file cannot be written.
+void write_minicbf(
+    const std::filesystem::path& path,
+    const DiffractionImage& image,
+    const std::string& header_contents = {}
+);
 
 /// ADSC / SMV reader (ASCII ``{KEY=VAL;}`` header + unsigned_short pixels).
 ///
