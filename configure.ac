@@ -98,6 +98,71 @@ AC_CHECK_LIB([hdf5],[H5Fopen])
 
 AC_CHECK_LIB([hdf5_hl],[H5DSset_scale])
 
+# Optional FFTW3 for ProcessingLab FFT-based autoindexing (Patterson FFT).
+# Autotools owns detection; results are substituted into Makefile and passed
+# into the processing-lab build. Disable with --without-fftw.
+AC_ARG_WITH([fftw],
+  [AS_HELP_STRING([--with-fftw@<:@=DIR@:>@],
+    [use FFTW3 (DIR = install prefix; default: search)])],
+  [],
+  [with_fftw=try])
+
+HAVE_FFTW=no
+FFTW_CFLAGS=
+FFTW_LIBS=
+
+if test "x$with_fftw" != xno; then
+  fftw_cppflags=
+  fftw_ldflags=
+  if test "x$with_fftw" != xtry && test "x$with_fftw" != xyes; then
+    fftw_cppflags="-I$with_fftw/include"
+    fftw_ldflags="-L$with_fftw/lib"
+  fi
+  # Prefer pkg-config when available (Ubuntu libfftw3-dev, Homebrew fftw).
+  if test -z "$fftw_cppflags" && command -v pkg-config >/dev/null 2>&1 && \
+     pkg-config --exists fftw3 2>/dev/null; then
+    fftw_cppflags=`pkg-config --cflags fftw3 2>/dev/null`
+    fftw_ldflags=`pkg-config --libs fftw3 2>/dev/null`
+  fi
+  save_CPPFLAGS=$CPPFLAGS
+  save_LIBS=$LIBS
+  CPPFLAGS="$fftw_cppflags $CPPFLAGS"
+  # Strip -lfftw3 from ldflags for AC_CHECK_LIB (it adds -l itself).
+  fftw_libs_nol=`echo " $fftw_ldflags " | sed 's/ -lfftw3 / /g'`
+  LIBS="$fftw_libs_nol $LIBS"
+  AC_CHECK_HEADER([fftw3.h], [
+    AC_CHECK_LIB([fftw3], [fftw_plan_dft_3d], [
+      HAVE_FFTW=yes
+      FFTW_CFLAGS="$fftw_cppflags"
+      if test -n "$fftw_ldflags" && echo " $fftw_ldflags " | grep -q ' -lfftw3 '; then
+        FFTW_LIBS="$fftw_ldflags"
+      else
+        FFTW_LIBS="$fftw_ldflags -lfftw3"
+      fi
+      AC_DEFINE([HAVE_FFTW3], [1],
+        [Define to 1 if FFTW3 is available for indexing FFTs])
+      AC_MSG_NOTICE([FFTW3 found — indexing will use fftw_plan_dft_3d])
+    ], [
+      AC_MSG_WARN([fftw3.h found but libfftw3 failed to link; indexing uses built-in FFT])
+    ])
+  ], [
+    if test "x$with_fftw" != xtry; then
+      AC_MSG_ERROR([FFTW3 requested (--with-fftw) but fftw3.h was not found])
+    else
+      AC_MSG_NOTICE([FFTW3 not found — indexing uses the built-in radix-2 FFT
+  Ubuntu/Debian: sudo apt install libfftw3-dev
+  macOS:         brew install fftw])
+    fi
+  ])
+  CPPFLAGS=$save_CPPFLAGS
+  LIBS=$save_LIBS
+fi
+
+AC_SUBST([HAVE_FFTW])
+AC_SUBST([FFTW_CFLAGS])
+AC_SUBST([FFTW_LIBS])
+AM_CONDITIONAL([HAVE_FFTW], [test "x$HAVE_FFTW" = xyes])
+
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h fcntl.h malloc.h sys/malloc.h malloc/malloc.h netdb.h netinet/in.h stddef.h string.h strings.h sys/socket.h unistd.h])
 

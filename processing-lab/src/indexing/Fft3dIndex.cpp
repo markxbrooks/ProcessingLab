@@ -165,6 +165,11 @@ void fft1d(std::vector<Cplx>& a, bool inverse) {
 
 enum class Axis { X, Y, Z };
 
+/// Flat index for C-order grid layout ``x + n*(y + n*z)`` (matches FFTW).
+std::size_t idx(std::size_t x, std::size_t y, std::size_t z, std::size_t n) {
+    return x + n * (y + n * z);
+}
+
 void fftAxis(std::vector<Cplx>& data, std::size_t n, bool inverse, Axis axis) {
     std::vector<Cplx> line(n);
 
@@ -173,7 +178,9 @@ void fftAxis(std::vector<Cplx>& data, std::size_t n, bool inverse, Axis axis) {
 
             // gather into line[0..n)
             for (std::size_t t = 0; t < n; ++t) {
-                std::size_t x, y, z;
+                std::size_t x = 0;
+                std::size_t y = 0;
+                std::size_t z = 0;
                 if (axis == Axis::X) { x = t; y = a0; z = a1; }
                 if (axis == Axis::Y) { x = a0; y = t; z = a1; }
                 if (axis == Axis::Z) { x = a0; y = a1; z = t; }
@@ -186,7 +193,9 @@ void fftAxis(std::vector<Cplx>& data, std::size_t n, bool inverse, Axis axis) {
 
             // scatter back
             for (std::size_t t = 0; t < n; ++t) {
-                std::size_t x, y, z;
+                std::size_t x = 0;
+                std::size_t y = 0;
+                std::size_t z = 0;
                 if (axis == Axis::X) { x = t; y = a0; z = a1; }
                 if (axis == Axis::Y) { x = a0; y = t; z = a1; }
                 if (axis == Axis::Z) { x = a0; y = a1; z = t; }

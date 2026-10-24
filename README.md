@@ -53,7 +53,7 @@ downstream**, typically with CCP4 Pointless and Aimless.
 | CCP4 | Required by `configure` (`$CCP4`, or `--with-ccp4-prefix`); default install location; reference `ipmosflm` |
 | gfortran (optional) | DPS autoindexing |
 | HDF5 (optional) | Eiger / NeXus master files |
-| FFTW (optional) | FFT-based autoindexing |
+| FFTW (optional) | FFT-based autoindexing (`./configure` detects it) |
 
 ### Build and install
 
@@ -67,6 +67,9 @@ make install                          # → $prefix/bin/ProcessingLab
 - **The prefix:** without `--prefix`, ProcessingLab installs into the CCP4
   tree (`$CCP4/bin`). `--with-ccp4-prefix` names the CCP4 installation when
   `$CCP4` is not set.
+- **FFTW:** `./configure` searches for FFTW3 (`pkg-config fftw3`, or
+  `--with-fftw=/prefix`). Install with `sudo apt install libfftw3-dev` /
+  `brew install fftw`. Use `--without-fftw` to force the built-in radix-2 FFT.
 - **Without gfortran:** `make` skips the DPS archives with a warning, and
   `make cpp-core` builds the C++ core alone.
 - **Permissions:** run `make` as yourself. If the prefix needs elevated

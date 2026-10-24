@@ -2,13 +2,13 @@
 # This must be "inc"'d by a header Makefile
 DPS    = ..
 CC     = gcc -c
-F77    = gfortran -c
-FLINK  = gfortran
-FFLAGS = -g -O2 -fno-second-underscore -fallow-argument-mismatch
-MOSFLAGS =  -g -O2 -fno-second-underscore -fallow-argument-mismatch
+F77    = f77 -c
+FLINK  = f77
+FFLAGS = -g -O2 -fallow-argument-mismatch
+MOSFLAGS =  -g -O2 -fallow-argument-mismatch
 CFLAGS = -O0 -g -O0 
-LIBS = -L/Applications/ccp4-9/lib -lccp4f -lccp4c -lmmdb2   -L/usr/X11/lib  -lSM -lICE \
-   -lgfortran -lm -lncurses   -lto_library -L/usr/local/lib -lc++ -lSystem /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/21/lib/darwin/libclang_rt.osx.a
+LIBS = -L/apps/ccp4/ccp4-9/lib -L/apps/ccp4/ccp4-9/lib -lccp4f -lccp4c -lmmdb2    -lSM -lICE \
+   -ljpeg -lm   -L/usr/lib/gcc/x86_64-linux-gnu/15 -L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/15/../../.. -L/lib -L/usr/lib -lstdc++ -lm -lgcc_s
 LDFLAGS = 
 ipmosflm_LDFLAGS = 
 DPSBIN = ${DPS}/bin

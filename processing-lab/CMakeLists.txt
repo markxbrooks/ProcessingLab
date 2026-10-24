@@ -174,34 +174,54 @@ else()
         "(macOS: brew install libomp)")
 endif()
 
-# Optional FFTW for the indexing Patterson FFT. The built-in radix-2
-# transform remains the fallback when the library is absent.
-find_package(PkgConfig QUIET)
-set(MOSFLM_HAS_FFTW OFF)
-if(PkgConfig_FOUND)
-    pkg_check_modules(FFTW3 QUIET IMPORTED_TARGET fftw3)
-endif()
-if(NOT TARGET PkgConfig::FFTW3)
-    find_path(FFTW3_INCLUDE_DIR fftw3.h
-        HINTS
-            "$ENV{HOMEBREW_PREFIX}/include"
-            /opt/homebrew/include
-            /usr/local/include
-    )
-    find_library(FFTW3_LIBRARY NAMES fftw3
-        HINTS
-            "$ENV{HOMEBREW_PREFIX}/lib"
-            /opt/homebrew/lib
-            /usr/local/lib
-    )
-endif()
-if(TARGET PkgConfig::FFTW3 OR (FFTW3_INCLUDE_DIR AND FFTW3_LIBRARY))
-    set(MOSFLM_HAS_FFTW ON)
-    message(STATUS "FFTW found — indexing uses fftw_plan_dft_3d")
+# Optional FFTW for the indexing Patterson FFT.
+# Preferred path: Autotools ./configure detects FFTW and injects flags via
+# Makefile (-DMOSFLM_FFTW_FROM_CONFIGURE=ON). Direct CMake find_* is legacy.
+option(MOSFLM_FFTW_FROM_CONFIGURE
+    "FFTW on/off already decided by Autotools configure"
+    OFF
+)
+option(MOSFLM_HAS_FFTW "Enable FFTW3 for indexing FFTs" OFF)
+set(MOSFLM_AUTOTOOLS_FFTW OFF)
+if(MOSFLM_FFTW_FROM_CONFIGURE)
+    if(MOSFLM_HAS_FFTW)
+        set(MOSFLM_AUTOTOOLS_FFTW ON)
+        message(STATUS
+            "FFTW from Autotools — indexing uses fftw_plan_dft_3d "
+            "(CFLAGS='${MOSFLM_FFTW_CFLAGS}' LIBS='${MOSFLM_FFTW_LIBS}')")
+    else()
+        message(STATUS
+            "FFTW disabled by Autotools configure — built-in radix-2 FFT")
+    endif()
 else()
-    message(STATUS
-        "FFTW not found — indexing uses the built-in radix-2 FFT "
-        "(macOS: brew install fftw)")
+    find_package(PkgConfig QUIET)
+    set(MOSFLM_HAS_FFTW OFF)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(FFTW3 QUIET IMPORTED_TARGET fftw3)
+    endif()
+    if(NOT TARGET PkgConfig::FFTW3)
+        find_path(FFTW3_INCLUDE_DIR fftw3.h
+            HINTS
+                "$ENV{HOMEBREW_PREFIX}/include"
+                /opt/homebrew/include
+                /usr/local/include
+        )
+        find_library(FFTW3_LIBRARY NAMES fftw3
+            HINTS
+                "$ENV{HOMEBREW_PREFIX}/lib"
+                /opt/homebrew/lib
+                /usr/local/lib
+        )
+    endif()
+    if(TARGET PkgConfig::FFTW3 OR (FFTW3_INCLUDE_DIR AND FFTW3_LIBRARY))
+        set(MOSFLM_HAS_FFTW ON)
+        message(STATUS
+            "FFTW found (legacy CMake search) — indexing uses fftw_plan_dft_3d")
+    else()
+        message(STATUS
+            "FFTW not found — indexing uses the built-in radix-2 FFT "
+            "(./configure --with-fftw, or: apt install libfftw3-dev / brew install fftw)")
+    endif()
 endif()
 
 set(MOSFLM_GEOMETRY_SOURCES
@@ -362,7 +382,22 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             m
     )
     if(MOSFLM_HAS_FFTW)
-        if(TARGET PkgConfig::FFTW3)
+        if(MOSFLM_AUTOTOOLS_FFTW)
+            if(MOSFLM_FFTW_CFLAGS)
+                separate_arguments(_mosflm_fftw_cflags NATIVE_COMMAND
+                    "${MOSFLM_FFTW_CFLAGS}")
+                target_compile_options(processinglab_indexing PRIVATE
+                    ${_mosflm_fftw_cflags})
+            endif()
+            if(MOSFLM_FFTW_LIBS)
+                separate_arguments(_mosflm_fftw_libs NATIVE_COMMAND
+                    "${MOSFLM_FFTW_LIBS}")
+                target_link_libraries(processinglab_indexing PRIVATE
+                    ${_mosflm_fftw_libs})
+            else()
+                target_link_libraries(processinglab_indexing PRIVATE fftw3)
+            endif()
+        elseif(TARGET PkgConfig::FFTW3)
             target_link_libraries(processinglab_indexing PRIVATE PkgConfig::FFTW3)
         else()
             target_include_directories(processinglab_indexing PRIVATE

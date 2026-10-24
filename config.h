@@ -2,75 +2,89 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
 /* build date */
-#define BUILD_DATE "Friday, October 23 2026 at 19:52"
+#define BUILD_DATE "Saturday, October 24 2026 at 14:35"
 
 /* build user */
 #define BUILD_USER "brooks"
 
-/* Define to dummy `main' function (if any) required to link to the Fortran
+/* Define to dummy 'main' function (if any) required to link to the Fortran
    libraries. */
 /* #undef F77_DUMMY_MAIN */
 
-/* Define if F77 and FC dummy `main' functions are identical. */
+/* Define if F77 and FC dummy 'main' functions are identical. */
 /* #undef FC_DUMMY_MAIN_EQ_F77 */
 
 /* executable file information */
-#define FMOSFLM_EXEC " Mach-O 64-bit executable arm64"
+#define FMOSFLM_EXEC " ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=163d0e97f8031b12aea9fe30119126cbf7541ded, for GNU/Linux 3.2.0, with debug_info, not stripped"
 
 /* fortran compiler */
-#define FORTRAN_COMPILER "gfortran"
+#define FORTRAN_COMPILER "f77"
 
 /* fortran compiler version */
-#define FORTRAN_VERSION "GNU Fortran (Homebrew GCC 15.1.0) 15.1.0 Copyright (C) 2025 Free Software Foundation, Inc. This is free software; see the source for copying conditions. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+#define FORTRAN_VERSION "GNU Fortran (Ubuntu 15.2.0-16ubuntu1) 15.2.0 Copyright (C) 2025 Free Software Foundation, Inc. This is free software; see the source for copying conditions. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
 
 /* Define to 1 if you have the <arpa/inet.h> header file. */
 #define HAVE_ARPA_INET_H 1
 
-/* Define to 1 if you have the `bzero' function. */
+/* Define to 1 if you have the 'bzero' function. */
 #define HAVE_BZERO 1
 
 /* Define to 1 if you have the <fcntl.h> header file. */
 #define HAVE_FCNTL_H 1
 
-/* Define to 1 if you have the `gethostbyname' function. */
+/* Define to 1 if FFTW3 is available for indexing FFTs */
+#define HAVE_FFTW3 1
+
+/* Define to 1 if you have the 'gethostbyname' function. */
 #define HAVE_GETHOSTBYNAME 1
 
-/* Define to 1 if you have the `gethostname' function. */
+/* Define to 1 if you have the 'gethostname' function. */
 #define HAVE_GETHOSTNAME 1
 
-/* Define to 1 if you have the `inet_ntoa' function. */
+/* Define to 1 if you have the <hdf5.h> header file. */
+/* #undef HAVE_HDF5_H */
+
+/* Define to 1 if you have the 'inet_ntoa' function. */
 #define HAVE_INET_NTOA 1
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #define HAVE_INTTYPES_H 1
 
-/* Define to 1 if you have the `ccp4f' library (-lccp4f). */
-#define HAVE_LIBCCP4F 1
+/* Define to 1 if you have the 'ccp4f' library (-lccp4f). */
+/* #undef HAVE_LIBCCP4F */
 
-/* Define to 1 if you have the `curses' library (-lcurses). */
+/* Define to 1 if you have the 'curses' library (-lcurses). */
 /* #undef HAVE_LIBCURSES */
 
-/* Define to 1 if you have the `m' library (-lm). */
+/* Define to 1 if you have the 'hdf5' library (-lhdf5). */
+/* #undef HAVE_LIBHDF5 */
+
+/* Define to 1 if you have the 'hdf5_hl' library (-lhdf5_hl). */
+/* #undef HAVE_LIBHDF5_HL */
+
+/* Define to 1 if you have the 'jpeg' library (-ljpeg). */
+#define HAVE_LIBJPEG 1
+
+/* Define to 1 if you have the 'm' library (-lm). */
 #define HAVE_LIBM 1
 
-/* Define to 1 if you have the `ncurses' library (-lncurses). */
-#define HAVE_LIBNCURSES 1
+/* Define to 1 if you have the 'ncurses' library (-lncurses). */
+/* #undef HAVE_LIBNCURSES */
 
-/* Define to 1 if you have the `tinfo' library (-ltinfo). */
+/* Define to 1 if you have the 'tinfo' library (-ltinfo). */
 /* #undef HAVE_LIBTINFO */
 
-/* Define to 1 if you have the `xdl_view' library (-lxdl_view). */
+/* Define if libws2_32 exists. */
+/* #undef HAVE_LIBWS2_32 */
+
+/* Define to 1 if you have the 'xdl_view' library (-lxdl_view). */
 /* #undef HAVE_LIBXDL_VIEW */
 
-/* Define to 1 if your system has a GNU libc compatible `malloc' function, and
-   to 0 otherwise. */
-/* #undef HAVE_MALLOC */
-
 /* Define to 1 if you have the <malloc.h> header file. */
-/* #undef HAVE_MALLOC_H */
+#define HAVE_MALLOC_H 1
 
-/* Define to 1 if you have the <memory.h> header file. */
-#define HAVE_MEMORY_H 1
+/* Define to 1 if you have the <malloc/malloc.h> header file. */
+/* #undef HAVE_MALLOC_MALLOC_H */
 
 /* Define to 1 if you have the <netdb.h> header file. */
 #define HAVE_NETDB_H 1
@@ -78,10 +92,10 @@
 /* Define to 1 if you have the <netinet/in.h> header file. */
 #define HAVE_NETINET_IN_H 1
 
-/* Define to 1 if you have the `rint' function. */
+/* Define to 1 if you have the 'rint' function. */
 #define HAVE_RINT 1
 
-/* Define to 1 if you have the `socket' function. */
+/* Define to 1 if you have the 'socket' function. */
 #define HAVE_SOCKET 1
 
 /* Define to 1 if you have the <stddef.h> header file. */
@@ -89,6 +103,9 @@
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
+
+/* Define to 1 if you have the <stdio.h> header file. */
+#define HAVE_STDIO_H 1
 
 /* Define to 1 if you have the <stdlib.h> header file. */
 #define HAVE_STDLIB_H 1
@@ -98,6 +115,9 @@
 
 /* Define to 1 if you have the <string.h> header file. */
 #define HAVE_STRING_H 1
+
+/* Define to 1 if you have the <sys/malloc.h> header file. */
+/* #undef HAVE_SYS_MALLOC_H */
 
 /* Define to 1 if you have the <sys/socket.h> header file. */
 #define HAVE_SYS_SOCKET_H 1
@@ -132,14 +152,13 @@
 /* Define to the version of this package. */
 #define PACKAGE_VERSION "7.3.0"
 
-/* Define to 1 if you have the ANSI C header files. */
+/* Define to 1 if all of the C89 standard headers exist (not just the ones
+   required in a freestanding environment). This macro is provided for
+   backward compatibility; new code need not use it. */
 #define STDC_HEADERS 1
 
 /* Define to 1 if the X Window System is missing or not being used. */
 /* #undef X_DISPLAY_MISSING */
 
-/* Define to rpl_malloc if the replacement function should be used. */
-/* #undef malloc */
-
-/* Define to `unsigned int' if <sys/types.h> does not define. */
+/* Define as 'unsigned int' if <stddef.h> doesn't define. */
 /* #undef size_t */

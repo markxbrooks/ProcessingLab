@@ -8,13 +8,18 @@
 #
 # Autotools variables below remain for the optional oracle path.
 #-----------------------------------------------------------------------------
-prefix =  /Users/brooks/.local
+prefix =  /home/brooks/.local/bin
 exec_prefix = ${prefix}
 bindir  = ${exec_prefix}/bin
 MOSHOME = .
 RANLIB  = ranlib
-INSTALL = /opt/homebrew/bin/ginstall -c
+INSTALL = /usr/bin/install -c
 INSTALL_PROGRAM = ${INSTALL}
+
+# FFTW3 from ./configure (--with-fftw / --without-fftw).
+HAVE_FFTW = yes
+FFTW_CFLAGS = 
+FFTW_LIBS = -lfftw3
 
 CPP_BUILD = processing-lab/build
 # C++ release binary; F77 oracle remains ``ipmosflm``.
@@ -25,6 +30,17 @@ else
 endif
 PROCESSINGLAB = ProcessingLab$(EXEEXT)
 bin_PROGRAMS = $(PROCESSINGLAB)
+
+# Pass Autotools FFTW detection into the (legacy) processing-lab CMake bridge.
+# MOSFLM_FFTW_FROM_CONFIGURE=ON stops CMake from re-searching when configure
+# already decided (including --without-fftw).
+ifeq ($(HAVE_FFTW),yes)
+  FFTW_CMAKE_ARGS = -DMOSFLM_FFTW_FROM_CONFIGURE=ON -DMOSFLM_HAS_FFTW=ON \
+	"-DMOSFLM_FFTW_CFLAGS=$(FFTW_CFLAGS)" \
+	"-DMOSFLM_FFTW_LIBS=$(FFTW_LIBS)"
+else
+  FFTW_CMAKE_ARGS = -DMOSFLM_FFTW_FROM_CONFIGURE=ON -DMOSFLM_HAS_FFTW=OFF
+endif
 
 .PHONY: all cpp cpp-core cbf-lib dps-lib fortran-oracle libs force install \
 	uninstall clean distclean realclean test
@@ -53,9 +69,17 @@ dps-lib:
 	cd src/dps/index && ${MAKE}
 
 # C++ CONTROL binary without DPS archives (no Bravais / AutoIndex tests).
+# FFTW is detected by ./configure (HAVE_FFTW=yes) and injected here;
+# do not rely on CMake's own FFTW search when building via Autotools.
 cpp-core: cbf-lib
+	@if [ "$(HAVE_FFTW)" = yes ]; then \
+		echo "Using FFTW3 from configure: $(FFTW_LIBS)"; \
+	else \
+		echo "FFTW3 not enabled (configure --with-fftw / apt install libfftw3-dev)"; \
+	fi
 	cmake -S processing-lab -B $(CPP_BUILD) -DCMAKE_BUILD_TYPE=Release \
-		-DMOSFLM_FORTRAN_ORACLE=OFF
+		-DMOSFLM_FORTRAN_ORACLE=OFF \
+		$(FFTW_CMAKE_ARGS)
 	cmake --build $(CPP_BUILD) --target processinglab_dev ProcessingLab
 	mkdir -p bin
 	# Copy to a temp name then mv: overwriting a Mach-O in place on macOS
