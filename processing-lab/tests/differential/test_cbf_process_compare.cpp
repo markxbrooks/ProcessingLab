@@ -441,7 +441,9 @@ int main() {
               << " asu_recall=" << asu_recall << '\n';
 
     // Soft gate: CBF path is newer than insulin SMV; require meaningful overlap.
-    CHECK_MSG(asu_recall >= 0.40, "ASU-aware HKL recall below 0.40 vs F77 CBF");
+    // KIT-02AT05 recalls 231 / 579 (0.399): Pilatus bad pixels (−2) are masked,
+    // and a reflection with one under its peak is rejected (0.401 before).
+    CHECK_MSG(asu_recall >= 0.39, "ASU-aware HKL recall below 0.39 vs F77 CBF");
 
     fs::remove_all(work);
     return mosflm_test::finish("cbf_process_compare");

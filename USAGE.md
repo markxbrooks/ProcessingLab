@@ -47,6 +47,9 @@ script. The image headers supply the experiment metadata; XDS.INP and
 | `--spacegroup N` | Space group number or symbol (`92`, `P41212`), over every import and `--from`. See [Overriding](#overriding-the-space-group-and-cell-run---spacegroup-run---cell). |
 | `--cell A B C α β γ` | Unit cell, over every import and `--from`; must fit the space group. |
 | `--refine LIST` | What PROCESS refines: `orientation`, `cell`, `distance`, `beam`, `tilt_twist`, `mosaicity` (re-estimated), or `all` / `none`; the rest are held fixed. Default: `orientation,mosaicity` with `--from` / `--xparm`, otherwise `all`. |
+| `--untrusted SHAPE V…` | Detector region to ignore, in XDS pixels (repeatable): `RECTANGLE x1 x2 y1 y2`, `ELLIPSE x1 x2 y1 y2` (its bounding box) or `QUADRILATERAL x1 y1 x2 y2 x3 y3 x4 y4`. Added to any `UNTRUSTED_*=` of `--xds-inp`, and written to `xds/XDS.INP`. See [Untrusted pixels](#untrusted-pixels-defpix). |
+| `--exclude-resolution D1 D2` | Resolution range (Å) to ignore (repeatable). |
+| `--exclude-ice` | Ignore the usual ice-ring ranges. |
 | `--run-mode MODE` | Where the parameters come from, recorded in the log, `input.json` and `process.md`: `processinglab` (`RunMode.PROCESSINGLAB`, the default: image headers, overridden by any imports), `xds` (`RunMode.XDS`: needs `--xds-inp`, no `--xinfo`), `xia2` (`RunMode.XIA2`: needs `--xinfo`, no `--xds-inp`). `mosflm` (`RunMode.MOSFLM`) is a CONTROL script run (see below). |
 | `--help`, `--version` | Usage, build version. |
 
@@ -348,6 +351,54 @@ Indexing details live in [`processing-lab/docs/XDS_BRIDGE.md`](processing-lab/do
 | `WIDEN_EWALD ON\|OFF` | Widen Ewald with mosaic (PROCESS default OFF). |
 | `NMASKS nx ny` | Standard-profile detector bins. |
 
+### Untrusted pixels (DEFPIX)
+
+PROCESS runs DEFPIX once, before integrating: it samples frames spread over
+the range and classifies every pixel, as XDS's DEFPIX does with INIT's
+background. Ignored pixels are left out of the background, and a
+reflection with one under its peak is rejected.
+
+| Keyword | Meaning |
+| ------- | ------- |
+| `UNTRUSTED RECTANGLE x1 x2 y1 y2` | Ignore a rectangle (XDS pixels: 1-based, x along fast, bounds included). |
+| `UNTRUSTED ELLIPSE x1 x2 y1 y2` | Ignore the ellipse in that bounding box. |
+| `UNTRUSTED QUADRILATERAL x1 y1 … x4 y4` | Ignore a quadrilateral (corners in order). |
+| `UNTRUSTED CLEAR` | Forget the regions given so far. |
+| `EXCLUDE RESOLUTION d1 d2` | Ignore a resolution range (Å, either order). |
+| `EXCLUDE ICE` | Ignore the usual ice-ring ranges (3.93–3.87 Å, …). |
+| `EXCLUDE CLEAR` | Forget the ranges given so far. |
+| `DEFPIX ON\|OFF` | Run DEFPIX (default ON). |
+| `DEFPIX FRAMES n` | Frames sampled (default 10, at most 50). Shaded, defective and hot pixels need 3 or more. |
+| `DEFPIX VALUE_RANGE lo hi` | A block's background relative to its resolution ring, ×10000 (default 7000 30000, as XDS). |
+| `DEFPIX SHADOWS ON\|OFF` | Look for shaded regions (default ON). |
+| `DEFPIX DEFECTS ON\|OFF` | Look for defective and hot pixels (default ON). |
+| `DEFPIX FILE name\|OFF` | Control image (default `defpix.cbf`). |
+
+Several `DEFPIX` options can share a line (`DEFPIX FRAMES 20 SHADOWS OFF`).
+DEFPIX ignores:
+
+- **Untrusted regions** and **excluded resolution** as given.
+- **Shaded** pixels: the background of each block of pixels (8×8 or larger,
+  so a block holds enough counts) is compared with the median block of its
+  resolution ring, and blocks outside `VALUE_RANGE` are ignored. A beamstop
+  that fills whole rings is compared with the rings just outside it.
+- **Defective** pixels: overloaded in at least half the sampled frames
+  (stuck), or in two or more and near background in the rest (flickering).
+- **Hot** pixels: in every sampled frame at least 10 counts and 20× the
+  mean background of their ring.
+
+Defective and hot pixels are only looked for when the frames span at least
+5°: over a shorter range a low-resolution spot can stay bright, or
+saturated, in every sampled frame.
+
+The background is each pixel's mean over the sampled frames without its
+largest value, so a spot crossing a pixel in one sampled frame doesn't count.
+The log's `DEFPIX` block lists the counts and the first defective and hot
+pixels; `process.json` has them under `integration.defpix`. `defpix.cbf`
+holds the background (summed over the sampled frames) for trusted pixels,
+−3 for ignored ones and −1 for pixels the detector masks, like XDS's
+`BKGPIX.cbf`.
+
 `XPARM path` / `GXPARM path` in the script is the same import as `--xparm`.
 `XPARMOUT path` writes a snapshot immediately; `XPARMOUT OFF` disables the
 automatic `GXPARM.XDS` after PROCESS.
@@ -368,6 +419,9 @@ keys:
 | `DATA_RANGE` | `PROCESS first TO last` |
 | `OSCILLATION_RANGE` | `PROCESS … ANGLE` |
 | `NAME_TEMPLATE_OF_DATA_FRAMES` | `DIRECTORY` + `TEMPLATE` (`?` → `#`) |
+| `UNTRUSTED_RECTANGLE` / `_ELLIPSE` / `_QUADRILATERAL` | `UNTRUSTED RECTANGLE` / … |
+| `EXCLUDE_RESOLUTION_RANGE` | `EXCLUDE RESOLUTION` |
+| `VALUE_RANGE_FOR_TRUSTED_DETECTOR_PIXELS` | `DEFPIX VALUE_RANGE` |
 
 `ORGX`/`ORGY` without pixel size do **not** set `BEAM`. Integrate/CORRECT
 `XDS.INP` files often omit them; prefer an IDXREF-stage `XDS.INP` or the
@@ -479,6 +533,7 @@ and spot lists, `XPARM.XDS` and `GXPARM.XDS` to `DIRECTORY` (default `.`).
 | `spots.spt` (or `FINDSPOTS FILE`) | FINDSPOTS `GO` | MOSFLM spot list: header (nfast, nslow, pixel, yscale, omega; invflag; beam mm) then `x_mm y_mm φ_start φ_end I σ`. |
 | `XPARM.XDS` | successful AUTOINDEX | Bridge-format orientation + cell + detector (written next to `DIRECTORY`). |
 | `GXPARM.XDS` | PROCESS `GO` (unless `XPARMOUT OFF`) | Same layout after integration. Override the path with `XPARMOUT`. |
+| `defpix.cbf` (or `DEFPIX FILE`) | PROCESS `GO` (unless `DEFPIX OFF` / `DEFPIX FILE OFF`) | [DEFPIX](#untrusted-pixels-defpix) control image: background for trusted pixels, −3 ignored, −1 masked by the detector. |
 | `index.log` | successful AUTOINDEX | Autoindexing result: `CELL` / `MATRIX` / `SYSTEM` / `CHARACTER` / `NSPOTS` / `INDEXED` / `RMSD_HKL`. |
 | `xds/`, `xia2/`, `mosflm/` | start (with an output directory); `xds/` gets the XPARMs after the run | [Repeat inputs](#repeat-inputs-xds-xia2-mosflm) for each run mode. |
 | stdout | always | Banner, import lines, COLSPOT/INDEXFIT/IDXREF/PROCESS log, `PROCESSINGLAB_*` dump. |

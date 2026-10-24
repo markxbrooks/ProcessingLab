@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mosflm/diffraction/Defpix.hpp"
 #include "mosflm/diffraction/ProcessPipeline.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <functional>
 #include <iosfwd>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -189,6 +191,13 @@ struct ControlState {
     /// PROCESS (MOSFLM/XDS-style); used when PEAKHALF is not set. 0 = none.
     int spot_peak_half_px{0};
 
+    /// DEFPIX, run once per PROCESS GO: untrusted regions, excluded
+    /// resolution, shaded / defective / hot pixels (CONTROL ``DEFPIX``,
+    /// ``UNTRUSTED``, ``EXCLUDE``).
+    diffraction::DefpixSettings defpix{};
+    /// Control image DEFPIX writes (``DEFPIX FILE``); empty = none.
+    std::filesystem::path defpix_file{"defpix.cbf"};
+
     /// Standard-profile detector tiling (MOSFLM NMASKS / XLINES×YLINES).
     int nmasks_x{5};
     int nmasks_y{5};
@@ -250,6 +259,23 @@ struct ControlState {
     return (state.output_directory.empty() ? state.directory : state.output_directory) / name;
 }
 
+/// What DEFPIX found for one PROCESS.
+struct DefpixSummary {
+    std::vector<int> frames;  ///< Frames sampled for the background.
+    std::size_t trusted{0};
+    std::size_t detector_masked{0};
+    std::size_t untrusted_region{0};
+    std::size_t excluded_resolution{0};
+    std::size_t shaded{0};
+    std::size_t defective{0};
+    std::size_t hot{0};
+    int shadow_block_px{0};  ///< 0: shadows / defects not looked for.
+    /// Defective / hot pixels were not looked for: the frames span too
+    /// little rotation to tell a pixel from a spot.
+    bool defects_skipped{false};
+    std::filesystem::path image;  ///< Control image written, or empty.
+};
+
 /// Outcome of one ``GO`` / ``RUN``.
 struct ControlGoResult {
     bool ran_process{false};
@@ -262,6 +288,8 @@ struct ControlGoResult {
     /// Inclusive PROCESS image range actually integrated this GO.
     int process_first{0};
     int process_last{0};
+    /// DEFPIX for this PROCESS (empty if it did not run).
+    std::optional<DefpixSummary> defpix;
     std::string message;
 };
 
@@ -364,6 +392,19 @@ private:
     int matrix_needed_{0};
     std::vector<double> matrix_buf_;
     std::set<std::string> warned_unknown_;
+    /// DEFPIX trusted mask of the running PROCESS (row-major, 1 = use).
+    std::shared_ptr<const std::vector<std::uint8_t>> defpix_mask_;
+    int defpix_width_{0};
+
+    /// Run DEFPIX on frames ``first``…``last`` (``osc_deg`` each) and keep
+    /// its mask.
+    [[nodiscard]] std::optional<DefpixSummary> run_defpix_stage(
+        const std::optional<std::filesystem::path>& image_override,
+        const image::DiffractionImage& image0,
+        int first,
+        int last,
+        double osc_deg
+    );
 
     void apply_keyword(const std::string& key, const std::vector<std::string>& args);
     void ingest_matrix_numbers(const std::vector<double>& vals);

@@ -102,6 +102,9 @@ void ImportedSweepGeometry::merge_from(const ImportedSweepGeometry& other) {
         has_template = true;
         image_template = other.image_template;
     }
+    trusted_region_control.insert(
+        trusted_region_control.end(), other.trusted_region_control.begin(), other.trusted_region_control.end()
+    );
 }
 
 std::vector<std::string> ImportedSweepGeometry::to_control_lines() const {
@@ -154,6 +157,7 @@ std::vector<std::string> ImportedSweepGeometry::to_control_lines() const {
             lines.push_back("IMAGE " + image_path.string());
         }
     }
+    lines.insert(lines.end(), trusted_region_control.begin(), trusted_region_control.end());
     if (has_process_range) {
         std::ostringstream oss;
         oss << "PROCESS " << process_first << " TO " << process_last;

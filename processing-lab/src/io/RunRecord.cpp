@@ -180,8 +180,14 @@ std::string md_value(const Json& v) {
         return "—";
     }
     if (v.is_number()) {
+        // Counts in full (5538830, not 5.53883e+06); other values to 6 digits.
+        const double x = v.number();
         char buf[32];
-        std::snprintf(buf, sizeof buf, "%.6g", v.number());
+        if (x == std::floor(x) && std::fabs(x) < 1e15) {
+            std::snprintf(buf, sizeof buf, "%.0f", x);
+        } else {
+            std::snprintf(buf, sizeof buf, "%.6g", x);
+        }
         return buf;
     }
     if (v.is_array()) {
@@ -289,6 +295,28 @@ Json settings_json(const control::ControlState& st) {
     i["rocking_model"] = st.rocking_model;
     i["mosaicity_deg"] = st.mosaic_from_user ? Json(st.mosaic_deg) : Json("estimated");
     i["partiality_scaling"] = st.scale_by_partiality;
+    const auto& dp = st.defpix;
+    Json d = Json::object();
+    d["enabled"] = dp.enabled;
+    d["frames"] = dp.frames;
+    Json regions = Json::array();
+    for (const auto& u : dp.untrusted) {
+        Json values = Json::array();
+        for (const double v : u.values) {
+            values.push_back(v);
+        }
+        regions.push_back(Json(Json::Object{{"shape", u.shape_name()}, {"values", std::move(values)}}));
+    }
+    d["untrusted_regions"] = std::move(regions);
+    Json ranges = Json::array();
+    for (const auto& r : dp.excluded_resolution) {
+        ranges.push_back(Json(Json::Array{Json(r.d1_A), Json(r.d2_A)}));
+    }
+    d["excluded_resolution_angstrom"] = std::move(ranges);
+    d["find_shadows"] = dp.find_shadows;
+    d["find_defects"] = dp.find_defects;
+    d["value_range"] = Json(Json::Array{Json(dp.value_range_low), Json(dp.value_range_high)});
+    i["defpix"] = std::move(d);
     s["integration"] = std::move(i);
     Json r = Json::object();
     r["period_frames"] = st.postrefine_period;
@@ -491,6 +519,31 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
         counts["omitted"] = p.n_omitted;
         counts["integrated_reflections"] = p.mosflm_reflections.size();
         in["counts"] = std::move(counts);
+        // DEFPIX: how the pixels were classified (docs/RUN_RECORDS.md).
+        if (r.defpix) {
+            const auto& d = *r.defpix;
+            Json frames = Json::array();
+            for (const int f : d.frames) {
+                frames.push_back(f);
+            }
+            Json px = Json::object();
+            px["trusted"] = d.trusted;
+            px["detector_masked"] = d.detector_masked;
+            px["untrusted_region"] = d.untrusted_region;
+            px["excluded_resolution"] = d.excluded_resolution;
+            px["shaded"] = d.shaded;
+            px["defective"] = d.defective;
+            px["hot"] = d.hot;
+            in["defpix"] = Json(Json::Object{{"frames_sampled", std::move(frames)},
+                                             {"block_px", d.shadow_block_px > 0 ? Json(d.shadow_block_px) : Json()},
+                                             {"defects_checked", !d.defects_skipped},
+                                             {"pixels", std::move(px)}});
+            if (!d.image.empty()) {
+                add_output(d.image, "defpix_image");
+            }
+        } else {
+            in["defpix"] = Json();
+        }
         doc_["integration"] = std::move(in);
         s["results"] = Json(Json::Object{{"integrated_reflections", p.mosflm_reflections.size()}});
         if (!p.mosflm_reflections.empty() && r.crystal.spacegroup != nullptr) {
@@ -720,6 +773,16 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
            << md_value(*c.find("predicted_observations")) << " predicted observations ("
            << md_value(*c.find("profile_fitted_observations")) << " profile-fitted, "
            << md_value(*c.find("overlapped_observations")) << " overlapped)\n";
+        if (const auto* d = ig->find("defpix"); d != nullptr && !d->is_null()) {
+            const Json& px = *d->find("pixels");
+            md << "- DEFPIX (" << d->find("frames_sampled")->items().size() << " frames): "
+               << md_value(*px.find("trusted")) << " pixels trusted; ignored: "
+               << md_value(*px.find("untrusted_region")) << " in untrusted regions, "
+               << md_value(*px.find("excluded_resolution")) << " in excluded resolution, "
+               << md_value(*px.find("shaded")) << " shaded, " << md_value(*px.find("defective"))
+               << " defective, " << md_value(*px.find("hot")) << " hot; "
+               << md_value(*px.find("detector_masked")) << " masked by the detector\n";
+        }
     }
 
     if (const auto* q = pr.find("quality"); q != nullptr && !q->is_null()) {

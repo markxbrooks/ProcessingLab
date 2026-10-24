@@ -7,6 +7,7 @@
 #include <optional>
 #include <utility>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace mosflm::diffraction {
@@ -88,6 +89,9 @@ struct MeasurementBoxSettings {
     /// Optional INIT/DEFPIX-lite trusted mask (row-major, 1=ok). Empty = all.
     std::vector<std::uint8_t> trusted_mask{};
     int trusted_width{0};
+    /// DEFPIX mask (row-major, 1 = ok, ``trusted_width`` wide): a rejected
+    /// pixel under the peak rejects the reflection, as a masked one does.
+    std::shared_ptr<const std::vector<std::uint8_t>> defpix_mask{};
 };
 
 /// Extra fields filled by :class:`MeasIntegrator`.
