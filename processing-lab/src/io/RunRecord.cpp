@@ -435,7 +435,28 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
         ix["spots_used"] = st.autoindex_n_spots;
         ix["indexed_fraction"] = st.autoindex_indexed_frac;
         ix["rmsd_hkl"] = st.autoindex_rmsd_hkl;
-        doc_["indexing"] = Json(Json::Object{{"selected_solution", std::move(ix)}});
+        // Every solution considered (best first); select another with
+        // AUTOINDEX … CHARACTER n.
+        Json sols = Json::array();
+        for (const auto& s : st.autoindex_solutions) {
+            Json row = Json::object();
+            row["rank"] = s.rank;
+            row["character"] = s.character;
+            row["lattice"] = s.lattice;
+            row["penalty"] = s.penalty;
+            row["unit_cell"] = cell_json(s.cell);
+            row["metric_deviation_pct"] = s.metric_deviation_pct ? Json(*s.metric_deviation_pct) : Json();
+            Json groups = Json::array();
+            for (const auto& g : s.space_groups) {
+                groups.push_back(g);
+            }
+            row["space_groups"] = std::move(groups);
+            row["selected"] = s.character == st.autoindex_character;
+            sols.push_back(std::move(row));
+        }
+        doc_["indexing"] = Json(Json::Object{{"selected_solution", std::move(ix)},
+                                             {"solutions", std::move(sols)},
+                                             {"lastgood_rank", st.autoindex_lastgood_rank}});
         add_output(control::output_path(st, "XPARM.XDS"), "xparm");
         add_output(control::output_path(st, "index.log"), "index_summary");
     }

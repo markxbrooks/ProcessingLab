@@ -102,6 +102,25 @@ namespace mosflm::indexing {
     std::string_view prefer_system = {}
 );
 
+/// One row of the lattice-solution table, as printed by
+/// :func:`write_bravais_penalty_table`.
+struct BravaisSolutionRow {
+    int rank{0};            ///< 1 = lowest penalty (the table's ``No``)
+    int character{0};       ///< Lattice character 1–44 (``AUTOINDEX CHARACTER n``)
+    std::string system_id;  ///< Bravais lattice, e.g. ``"tP"``
+    double penalty{0.0};    ///< Raw DPS goof (lower is better)
+    UnitCell cell{};        ///< Cell in that lattice's conventional setting
+    /// Metric departure from the lattice's constrained cell (%), if defined.
+    std::optional<double> metric_deviation_pct;
+    /// Possible space groups, in the table's order (``"P4"``, ``"P41"``, …).
+    std::vector<std::string> space_groups;
+};
+
+/// The table's rows, best (rank 1) first.
+[[nodiscard]] std::vector<BravaisSolutionRow> bravais_solution_rows(
+    const std::vector<BravaisCandidate>& candidates
+);
+
 /// Write Mosflm-style lattice-character / penalty table (DPSCHOOSE format
 /// without DI/SDCELL/FRACN — ``No PENALTY LATT a b c alpha beta gamma``).
 ///

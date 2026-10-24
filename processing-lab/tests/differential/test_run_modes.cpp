@@ -403,6 +403,48 @@ int main() {
         CHECK(!fs::exists(work / "refine_refused"));
     }
 
+    // 15. Staged processing (as DiffractionLab's ProcessingLab window does):
+    //     every lattice solution in process.json, one chosen by CHARACTER,
+    //     then integration from the index stage's XPARM in a space group of
+    //     that lattice (the raw indexing cell is constrained by CELLFIX).
+    {
+        const auto record = [&](const fs::path& dir) { return mosflm::io::Json::parse(slurp(dir / "process.json")); };
+        const fs::path spt = work / "xds" / "spots.spt";
+        write_text_file(work / "stage_index.in", "AUTOINDEX DPS THRESHOLD 15 FILE " + spt.string() + "\nGO\nEXIT\n");
+        CHECK_EQ(run(work, "--image " + img + " --output-dir stage_index stage_index.in", "stage_index.out"), 0);
+        const auto ix = record(work / "stage_index");
+        const auto& sols = ix.find("indexing")->find("solutions")->items();
+        CHECK_EQ(sols.size(), std::size_t{44});
+        CHECK(sols.front().find("rank")->number() == 1.0);
+        int selected = 0;
+        int ap_character = 0;
+        for (const auto& s : sols) {
+            selected += s.find("selected")->boolean() ? 1 : 0;
+            if (s.find("lattice")->string() == "aP" && ap_character == 0) {
+                ap_character = static_cast<int>(s.find("character")->number());
+            }
+            CHECK(!s.find("space_groups")->items().empty());
+        }
+        CHECK_EQ(selected, 1);
+        CHECK(ix.find("indexing")->find("lastgood_rank")->number() >= 1.0);
+        CHECK(contains(slurp(work / "stage_index" / "input.json"), "\"first_frame\": 1"));
+
+        // CHARACTER n selects that solution.
+        write_text_file(work / "stage_index_ap.in", "AUTOINDEX DPS THRESHOLD 15 CHARACTER " +
+                        std::to_string(ap_character) + " FILE " + spt.string() + "\nGO\nEXIT\n");
+        CHECK_EQ(run(work, "--image " + img + " --output-dir stage_index_ap stage_index_ap.in", "stage_ap.out"), 0);
+        const auto ap = record(work / "stage_index_ap");
+        CHECK(ap.find("indexing")->find("selected_solution")->find("lattice")->string() == "aP");
+
+        // Integration from the index stage: --spacegroup with the raw cell.
+        CHECK_EQ(run(work, "run --image " + img + " --xparm stage_index/XPARM.XDS --spacegroup 197 "
+                     "--refine all --output-dir stage_integrate", "stage_integrate.out"), 0);
+        const auto integ = record(work / "stage_integrate");
+        CHECK(integ.find("status")->string() == "completed");
+        CHECK(integ.find("experiment")->find("crystal")->find("space_group")->find("number")->number() == 197.0);
+        CHECK(contains(slurp(work / "stage_integrate" / "process.log"), "CELLFIX: orientation matrix rebuilt"));
+    }
+
     // Nothing written into the fixtures or next to the image.
     CHECK_MSG(snapshot(fixtures) == fixtures_before, "testdata/run_modes was modified");
     CHECK_MSG(snapshot(image_dir) == image_dir_before, "files written next to the image");

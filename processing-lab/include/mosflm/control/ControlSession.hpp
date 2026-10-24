@@ -64,6 +64,17 @@ struct FindSpotsControlSettings {
 };
 
 /// Keyword state accumulated by MOSFLM CONTROL (Phase D / E).
+/// One AUTOINDEX lattice solution (a row of the penalty table).
+struct AutoindexSolution {
+    int rank{0};            ///< 1 = lowest penalty
+    int character{0};       ///< Lattice character 1–44 (``AUTOINDEX CHARACTER n``)
+    std::string lattice;    ///< Bravais lattice, e.g. ``"tP"``
+    double penalty{0.0};    ///< Raw DPS goof (lower is better)
+    UnitCell cell{};        ///< Conventional cell for that lattice
+    std::optional<double> metric_deviation_pct;
+    std::vector<std::string> space_groups;  ///< Possible space groups
+};
+
 struct ControlState {
     bool has_distance{false};
     bool has_wavelength{false};
@@ -205,6 +216,10 @@ struct ControlState {
     double autoindex_indexed_frac{0.0};
     /// RMS fractional HKL residual for indexed spots.
     double autoindex_rmsd_hkl{0.0};
+    /// Every lattice solution AUTOINDEX considered, best first.
+    std::vector<AutoindexSolution> autoindex_solutions;
+    /// Rank of the last solution before the largest penalty jump (LASTGOOD).
+    int autoindex_lastgood_rank{0};
     /// INVERTX flag of the ``.spt`` AUTOINDEX indexed (header field 6).
     /// Selects the detector CCOM PROCESS must use so predictions land in the
     /// frame the AMAT was derived in (``ccom_from_spt_omega``). Default true

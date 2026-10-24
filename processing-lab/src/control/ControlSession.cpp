@@ -210,6 +210,16 @@ void ControlSession::parse_autoindex_args(const std::vector<std::string>& args) 
             state_.autoindex.nvref = require_int(args[++i], "AUTOINDEX");
             continue;
         }
+        if (u == "CHARACTER" && i + 1 < args.size()) {
+            // Select the solution with this lattice character (1–44), as
+            // listed in the penalty table / process.json indexing.solutions.
+            const int ch = require_int(args[++i], "AUTOINDEX");
+            if (ch < 1 || ch > 44) {
+                throw std::invalid_argument("AUTOINDEX CHARACTER needs 1–44");
+            }
+            state_.autoindex.prefer_character = ch;
+            continue;
+        }
         if (u == "SOLUTION" && i + 1 < args.size()) {
             // MOSFLM SOLUTION n selects a printed indexing solution; map the
             // common insulin case (12 → cI) via prefer_system. Do not treat n

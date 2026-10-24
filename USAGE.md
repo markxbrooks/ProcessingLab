@@ -328,6 +328,9 @@ it and writes `XPARM.XDS`; `GO` after `PROCESS` integrates and writes MTZ /
 Useful `AUTOINDEX` knobs: `THRESHOLD`, `HKLDEV`, `NVECT`, `NVREF`, `SEPMIN`,
 `CLUSTER_RADIUS`, `MININDEXED` (default 0.70), `SYSTEM` / `CHARACTER` /
 `SOLUTION`, `DELTA`/`NODELTA`, `FFT`/`NOFFT`, `DPSONLY`, `IDXREF`/`NOIDXREF`.
+`CHARACTER n` selects the lattice solution with that lattice character (1–44,
+the `character` of each row in `process.json` `indexing.solutions`), and
+`SYSTEM tP` selects the lowest-penalty solution of that lattice.
 Indexing details live in [`processing-lab/docs/XDS_BRIDGE.md`](processing-lab/docs/XDS_BRIDGE.md).
 
 ### Integration

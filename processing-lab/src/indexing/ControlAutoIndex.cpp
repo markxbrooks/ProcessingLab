@@ -137,6 +137,14 @@ void run_autoindex(
         state.has_symmetry = true;
     }
 
+    // The same rows, for run records (process.json indexing.solutions).
+    state.autoindex_solutions.clear();
+    for (auto& row : bravais_solution_rows(result.bravais)) {
+        state.autoindex_solutions.push_back({row.rank, row.character, std::move(row.system_id), row.penalty,
+                                             row.cell, row.metric_deviation_pct, std::move(row.space_groups)});
+    }
+    state.autoindex_lastgood_rank = find_lastgood_rank(result.bravais);
+
     // Mosflm DPSCHOOSE-style lattice-character / penalty table.
     write_bravais_penalty_table(
         std::cout,

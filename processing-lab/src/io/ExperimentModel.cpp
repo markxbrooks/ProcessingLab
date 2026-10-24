@@ -438,7 +438,9 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
             cli.symmetry_number = *in.symmetry;
         }
         apply_import(m, cli, MetadataSource::CommandLine);
-        if (m.cell.set() && m.symmetry.set()) {
+        // A cell given here must fit the space group. An imported cell (e.g.
+        // the raw indexing cell of an XPARM) is projected by CELLFIX instead.
+        if (in.cell && m.symmetry.set()) {
             check_cell_fits_spacegroup(m.cell.value, m.symmetry.value);
         }
         // The matrix carries the cell too (UB = U·B): keep the orientation,
@@ -720,6 +722,7 @@ Json ExperimentModel::to_json() const {
     // From the first frame's header (no other source sets them).
     e["detector_size_px"] = Json(Json::Object{{"fast", detector_nx}, {"slow", detector_ny}});
     e["detector_id"] = detector_id;
+    e["first_frame"] = first_frame;  // first frame on disk; phi_start_deg is its φ
     e["phi_start_deg"] = phi_start_deg;
     // The refinement policy: each parameter refined or held fixed.
     Json policy = Json::object();

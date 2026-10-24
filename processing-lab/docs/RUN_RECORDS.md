@@ -113,6 +113,23 @@ unconstrained indexing estimate, and is not updated by refinement.
 | `orientation_matrix_mosflm` | 3×3 rows of the autoindexing matrix, in ProcessingLab's internal MOSFLM-style convention (not yet specified as an interchange format) |
 | `spots_used`, `indexed_fraction`, `rmsd_hkl` | Spots used, the fraction indexed and the RMS deviation from integer hkl |
 
+`indexing.solutions` lists every lattice solution AUTOINDEX considered (the
+penalty table in `process.log`), best first:
+
+| Field | Meaning |
+| ----- | ------- |
+| `rank` | 1 = lowest penalty |
+| `character` | Lattice character 1–44; `AUTOINDEX … CHARACTER n` selects this solution |
+| `lattice` | Bravais lattice, e.g. `tP` |
+| `penalty` | DPS penalty (lower is better) |
+| `unit_cell` | Conventional cell for that lattice |
+| `metric_deviation_pct` | Departure from the lattice's symmetry-constrained metric (%), or `null` |
+| `space_groups` | Possible space groups, lowest symmetry first |
+| `selected` | Whether AUTOINDEX chose it |
+
+`indexing.lastgood_rank` is the rank of the last solution before the largest
+penalty jump (MOSFLM's LASTGOOD).
+
 ### `experiment`
 
 The run's final model, after the last periodic refinement of `PROCESS`. It
@@ -260,7 +277,7 @@ observations, ⟨I⟩ is their 1/σ²-weighted mean:
 | `command_line` | The arguments, as given |
 | `inputs.images` | `[{path, source, format, template?, frames_available}]` |
 | `inputs.imports` | `xds_inp`, `xinfo`, `xinfo_sweep`, `xparm`, `previous_run`, each a path or `null` |
-| `experiment` | Each value as `{value, unit (or length_unit / angle_unit), source, overrides: [{value, source}]}`; `source` is `image_header`, `xds_inp`, `xinfo`, `xparm`, `previous_run`, `control` or `command_line` |
+| `experiment` | Header facts `detector_size_px`, `detector_id`, `first_frame` (first frame on disk) and `phi_start_deg` (its φ), the `refinement_policy`, and each value as `{value, unit (or length_unit / angle_unit), source, overrides: [{value, source}]}`; `source` is `image_header`, `xds_inp`, `xinfo`, `xparm`, `previous_run`, `control` or `command_line` |
 | `settings` | Effective FINDSPOTS / AUTOINDEX / integration / refinement settings, including the parameters refined |
 | `warnings` | Disagreements between sources (the higher-priority value is used) |
 | `control` | The CONTROL text the run executed |

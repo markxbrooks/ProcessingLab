@@ -685,4 +685,45 @@ void write_bravais_penalty_table(
     os << std::flush;
 }
 
+std::vector<BravaisSolutionRow> bravais_solution_rows(
+    const std::vector<BravaisCandidate>& candidates
+) {
+    std::vector<BravaisSolutionRow> rows;
+    const auto order = order_by_penalty(candidates);
+    rows.reserve(order.size());
+    for (std::size_t rank = 0; rank < order.size(); ++rank) {
+        const auto& c = candidates[order[rank]];
+        BravaisSolutionRow row;
+        row.rank = static_cast<int>(rank) + 1;
+        row.character = c.character;
+        row.system_id = c.system_id;
+        row.penalty = c.criterion;
+        row.cell = cell_from_dps_om(c.orientation);
+        if (const auto proj = project_candidate_metric(c.system_id, row.cell)) {
+            row.metric_deviation_pct = 100.0 * proj->rel_metric_dev;
+        }
+        // "P4,P41,…" (hP also lists the hexagonal P6 groups, as the table).
+        std::string list(possible_spacegroups_for_lattice(c.system_id));
+        if (c.system_id == "hP") {
+            list += std::string(",") + kHexagonalP6;
+        }
+        std::string token;
+        for (const char ch : list + ",") {
+            if (ch == ',' || ch == ' ') {
+                if (!token.empty()) {
+                    row.space_groups.push_back(token);
+                }
+                token.clear();
+                if (ch == ' ') {
+                    break;  // trailing notes such as "(hexagonal settings …)"
+                }
+            } else {
+                token += ch;
+            }
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
 }  // namespace mosflm::indexing
