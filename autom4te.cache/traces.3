@@ -1,0 +1,867 @@
+m4trace:/usr/share/aclocal-1.18/cond.m4:12: -1- AC_DEFUN([AM_CONDITIONAL], [AC_PREREQ([2.52])dnl
+ m4_if([$1], [TRUE],  [AC_FATAL([$0: invalid condition: $1])],
+       [$1], [FALSE], [AC_FATAL([$0: invalid condition: $1])])dnl
+AC_SUBST([$1_TRUE])dnl
+AC_SUBST([$1_FALSE])dnl
+_AM_SUBST_NOTMAKE([$1_TRUE])dnl
+_AM_SUBST_NOTMAKE([$1_FALSE])dnl
+m4_define([_AM_COND_VALUE_$1], [$2])dnl
+if $2; then
+  $1_TRUE=
+  $1_FALSE='#'
+else
+  $1_TRUE='#'
+  $1_FALSE=
+fi
+AC_CONFIG_COMMANDS_PRE(
+[if test -z "${$1_TRUE}" && test -z "${$1_FALSE}"; then
+  AC_MSG_ERROR([[conditional "$1" was never defined.
+Usually this means the macro was only invoked conditionally.]])
+fi])])
+m4trace:/usr/share/aclocal-1.18/substnot.m4:12: -1- AC_DEFUN([_AM_SUBST_NOTMAKE])
+m4trace:/usr/share/aclocal-1.18/substnot.m4:17: -1- AC_DEFUN([AM_SUBST_NOTMAKE], [_AM_SUBST_NOTMAKE($@)])
+m4trace:macros/ccp4.m4:2: -1- AC_DEFUN([CCP4_CHECK_LIB], [ ccp4_check_lib_save_LIBS=$LIBS
+   ccp4_check_lib_save_LDFLAGS=$LDFLAGS
+   AC_LANG_PUSH([Fortran 77])
+   LIBS=""
+   if test "$CLIB"
+   then
+     LDFLAGS="-L$CLIB"
+   else
+     LDFLAGS="-L$CCP4/lib"
+   fi
+# library tests
+  AC_CHECK_LIB(ccp4f, qisnan, ,[AC_MSG_WARN([
+*** Can't find the CCP4 library against which to link.
+*** You can set the environment variable CLIB to point to the right
+    directory.  Currently this is "$CLIB".  If necessary, check the
+    file `config.log' for other problems.
+*** Setting to $CCP4/lib ])
+    LDFLAGS="-L$CCP4/lib $LDFLAGS"],[-lccp4c -lmmdb2])
+  CCP4_LIBS="$LDFLAGS -lccp4f -lccp4c -lmmdb2"
+  LIBS="$ccp4_check_lib_save_LIBS"
+  LDFLAGS="$ccp4_check_lib_save_LDFLAGS"
+  AC_LANG_POP([Fortran 77])
+])
+m4trace:macros/cxx.m4:1: -1- AC_DEFUN([_AC_PROG_CXX_V_OUTPUT], [AC_REQUIRE([AC_PROG_CXX])dnl
+AC_LANG_PUSH(C++)dnl
+AC_LANG_CONFTEST([AC_LANG_PROGRAM([])])
+ac_save_CXXFLAGS=$CXXFLAGS
+CXXFLAGS="$CXXFLAGS m4_default([$1], [$ac_cv_prog_cxx_v])"
+(eval echo $as_me:__oline__: \"$ac_link\") >&AS_MESSAGE_LOG_FD
+ac_cxx_v_output=`eval $ac_link AS_MESSAGE_LOG_FD>&1 2>&1 | grep -v 'Driving:'`
+echo "$ac_cxx_v_output" >&AS_MESSAGE_LOG_FD
+CXXFLAGS=$ac_save_CXXFLAGS
+
+rm -f conftest*
+AC_LANG_POP(C++)dnl    
+# If we are using xlf then replace all the commas with spaces.    
+if echo $ac_cxx_v_output | grep xlfentry >/dev/null 2>&1; then
+  ac_cxx_v_output=`echo $ac_cxx_v_output | sed 's/,/ /g'`
+fi
+# On OS X need to replace quotes when using icpc
+if echo $ac_cxx_v_output | grep icpc >/dev/null 2>&1; then
+  ac_cxx_v_output=`echo $ac_cxx_v_output | sed "s/\"//g"`
+fi
+# On HP/UX there is a line like: "LPATH is: /foo:/bar:/baz" where
+# /foo, /bar, and /baz are search directories for the Fortran linker.
+# Here, we change these into -L/foo -L/bar -L/baz (and put it first):
+ac_cxx_v_output="`echo $ac_cxx_v_output |
+        grep 'LPATH is:' |
+        sed 's,.*LPATH is\(: *[[^ ]]*\).*,\1,;s,: */, -L/,g'` $ac_cxx_v_output"
+
+])
+m4trace:macros/cxx.m4:31: -1- AC_DEFUN([_AC_PROG_CXX_V], [AC_CACHE_CHECK([how to get verbose linking output from $CXX],
+                [ac_cv_prog_cxx_v],
+[AC_LANG_ASSERT(C++)
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM()],
+[ac_cv_prog_cxx_v=
+# Try some options frequently used verbose output
+for ac_verb in -v -verbose --verbose -V -\#\#\#; do
+  _AC_PROG_CXX_V_OUTPUT($ac_verb)
+  # look for -l* and *.a constructs in the output
+  for ac_arg in $ac_cxx_v_output; do
+     case $ac_arg in
+        [[\\/]]*.a | ?:[[\\/]]*.a | -[[lLRu]]*)
+          ac_cv_prog_cxx_v=$ac_verb
+          break 2 ;;
+     esac
+  done
+done
+if test -z "$ac_cv_prog_cxx_v"; then
+   AC_MSG_WARN([cannot determine how to obtain linking information from $CXX])
+fi],
+                  [AC_MSG_WARN([compilation failed])])
+])])
+m4trace:macros/cxx.m4:55: -1- AC_DEFUN([AC_CXX_LIBRARY_LDFLAGS], [AC_LANG_PUSH(C++)dnl
+_AC_PROG_CXX_V  
+AC_CACHE_CHECK([for C++ libraries], ac_cv_cxxlibs,
+[if test "x$CXXLIBS" != "x"; then
+  ac_cv_cxxlibs="$CXXLIBS" # Let the user override the test.
+else
+
+_AC_PROG_CXX_V_OUTPUT     
+
+ac_cv_cxxlibs=
+
+# Save positional arguments (if any)  
+ac_save_positional="$[@]"
+
+set X $ac_cxx_v_output
+while test $[@%:@] != 1; do      
+  shift
+  ac_arg=$[1]
+  case $ac_arg in   
+        [[\\/]]*.a | ?:[[\\/]]*.a)
+          _AC_LIST_MEMBER_IF($ac_arg, $ac_cv_cxxlibs, ,
+              ac_cv_cxxlibs="$ac_cv_cxxlibs $ac_arg")
+          ;;
+        -bI:*)
+          _AC_LIST_MEMBER_IF($ac_arg, $ac_cv_cxxlibs, ,
+             [_AC_LINKER_OPTION([$ac_arg], ac_cv_cxxlibs)])
+          ;;
+          # Ignore these flags.
+        -lang* | -lcrt0.o | -lc | -lgcc | -libmil | -LANG:=*)
+          ;;
+        -lcrt1.o | -lcrt2.o | -lcrtbegin.o | -lcrt1.10.[[5-6]].o )
+          ;;
+        -lkernel32)
+          test x"$CYGWIN" != xyes && ac_cv_cxxlibs="$ac_cv_cxxlibs $ac_arg"
+          ;;
+        -[[LRuY]])      
+          # These flags, when seen by themselves, take an argument.
+          # We remove the space between option and argument and re-iterate
+          # unless we find an empty arg or a new option (starting with -)
+          case $[2] in
+             "" | -*);;       
+             *)
+                ac_arg="$ac_arg$[2]"
+                shift; shift
+                set X $ac_arg "$[@]"
+                ;;
+          esac
+          ;;
+        -YP,*)
+          for ac_j in `echo $ac_arg | sed -e 's/-YP,/-L/;s/:/ -L/g'`; do
+            _AC_LIST_MEMBER_IF($ac_j, $ac_cv_cxxlibs, ,
+                               [ac_arg="$ac_arg $ac_j"
+                               ac_cv_cxxlibs="$ac_cv_cxxlibs $ac_j"]) 
+          done
+          ;;
+        -[[lLR]]*)
+          _AC_LIST_MEMBER_IF($ac_arg, $ac_cv_cxxlibs, ,
+                             ac_cv_cxxlibs="$ac_cv_cxxlibs $ac_arg")
+          ;;
+          # Ignore everything else.
+  esac
+done
+# restore positional arguments    
+set X $ac_save_positional; shift
+
+# We only consider "LD_RUN_PATH" on Solaris systems.  If this is seen,
+# then we insist that the "run path" must be an absolute path (i.e. it
+# must begin with a "/").
+case `(uname -sr) 2>/dev/null` in
+   "SunOS 5"*)
+      ac_ld_run_path=`echo $ac_cxx_v_output |
+                        sed -n 's,^.*LD_RUN_PATH *= *\(/[[^ ]]*\).*$,-R\1,p'`
+      test "x$ac_ld_run_path" != x &&
+        _AC_LINKER_OPTION([$ac_ld_run_path], ac_cv_cxxlibs)
+      ;;
+esac
+fi # test "x$CXXLIBS" = "x"
+])
+CXXLIBS="$ac_cv_cxxlibs"             
+AC_SUBST(CXXLIBS)
+AC_LANG_POP(C++)dnl
+])
+m4trace:macros/m4_ax_check_compile_flag.m4:39: -1- AC_DEFUN([AX_CHECK_COMPILE_FLAG], [AC_PREREQ(2.64)dnl for _AC_LANG_PREFIX and AS_VAR_IF
+AS_VAR_PUSHDEF([CACHEVAR],[ax_cv_check_[]_AC_LANG_ABBREV[]flags_$4_$1])dnl
+AC_CACHE_CHECK([whether _AC_LANG compiler accepts $1], CACHEVAR, [
+  ax_check_save_flags=$[]_AC_LANG_PREFIX[]FLAGS
+  _AC_LANG_PREFIX[]FLAGS="$[]_AC_LANG_PREFIX[]FLAGS $4 $1"
+  AC_COMPILE_IFELSE([m4_default([$5],[AC_LANG_PROGRAM()])],
+    [AS_VAR_SET(CACHEVAR,[yes])],
+    [AS_VAR_SET(CACHEVAR,[no])])
+  _AC_LANG_PREFIX[]FLAGS=$ax_check_save_flags])
+AS_VAR_IF(CACHEVAR,yes,
+  [m4_default([$2], :)],
+  [m4_default([$3], :)])
+AS_VAR_POPDEF([CACHEVAR])dnl
+])
+m4trace:macros/mosflm_int.m4:2: -1- AC_DEFUN([MOSFLM_F77_INT1], [ AC_LANG_PUSH(Fortran 77)dnl
+   AC_LINK_IFELSE([AC_LANG_PROGRAM([],[
+      integer*1 tmp
+      tmp = 1
+])],
+      [ac_mosflm_f77_int=yes],[ac_mosflm_f77_int=no])
+   AC_LANG_POP(Fortran 77)
+])
+m4trace:macros/mosflm_options.m4:1: -1- AC_DEFUN([AC_MOSFLM_OPTIONS], [
+#our specifics
+#module specific flags
+MOSFLM_EXTRA_FFLAGS=""
+
+case "$host" in
+  *osf4* )
+    if test "`basename $CC`" = cc; then
+      if ! (echo "$CFLAGS") | grep std1 >/dev/null ; then
+        CFLAGS="$CFLAGS -std1"
+      fi
+      DEFS_SYS="-Dalpha"
+    elif test "`basename $CC`" = c89; then
+      DEFS_SYS="-Dalpha"
+    else
+      DEFS_SYS="-D__OSF1__"
+    fi
+    if test "`basename $F77`" = f77; then
+      FFLAGS="$FFLAGS -fpe0 -assume dummy_aliases -nowarn"
+    elif test "`basename $F77`" = g77; then
+      FFLAGS="$FFLAGS -fno-globals -fno-automatic"
+    fi
+    X_EXTRA_FLAGS="-dnet_stub $X_EXTRA_FLAGS"
+    AR_FLAGS="ruv"
+    TIDY=${TIDY:-"rm -f ________64ELEL_"}
+    ;;
+  *osf5* )
+    if test "`basename $CC`" = cc; then
+      CFLAGS="$CFLAGS -w -DPROTOTYPE"
+      DEFS_SYS="-Dalpha"
+    else
+      CFLAGS="$CFLAGS -fpe0 -assume dummy_aliases -assume no2underscores -nowarn"
+      DEFS_SYS="-D__OSF1__"
+    fi 
+    FFLAGS="$FFLAGS -fpe0 -assume dummy_aliases -nowarn"
+    X_EXTRA_FLAGS="-dnet_stub $X_EXTRA_FLAGS"
+    AR_FLAGS="ruv"
+    TIDY=${TIDY:-"rm -f ________64ELEL_"}
+    ;;
+  *sun* )
+   AR_FLAGS="ruv"
+   TIDY=${TIDY:-":"}
+  ;;
+  *irix6* )
+   FFLAGS="$FFLAGS -w -Nn12000 -Nq12000"
+   AR_FLAGS="vrus"
+   TIDY=${TIDY:-"rm -f ________64ELEL_"}
+   VERBOSE=""
+   DEFS_SYS="-Dsgi"
+    # Probably consistent with libccp4 (should have a hairy test for this):
+    if test "`basename $CC`" = cc; then
+      case "$CFLAGS" in
+      *-64* ) ;;   # assume they meant it
+      *-o32* | *-32* ) ;;   # presumably OK
+      *-n32* ) ;;
+      * ) 
+      CFLAGS="$CFLAGS -n32"
+      FFLAGS="$FFLAGS -n32"
+      AC_MSG_WARN([
+
+*** Using compiler flag -n32 for probable compatibility with
+*** the CCP4 library.  You should check this, and re-run configure
+*** specifying an appropriate value of CFLAGS if necessary.
+*** See the INSTALL file for how to do so.
+])
+        ;;
+    esac
+    elif test "`basename $ac_cv_prog_CC`" = "gcc"; then
+      AC_MSG_WARN([
+
+*** Using gcc configured for Irix 6 won't be compatible with
+*** the CCP4 library if that was compiled with `cc -o32'.  You should
+*** check this and re-run configure specifying appropriate values of CC
+*** and CFLAGS if necessary.  The `--without-gcc' option may be useful.
+*** See the INSTALL file for more info.
+])
+    fi ;;
+  *linux* )
+    case $CC in
+    *ccc )
+      CFLAGS="$CFLAGS -O -c -tune generic" ;;
+    *icc | *ecc)
+      CFLAGS="$CFLAGS -c -w"
+       case "$CFLAGS" in
+         *-O* | *-O1* | *-O2* | *-O3* )
+          CFLAGS=`echo $CFLAGS | sed s%-O[[\ 123]]%-O0\ %g`
+          ;;
+         *-O0* ) ;;
+         *) CFLAGS="$CFLAGS -O0"
+         esac ;;
+    *gcc)
+      case "$CFLAGS" in
+         *-O* | *-O1* | *-O2* | *-O3* )
+          CFLAGS=`echo $CFLAGS | sed s%-O[[\ 123]]%-O0\ %g`
+          ;;
+         *-O0* ) ;;
+         *) CFLAGS="$CFLAGS -O0"
+         esac
+      esac
+
+    ac_ext=f    
+    ac_compile='$F77 $ac_cv_prog_f77_v -c $FFLAGS conftest.$ac_ext 2>&1'
+cat >conftest.$ac_ext <<_ACEOF
+      program main
+
+      end
+_ACEOF
+    rm -f conftest.$ac_objext 
+
+    case $F77 in
+    *g77* )
+      EXTRA_LIBS="$EXTRA_LIBS -lg2c"
+      case "$FFLAGS" in
+        *-fno-globals* ) ;;
+        *) FFLAGS="$FFLAGS -fno-globals"
+        esac
+      case "$FFLAGS" in
+        *fno-automatic* ) ;;
+        *) FFLAGS="$FFLAGS -fno-automatic"
+        esac
+      case "$FFLAGS" in
+        *fno-second-underscore* ) ;;
+        *) FFLAGS="$FFLAGS -fno-second-underscore"
+        esac
+      case `$F77 -v 2>&1` in
+      *2.96*) 
+       case "$FFLAGS" in
+         *-O* | *-O1* | *-O2* | *-O3* )
+          FFLAGS=`echo $FFLAGS | sed s%-O[[\ 123]]%-O0\ %g`
+          ;;
+         *-O0* ) ;;
+         *) FFLAGS="$FFLAGS -O0"
+         esac
+         ;;
+      *) ;;
+      esac ;;
+    *gfortran* )
+      EXTRA_LIBS="$EXTRA_LIBS -lgfortran"
+      case "$FFLAGS" in
+        *fno-second-underscore* ) ;;
+        *) FFLAGS="$FFLAGS -fno-second-underscore"
+        esac ;;
+    *fort* ) 
+      if (eval $ac_compile) | grep 'INTEL_COMPILER' >/dev/null ; then
+         if ! (echo "$F77 $FFLAGS $LDFLAGS") | grep Vaxlib >/dev/null ; then
+          LDFLAGS="$LDFLAGS -Vaxlib"
+         fi
+      else
+         FFLAGS="$FFLAGS -O -fpe0 -assume dummy_aliases -assume no2underscores -c -tune generic" 
+      fi
+      ;;
+    *ifc | *efc) 
+      if ! (echo "$F77 $FFLAGS $LDFLAGS") | grep Vaxlib >/dev/null ; then
+        LDFLAGS="$LDFLAGS -Vaxlib"
+      fi
+    esac 
+    DEFS_SYS="-D__linux__"
+    AR_FLAGS="ruv"
+    TIDY=${TIDY:-"rm -f sta*"}
+    VERBOSE=""
+    ;;
+  *darwin* )
+    case $CC in
+       *icc )
+         case "$CFLAGS" in
+           *-O* | *-O1* | *-O2* | *-O3* )
+             CFLAGS=`echo $CFLAGS | sed s%-O[[\ 123]]%-O0\ %g`
+             ;;
+           *-O0* ) ;;
+           *) CFLAGS="$CFLAGS -O0"
+         esac ;;
+       *xlc* )
+         case "$CFLAGS" in
+           *-O* | *-O1* | *-O2* | *-O3* )
+             CFLAGS=`echo $CFLAGS | sed s%-O[[\ 123]]%-O0\ %g`
+             ;;
+           *-O0* ) ;;
+           *) CFLAGS="$CFLAGS -O0"
+         esac ;;
+      *gcc* )
+         case "$CFLAGS" in
+           *-O* | *-O1* | *-O2* | *-O3* )
+             CFLAGS=`echo $CFLAGS | sed s%-O[[\ 123]]%-O0\ %g`
+             ;;
+           *-O0* ) ;;
+           *) CFLAGS="$CFLAGS -O0"
+         esac
+      esac
+    case $F77 in
+    *gfortran* )
+      EXTRA_LIBS="$EXTRA_LIBS -lgfortran"
+      case "$FFLAGS" in
+        *fno-second-underscore* ) ;;
+        *) FFLAGS="$FFLAGS -fno-second-underscore"
+        esac ;;
+    *g77 )
+      EXTRA_LIBS="$EXTRA_LIBS -lg2c"
+      case "$FFLAGS" in
+        *-fno-globals* ) ;;
+        *) FFLAGS="$FFLAGS -fno-globals"
+        esac
+      case "$FFLAGS" in
+        *fno-automatic* ) ;;
+        *) FFLAGS="$FFLAGS -fno-automatic"
+        esac
+      case "$FFLAGS" in 
+        *fno-second-underscore* ) ;;
+        *) FFLAGS="$FFLAGS -fno-second-underscore"
+        esac
+    case `$F77 -v 2>&1` in
+     *3.1*) 
+       case "$FFLAGS" in
+         *-O* | *-O1* | *-O2* | *-O3* )
+          FFLAGS=`echo $FFLAGS | sed s%-O[[\ 123]]%-O0\ %g`
+          ;;
+         *-O0* ) ;;
+         *) FFLAGS="$FFLAGS -O0"
+         esac
+         ;;
+     *3.4*)
+       case "$FFLAGS" in
+         *funroll-loops* )
+          FFLAGS=`echo $FFLAGS | sed s%funroll-loops%fno-unroll-loops%g`
+          ;;
+         *) FFLAGS="$FFLAGS -fno-unroll-loops"
+         esac
+         ;;
+     *)
+     esac ;;
+    *xlf* )
+      case "$FFLAGS" in
+        *-qextname* ) ;;
+        *) FFLAGS="$FFLAGS -qextname"
+        esac ;;
+    *ifc )
+      if ! (echo "$F77 $FFLAGS $LDFLAGS") | grep Vaxlib >/dev/null ; then
+        LDFLAGS="$LDFLAGS -Vaxlib"
+      fi
+      ;;
+
+    esac 
+    DEFS_SYS="-D__APPLE__"
+    AR_FLAGS="ruv"
+    TIDY=${TIDY:-"rm -f sta*"}
+    VERBOSE=""
+    ;;
+  *freebsd*)
+    EXTRA_LIBS="$EXTRA_LIBS -lg2c"
+    case $F77 in
+    *gfortran* )
+      EXTRA_LIBS="$EXTRA_LIBS -lgfortran"
+      case "$FFLAGS" in
+        *fno-second-underscore* ) ;;
+        *) FFLAGS="$FFLAGS -fno-second-underscore"
+        esac ;;
+    *g77* )
+      case "$FFLAGS" in
+        *-fno-globals* ) ;;
+        *) FFLAGS="$FFLAGS -fno-globals"
+        esac
+      case "$FFLAGS" in 
+        *fno-automatic* ) ;;
+        *) FFLAGS="$FFLAGS -fno-automatic"
+        esac
+      case "$FFLAGS" in 
+        *fno-second-underscore* ) ;;
+        *) FFLAGS="$FFLAGS -fno-second-underscore"
+        esac
+      ;;
+      *)
+    esac
+    DEFS_SYS="-D__FreeBSD__"
+    AR_FLAGS="ruv"
+    TIDY=${TIDY:-"rm -f sta*"}
+    VERBOSE=""
+    ;;
+  *)
+esac
+
+AC_SUBST(MOSFLM_EXTRA_FFLAGS)
+
+])
+m4trace:macros/mosflm_options.m4:285: -1- AC_DEFUN([AC_F77_LIBRARY_LDFLAGS], [AC_LANG_PUSH(Fortran 77)dnl    
+_AC_PROG_F77_V
+AC_CACHE_CHECK([for Fortran 77 libraries], ac_cv_flibs,
+[if test "x$FLIBS" != "x"; then
+  ac_cv_flibs="$FLIBS" # Let the user override the test.
+else
+
+_AC_PROG_F77_V_OUTPUT
+
+ac_cv_flibs=
+
+# Save positional arguments (if any)
+ac_save_positional="$[@]"
+
+set X $ac_f77_v_output
+while test $[@%:@] != 1; do
+  shift
+  ac_arg=$[1]
+  case $ac_arg in
+        [[\\/]]*.a | ?:[[\\/]]*.a)
+          _AC_LIST_MEMBER_IF($ac_arg, $ac_cv_flibs, ,
+              ac_cv_flibs="$ac_cv_flibs $ac_arg")
+          ;;
+        -bI:*)
+          _AC_LIST_MEMBER_IF($ac_arg, $ac_cv_flibs, ,
+             [_AC_LINKER_OPTION([$ac_arg], ac_cv_flibs)])
+          ;;
+          # Ignore these flags.
+        -lang* | -lcrt0.o | -lc | -lgcc | -libmil | -LANG:=*)
+          ;;
+        -lcrt1.o | -lcrtbegin.o | -lcrt2.o | -lcrt1.10.[[5-6]].o )
+          ;;
+        -lkernel32)
+          test x"$CYGWIN" != xyes && ac_cv_flibs="$ac_cv_flibs $ac_arg"
+          ;;
+        -[[LRuY]])
+          # These flags, when seen by themselves, take an argument.
+          # We remove the space between option and argument and re-iterate
+          # unless we find an empty arg or a new option (starting with -)
+          case $[2] in
+             "" | -*);;
+             *)
+                ac_arg="$ac_arg$[2]"
+                shift; shift
+                set X $ac_arg "$[@]"
+                ;;
+          esac
+          ;;
+        -YP,*)
+          for ac_j in `echo $ac_arg | sed -e 's/-YP,/-L/;s/:/ -L/g'`; do
+            _AC_LIST_MEMBER_IF($ac_j, $ac_cv_flibs, ,
+                               [ac_arg="$ac_arg $ac_j"
+                               ac_cv_flibs="$ac_cv_flibs $ac_j"])
+          done
+          ;;
+        -[[lLR]]*)       
+          _AC_LIST_MEMBER_IF($ac_arg, $ac_cv_flibs, ,
+                             ac_cv_flibs="$ac_cv_flibs $ac_arg")
+          ;;
+          # Ignore everything else.      
+  esac
+done
+# restore positional arguments    
+set X $ac_save_positional; shift
+
+# We only consider "LD_RUN_PATH" on Solaris systems.  If this is seen,
+# then we insist that the "run path" must be an absolute path (i.e. it
+# must begin with a "/").
+case `(uname -sr) 2>/dev/null` in
+   "SunOS 5"*)
+      ac_ld_run_path=`echo $ac_f77_v_output |
+                        sed -n 's,^.*LD_RUN_PATH *= *\(/[[^ ]]*\).*$,-R\1,p'`
+      test "x$ac_ld_run_path" != x &&
+        _AC_LINKER_OPTION([$ac_ld_run_path], ac_cv_flibs)
+      ;;
+esac
+fi # test "x$FLIBS" = "x"
+
+#workaround for -lompstubs ordering under solaris
+if test "$GCC" != yes; then
+  case $host_os in
+    solaris* ) ac_cv_flibs="-xopenmp=stubs $ac_cv_flibs" ;;
+    esac
+fi
+
+])
+FLIBS="$ac_cv_flibs"       
+AC_SUBST(FLIBS)
+AC_LANG_POP(Fortran 77)dnl
+])
+m4trace:macros/mosflm_options.m4:386: -1- AC_DEFUN([_AC_PROG_F77_V_OUTPUT], [AC_REQUIRE([AC_PROG_F77])dnl
+AC_LANG_PUSH(Fortran 77)dnl 
+                
+AC_LANG_CONFTEST([AC_LANG_PROGRAM([])])
+        
+# Compile and link our simple test program by passing a flag (argument
+# 1 to this macro) to the Fortran 77 compiler in order to get
+# "verbose" output that we can then parse for the Fortran 77 linker
+# flags.
+ac_save_FFLAGS=$FFLAGS 
+FFLAGS="$FFLAGS m4_default([$1], [$ac_cv_prog_f77_v])"
+(eval echo $as_me:__oline__: \"$ac_link\") >&AS_MESSAGE_LOG_FD
+ac_f77_v_output=`eval $ac_link AS_MESSAGE_LOG_FD>&1 2>&1 | grep -v 'Driving:'`
+echo "$ac_f77_v_output" >&AS_MESSAGE_LOG_FD
+FFLAGS=$ac_save_FFLAGS
+  
+rm -f conftest*
+AC_LANG_POP(Fortran 77)dnl
+          
+# If we are using xlf then replace all the commas with spaces.
+if echo $ac_f77_v_output | grep xlfentry >/dev/null 2>&1; then
+  ac_f77_v_output=`echo $ac_f77_v_output | sed 's/,/ /g'`
+fi 
+
+# If we are using Cray Fortran then delete quotes. 
+# Use "\"" instead of '"' for font-lock-mode. 
+# FIXME: a more general fix for quoted arguments with spaces?  
+if echo $ac_f77_v_output | grep cft90 >/dev/null 2>&1; then
+  ac_f77_v_output=`echo $ac_f77_v_output | sed "s/\"//g"`
+fi
+
+if echo $ac_f77_v_output | grep ifort >/dev/null 2>&1; then
+  ac_f77_v_output=`echo $ac_f77_v_output | sed "s/\"//g"`
+fi[]dnl
+])
+m4trace:macros/mosflm_options.m4:431: -1- AC_DEFUN([_AC_PROG_F77_V], [AC_CACHE_CHECK([how to get verbose linking output from $F77],
+                [ac_cv_prog_f77_v],
+[AC_LANG_ASSERT(Fortran 77)
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM()],
+[ac_cv_prog_f77_v=
+# Try some options frequently used verbose output
+for ac_verb in -v -verbose --verbose -V -\#\#\#; do
+  _AC_PROG_F77_V_OUTPUT($ac_verb)
+  # look for -l* and *.a constructs in the output
+  for ac_arg in $ac_f77_v_output; do
+     case $ac_arg in
+        [[\\/]]*.a | ?:[[\\/]]*.a | -[[lLRu]]*)
+          ac_cv_prog_f77_v=$ac_verb
+          break 2 ;;
+     esac
+  done
+done
+if test -z "$ac_cv_prog_f77_v"; then
+   AC_MSG_WARN([cannot determine how to obtain linking information from $F77])
+fi],
+                  [AC_MSG_WARN([compilation failed])])
+])])
+m4trace:macros/xdl_view.m4:2: -1- AC_DEFUN([CCP4_CHECK_XDL_VIEW], [ ccp4_check_xdl_view_save_LIBS=$LIBS
+    ccp4_check_xdl_view_save_LDFLAGS=$LDFLAGS
+    LIBS=""
+   if test "$CLIB"
+   then
+     LDFLAGS="-L$CLIB"
+   else
+     LDFLAGS="-L$CCP4/lib"
+   fi
+    LDFLAGS="$LDFLAGS $X_LIBS"
+AC_CHECK_LIB(xdl_view, xdl_open_view, ,[ AC_MSG_WARN([
+*** Can't find the xdl_view library against which to link.
+*** You can set the environment variable CLIB to point to the right
+    directory.  Currently this is "$CLIB".  If necessary, check the
+    file `config.log' for other problems.
+*** Setting to $CCP4/lib ])
+    LDFLAGS="-L$CCP4/lib $X_LIBS"
+    LIBS="-lxdl_view" ], -lXt -lX11) 
+    XDL_LIB="$LDFLAGS $LIBS"
+    LIBS="$ccp4_check_xdl_view_save_LIBS"
+    LDFLAGS="$ccp4_check_xdl_view_save_LDFLAGS"    
+])
+m4trace:configure.ac:2: -1- m4_pattern_forbid([^_?A[CHUM]_])
+m4trace:configure.ac:2: -1- m4_pattern_forbid([_AC_])
+m4trace:configure.ac:2: -1- m4_pattern_forbid([^LIBOBJS$], [do not use LIBOBJS directly, use AC_LIBOBJ (see section 'AC_LIBOBJ vs LIBOBJS'])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^AS_FLAGS$])
+m4trace:configure.ac:2: -1- m4_pattern_forbid([^_?m4_])
+m4trace:configure.ac:2: -1- m4_pattern_forbid([^dnl$])
+m4trace:configure.ac:2: -1- m4_pattern_forbid([^_?AS_])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^SHELL$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PATH_SEPARATOR$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_NAME$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_TARNAME$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_VERSION$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_STRING$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_BUGREPORT$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_URL$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^exec_prefix$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^prefix$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^program_transform_name$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^bindir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^sbindir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^libexecdir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^datarootdir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^datadir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^sysconfdir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^sharedstatedir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^localstatedir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^runstatedir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^includedir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^oldincludedir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^docdir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^infodir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^htmldir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^dvidir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^pdfdir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^psdir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^libdir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^localedir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^mandir$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_NAME$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_TARNAME$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_VERSION$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_STRING$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_BUGREPORT$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^PACKAGE_URL$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^DEFS$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^ECHO_C$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^ECHO_N$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^ECHO_T$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^LIBS$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^build_alias$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^host_alias$])
+m4trace:configure.ac:2: -1- m4_pattern_allow([^target_alias$])
+m4trace:configure.ac:4: -1- _m4_warn([obsolete], [The macro 'AC_CONFIG_HEADER' is obsolete.
+You should run autoupdate.], [./lib/autoconf/status.m4:719: AC_CONFIG_HEADER is expanded from...
+configure.ac:4: the top level])
+m4trace:configure.ac:16: -1- m4_pattern_allow([^CCP4$])
+m4trace:configure.ac:35: -1- m4_pattern_allow([^build$])
+m4trace:configure.ac:35: -1- m4_pattern_allow([^build_cpu$])
+m4trace:configure.ac:35: -1- m4_pattern_allow([^build_vendor$])
+m4trace:configure.ac:35: -1- m4_pattern_allow([^build_os$])
+m4trace:configure.ac:35: -1- m4_pattern_allow([^host$])
+m4trace:configure.ac:35: -1- m4_pattern_allow([^host_cpu$])
+m4trace:configure.ac:35: -1- m4_pattern_allow([^host_vendor$])
+m4trace:configure.ac:35: -1- m4_pattern_allow([^host_os$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^CC$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^CFLAGS$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^LDFLAGS$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^LIBS$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^CPPFLAGS$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^CC$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^CC$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^CC$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^CC$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^ac_ct_CC$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^CC$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^EXEEXT$])
+m4trace:configure.ac:38: -1- m4_pattern_allow([^OBJEXT$])
+m4trace:configure.ac:39: -1- m4_pattern_allow([^CXX$])
+m4trace:configure.ac:39: -1- m4_pattern_allow([^CXXFLAGS$])
+m4trace:configure.ac:39: -1- m4_pattern_allow([^LDFLAGS$])
+m4trace:configure.ac:39: -1- m4_pattern_allow([^LIBS$])
+m4trace:configure.ac:39: -1- m4_pattern_allow([^CPPFLAGS$])
+m4trace:configure.ac:39: -1- m4_pattern_allow([^CXX$])
+m4trace:configure.ac:39: -1- m4_pattern_allow([^ac_ct_CXX$])
+m4trace:configure.ac:40: -1- AC_CXX_LIBRARY_LDFLAGS
+m4trace:configure.ac:40: -1- _AC_PROG_CXX_V
+m4trace:configure.ac:40: -1- _AC_PROG_CXX_V_OUTPUT([$ac_verb])
+m4trace:configure.ac:40: -1- _AC_PROG_CXX_V_OUTPUT
+m4trace:configure.ac:40: -1- m4_pattern_allow([^CXXLIBS$])
+m4trace:configure.ac:41: -1- m4_pattern_allow([^F77$])
+m4trace:configure.ac:41: -1- m4_pattern_allow([^FFLAGS$])
+m4trace:configure.ac:41: -1- m4_pattern_allow([^LDFLAGS$])
+m4trace:configure.ac:41: -1- m4_pattern_allow([^LIBS$])
+m4trace:configure.ac:41: -1- m4_pattern_allow([^F77$])
+m4trace:configure.ac:41: -1- m4_pattern_allow([^ac_ct_F77$])
+m4trace:configure.ac:42: -1- m4_pattern_allow([^CPP$])
+m4trace:configure.ac:42: -1- m4_pattern_allow([^CPPFLAGS$])
+m4trace:configure.ac:42: -1- m4_pattern_allow([^CPP$])
+m4trace:configure.ac:43: -1- m4_pattern_allow([^INSTALL_PROGRAM$])
+m4trace:configure.ac:43: -1- m4_pattern_allow([^INSTALL_SCRIPT$])
+m4trace:configure.ac:43: -1- m4_pattern_allow([^INSTALL_DATA$])
+m4trace:configure.ac:44: -1- m4_pattern_allow([^SET_MAKE$])
+m4trace:configure.ac:45: -1- m4_pattern_allow([^RANLIB$])
+m4trace:configure.ac:47: -1- AC_F77_LIBRARY_LDFLAGS
+m4trace:configure.ac:47: -1- _AC_PROG_F77_V
+m4trace:configure.ac:47: -1- _AC_PROG_F77_V_OUTPUT([$ac_verb])
+m4trace:configure.ac:47: -1- _AC_PROG_F77_V_OUTPUT
+m4trace:configure.ac:47: -1- m4_pattern_allow([^FLIBS$])
+m4trace:configure.ac:47: -1- m4_pattern_allow([^F77_DUMMY_MAIN$])
+m4trace:configure.ac:47: -1- m4_pattern_allow([^FC_DUMMY_MAIN_EQ_F77$])
+m4trace:configure.ac:54: -1- m4_pattern_allow([^LINKTYP$])
+m4trace:configure.ac:57: -1- m4_pattern_allow([^LINKTYP$])
+m4trace:configure.ac:60: -1- m4_pattern_allow([^LINKTYP$])
+m4trace:configure.ac:63: -1- m4_pattern_allow([^LINKTYP$])
+m4trace:configure.ac:81: -1- MOSFLM_F77_INT1([])
+m4trace:configure.ac:82: -1- AM_CONDITIONAL([INT_BYTE], [test "$ac_mosflm_f77_int" = yes])
+m4trace:configure.ac:82: -1- m4_pattern_allow([^INT_BYTE_TRUE$])
+m4trace:configure.ac:82: -1- m4_pattern_allow([^INT_BYTE_FALSE$])
+m4trace:configure.ac:82: -1- _AM_SUBST_NOTMAKE([INT_BYTE_TRUE])
+m4trace:configure.ac:82: -1- _AM_SUBST_NOTMAKE([INT_BYTE_FALSE])
+m4trace:configure.ac:83: -1- AM_CONDITIONAL([WITH_X], [test "x$with_x" = xyes])
+m4trace:configure.ac:83: -1- m4_pattern_allow([^WITH_X_TRUE$])
+m4trace:configure.ac:83: -1- m4_pattern_allow([^WITH_X_FALSE$])
+m4trace:configure.ac:83: -1- _AM_SUBST_NOTMAKE([WITH_X_TRUE])
+m4trace:configure.ac:83: -1- _AM_SUBST_NOTMAKE([WITH_X_FALSE])
+m4trace:configure.ac:86: -1- m4_pattern_allow([^HAVE_LIBTINFO$])
+m4trace:configure.ac:87: -1- m4_pattern_allow([^HAVE_LIBNCURSES$])
+m4trace:configure.ac:90: -1- m4_pattern_allow([^HAVE_LIBCURSES$])
+m4trace:configure.ac:93: -1- m4_pattern_allow([^HAVE_LIBM$])
+m4trace:configure.ac:95: -1- m4_pattern_allow([^HAVE_LIBJPEG$])
+m4trace:configure.ac:97: -1- m4_pattern_allow([^HAVE_LIBHDF5$])
+m4trace:configure.ac:99: -1- m4_pattern_allow([^HAVE_LIBHDF5_HL$])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_stdio_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" stdio.h ]AS_TR_SH([stdio.h]) AS_TR_CPP([HAVE_stdio.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_stdlib_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" stdlib.h ]AS_TR_SH([stdlib.h]) AS_TR_CPP([HAVE_stdlib.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_string_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" string.h ]AS_TR_SH([string.h]) AS_TR_CPP([HAVE_string.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_inttypes_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" inttypes.h ]AS_TR_SH([inttypes.h]) AS_TR_CPP([HAVE_inttypes.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_stdint_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" stdint.h ]AS_TR_SH([stdint.h]) AS_TR_CPP([HAVE_stdint.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_strings_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" strings.h ]AS_TR_SH([strings.h]) AS_TR_CPP([HAVE_strings.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_sys_stat_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" sys/stat.h ]AS_TR_SH([sys/stat.h]) AS_TR_CPP([HAVE_sys/stat.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_sys_types_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" sys/types.h ]AS_TR_SH([sys/types.h]) AS_TR_CPP([HAVE_sys/types.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- AC_DEFUN([_AC_Header_unistd_h], [m4_divert_text([INIT_PREPARE],
+  [AS_VAR_APPEND([ac_header_]]_AC_LANG_ABBREV[[_list],
+  [" unistd.h ]AS_TR_SH([unistd.h]) AS_TR_CPP([HAVE_unistd.h])["])])_AC_HEADERS_EXPANSION(_AC_LANG_ABBREV)])
+m4trace:configure.ac:133: -1- m4_pattern_allow([^STDC_HEADERS$])
+m4trace:configure.ac:133: -1- m4_pattern_allow([^HAVE_FFTW3$])
+m4trace:configure.ac:161: -1- m4_pattern_allow([^HAVE_FFTW$])
+m4trace:configure.ac:162: -1- m4_pattern_allow([^FFTW_CFLAGS$])
+m4trace:configure.ac:163: -1- m4_pattern_allow([^FFTW_LIBS$])
+m4trace:configure.ac:164: -1- AM_CONDITIONAL([HAVE_FFTW], [test "x$HAVE_FFTW" = xyes])
+m4trace:configure.ac:164: -1- m4_pattern_allow([^HAVE_FFTW_TRUE$])
+m4trace:configure.ac:164: -1- m4_pattern_allow([^HAVE_FFTW_FALSE$])
+m4trace:configure.ac:164: -1- _AM_SUBST_NOTMAKE([HAVE_FFTW_TRUE])
+m4trace:configure.ac:164: -1- _AM_SUBST_NOTMAKE([HAVE_FFTW_FALSE])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_ARPA_INET_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_FCNTL_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_MALLOC_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_SYS_MALLOC_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_MALLOC_MALLOC_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_NETDB_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_NETINET_IN_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_STDDEF_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_STRING_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_STRINGS_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_SYS_SOCKET_H$])
+m4trace:configure.ac:167: -1- m4_pattern_allow([^HAVE_UNISTD_H$])
+m4trace:configure.ac:169: -1- m4_pattern_allow([^HAVE_HDF5_H$])
+m4trace:configure.ac:172: -1- m4_pattern_allow([^size_t$])
+m4trace:configure.ac:175: -1- m4_pattern_allow([^HAVE_BZERO$])
+m4trace:configure.ac:175: -1- m4_pattern_allow([^HAVE_GETHOSTBYNAME$])
+m4trace:configure.ac:175: -1- m4_pattern_allow([^HAVE_GETHOSTNAME$])
+m4trace:configure.ac:175: -1- m4_pattern_allow([^HAVE_INET_NTOA$])
+m4trace:configure.ac:175: -1- m4_pattern_allow([^HAVE_RINT$])
+m4trace:configure.ac:175: -1- m4_pattern_allow([^HAVE_SOCKET$])
+m4trace:configure.ac:178: -1- m4_pattern_allow([^XMKMF$])
+m4trace:configure.ac:178: -1- m4_pattern_allow([^X_DISPLAY_MISSING$])
+m4trace:configure.ac:178: -1- m4_pattern_allow([^X_CFLAGS$])
+m4trace:configure.ac:178: -1- m4_pattern_allow([^X_PRE_LIBS$])
+m4trace:configure.ac:178: -1- m4_pattern_allow([^X_LIBS$])
+m4trace:configure.ac:178: -1- m4_pattern_allow([^X_EXTRA_LIBS$])
+m4trace:configure.ac:180: -1- AC_MOSFLM_OPTIONS
+m4trace:configure.ac:180: -1- m4_pattern_allow([^MOSFLM_EXTRA_FFLAGS$])
+m4trace:configure.ac:182: -1- CCP4_CHECK_LIB([$EXTRA_LIBS $CXXLIBS])
+m4trace:configure.ac:182: -1- m4_pattern_allow([^HAVE_LIBCCP4F$])
+m4trace:configure.ac:185: -1- CCP4_CHECK_XDL_VIEW
+m4trace:configure.ac:185: -1- m4_pattern_allow([^HAVE_LIBXDL_VIEW$])
+m4trace:configure.ac:189: -1- m4_pattern_allow([^HAVE_LIBWS2_32$])
+m4trace:configure.ac:194: -1- m4_pattern_allow([^AR_FLAGS$])
+m4trace:configure.ac:195: -1- m4_pattern_allow([^TIDY$])
+m4trace:configure.ac:196: -1- m4_pattern_allow([^CCP4_LIBS$])
+m4trace:configure.ac:197: -1- m4_pattern_allow([^XDL_LIB$])
+m4trace:configure.ac:198: -1- m4_pattern_allow([^EXTRA_LIBS$])
+m4trace:configure.ac:199: -1- m4_pattern_allow([^ipmosflm_LDFLAGS$])
+m4trace:configure.ac:201: -1- m4_pattern_allow([^subdirs$])
+m4trace:configure.ac:262: -1- AX_CHECK_COMPILE_FLAG([-fallow-argument-mismatch], [FFLAGS="$FFLAGS -fallow-argument-mismatch"], [], [-Werror])
+m4trace:configure.ac:265: -1- m4_pattern_allow([^FORTRAN_COMPILER$])
+m4trace:configure.ac:266: -1- m4_pattern_allow([^FORTRAN_VERSION$])
+m4trace:configure.ac:267: -1- m4_pattern_allow([^FMOSFLM_EXEC$])
+m4trace:configure.ac:268: -1- m4_pattern_allow([^BUILD_DATE$])
+m4trace:configure.ac:269: -1- m4_pattern_allow([^BUILD_USER$])
+m4trace:configure.ac:278: -1- m4_pattern_allow([^LIB@&t@OBJS$])
+m4trace:configure.ac:278: -1- m4_pattern_allow([^LTLIBOBJS$])
