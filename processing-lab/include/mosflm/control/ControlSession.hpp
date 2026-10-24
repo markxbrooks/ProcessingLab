@@ -2,8 +2,10 @@
 
 #include "mosflm/diffraction/Defpix.hpp"
 #include "mosflm/diffraction/ProcessPipeline.hpp"
+#include "mosflm/diffraction/Strategy.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
+#include "mosflm/io/RunStep.hpp"
 #include "mosflm/util/OpenMP.hpp"
 
 #include <Eigen/Dense>
@@ -241,7 +243,14 @@ struct ControlState {
 
     bool strategy_pending{false};
     bool strategy_done{false};
-    double strategy_osc_range_deg{90.0};
+    /// STRATEGY: target completeness, anomalous, ROTATE, φ step.
+    diffraction::StrategySettings strategy{};
+    /// ``STRATEGY FRAMES first last``: choose within these collected frames
+    /// (unset: plan on a full turn).
+    std::optional<std::pair<int, int>> strategy_frames;
+    /// ``STRATEGY RESOLUTION d`` (Å); 0: as PROCESS (DMIN or the detector edge).
+    double strategy_dmin_A{0.0};
+    /// Best completeness found by the last STRATEGY (fraction).
     double strategy_completeness_est{0.0};
 
     bool done_run{false};
@@ -290,6 +299,8 @@ struct ControlGoResult {
     int process_last{0};
     /// DEFPIX for this PROCESS (empty if it did not run).
     std::optional<DefpixSummary> defpix;
+    /// What STRATEGY found (empty unless ``ran_strategy``).
+    std::optional<diffraction::StrategyResult> strategy;
     std::string message;
 };
 
@@ -308,10 +319,13 @@ using FindSpotsRunner = std::function<void(
 
 /// Hooks around each ``GO`` in :meth:`ControlSession::run_stream`, for run
 /// records: ``before`` sees the state with the step still pending, ``after``
-/// the result. An exception from ``go`` propagates after ``before`` ran.
+/// the result. ``step_done`` reports a step that finished inside a ``GO``
+/// (``RunStep::DEFPIX`` at the start of ``PROCESS``), with the result so
+/// far. An exception from ``go`` propagates after ``before`` ran.
 struct GoObserver {
     std::function<void(const ControlState&)> before;
     std::function<void(const ControlGoResult&, const ControlState&)> after;
+    std::function<void(io::RunStep, const ControlGoResult&, const ControlState&)> step_done;
 };
 
 /// Pure-C++ CONTROL driver (Phase D subset + Phase E extensions).
@@ -411,6 +425,9 @@ private:
     void finish_matrix_if_ready();
     void parse_autoindex_args(const std::vector<std::string>& args);
     void parse_findspots_args(const std::vector<std::string>& args);
+    void parse_strategy_args(const std::vector<std::string>& args);
+    /// Run the pending STRATEGY into ``out``.
+    void run_strategy(const std::optional<std::filesystem::path>& image_override, ControlGoResult& out);
 };
 
 }  // namespace mosflm::control

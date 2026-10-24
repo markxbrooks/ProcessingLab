@@ -336,6 +336,39 @@ the `character` of each row in `process.json` `indexing.solutions`), and
 `SYSTEM tP` selects the lowest-penalty solution of that lattice.
 Indexing details live in [`processing-lab/docs/XDS_BRIDGE.md`](processing-lab/docs/XDS_BRIDGE.md).
 
+### Strategy (`RunStep.STRATEGY`)
+
+After indexing (or `XPARM` with the orientation), `STRATEGY` works out the
+smallest rotation that records a target completeness, as MOSFLM's
+`STRATEGY AUTO` does. Every reflection to the resolution limit is followed
+over a full turn: both Ewald crossings are solved, kept when they land on the
+detector, and reduced to the asymmetric unit with their Friedel sign. For
+each total rotation the start angle recording the most is found.
+
+| Keyword | Meaning |
+| ------- | ------- |
+| `STRATEGY [AUTO] COMPLETENESS pct` | Completeness wanted, % (default 99). The rotation reported is the smallest reaching it. |
+| `STRATEGY … ANOMALOUS` / `NOANOMALOUS` | Aim for anomalous completeness: acentric pairs with both Friedel mates. |
+| `STRATEGY … FRAMES first last` | Choose within these collected frames, and report the frames to integrate. `FULL` (default): plan on a full turn. |
+| `STRATEGY … ROTATE r` | Also report the best start for a rotation of *r*° (MOSFLM `ROTATE`; `ANGLE` and `RANGE` are aliases). |
+| `STRATEGY … RESOLUTION d` | High-resolution limit (Å). Default: `DMIN` if given, otherwise the nearest detector edge. Beyond the edge only the corners record data, so no rotation could be complete. |
+| `STRATEGY … STEP deg` | φ bin and rotation step (default 1°). |
+
+The space group matters: higher symmetry needs less rotation. On the CCP4
+insulin frame, 95% completeness to 1.87 Å needs 13° in P4₁32, 16° in P23
+and 151° in P1, and 95% of anomalous pairs needs 17°, 28° and 218°. The log
+prints the best completeness for each rotation, then the chosen segment's
+start, end, number of images (and frames) and its statistics by resolution
+shell. `process.json` has them under `strategy` (see
+[RUN_RECORDS.md](processing-lab/docs/RUN_RECORDS.md)).
+
+```text
+XPARM 02-index/XPARM.XDS
+SYMMETRY P41212
+STRATEGY COMPLETENESS 99 FRAMES 1 1800
+GO
+```
+
 ### Integration
 
 | Keyword | Meaning |
@@ -526,7 +559,7 @@ and spot lists, `XPARM.XDS` and `GXPARM.XDS` to `DIRECTORY` (default `.`).
 | File | When | Contents |
 | ---- | ---- | -------- |
 | `input.json` | start (with an output directory) | Resolved inputs: images, imports, each experiment value as `{value, unit, source, overrides}`, effective FINDSPOTS / AUTOINDEX / integration / refinement settings, the CONTROL run. |
-| `process.json` | created at start, updated at every `GO` | `status` (`running` / `completed` / `failed`), `stages` with status and timing, `indexing.selected_solution`, `refinement` (after PROCESS), `integration`, `quality` (unscaled shells + total, and counts that add up to the integrated reflections), `validation`, `warnings`, `error`, `outputs` (relative to `run_directory`). Written atomically; schema version 2, defined in [processing-lab/docs/RUN_RECORDS.md](processing-lab/docs/RUN_RECORDS.md). |
+| `process.json` | created at start, updated at every `GO` | `status` (`running` / `completed` / `failed`), `stages` with status and timing, `indexing.selected_solution`, `refinement` (after PROCESS), `integration`, `quality` (unscaled shells + total, and counts that add up to the integrated reflections), `validation`, `warnings`, `error`, `outputs` (relative to `run_directory`). Written atomically; schema version 3 (stages named by `RunStep`: `find_spots`, `indexing`, `defpix`, `integrate`, `strategy`), defined in [processing-lab/docs/RUN_RECORDS.md](processing-lab/docs/RUN_RECORDS.md). |
 | `process.md` | with `process.json` | Report rendered from the two records. |
 | `process.log` | always (unless `--no-log`) | Everything printed to the terminal. |
 | `HKLOUT` (`process.mtz` if unset) | PROCESS `GO` | Unmerged MOSFLM-style MTZ. |

@@ -8,6 +8,7 @@
 #include "mosflm/diffraction/Profile3d.hpp"
 #include "mosflm/diffraction/ReflectionPredictor.hpp"
 #include "mosflm/diffraction/Shoebox.hpp"
+#include "mosflm/diffraction/Strategy.hpp"
 #include "mosflm/diffraction/TrustedRegion.hpp"
 #include "mosflm/geometry/CellFix.hpp"
 #include "mosflm/geometry/LabFrame.hpp"
@@ -371,6 +372,51 @@ void ControlSession::parse_findspots_args(const std::vector<std::string>& args) 
         state_.findspots.range_first = start;
         state_.findspots.range_last = start + 49;
     }
+}
+
+void ControlSession::parse_strategy_args(const std::vector<std::string>& args) {
+    // STRATEGY [AUTO] [ROTATE r] [COMPLETENESS pct] [ANOMALOUS | NOANOMALOUS]
+    //          [FRAMES first last | FULL] [RESOLUTION d] [STEP deg]
+    // (MOSFLM: STRATEGY AUTO ROTATE 60 ANOM; ANGLE / RANGE = ROTATE.)
+    auto& s = state_.strategy;
+    const auto value = [&](std::size_t& i, const char* what) {
+        if (i + 1 >= args.size()) {
+            throw std::invalid_argument(std::string("CONTROL STRATEGY ") + what + " needs a value");
+        }
+        return require_double(args[++i], "STRATEGY");
+    };
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const std::string u = upper(args[i]);
+        if (u == "AUTO" || u == "GO") {
+            continue;
+        }
+        if (u.rfind("ROT", 0) == 0 || u == "ANGLE" || u == "RANGE") {
+            s.rotation_deg = value(i, "ROTATE");
+        } else if (u.rfind("COMP", 0) == 0) {
+            const double pct = value(i, "COMPLETENESS");
+            s.target_completeness = std::clamp(pct > 1.0 ? pct / 100.0 : pct, 0.01, 1.0);
+        } else if (u.rfind("ANOM", 0) == 0) {
+            s.anomalous = true;
+        } else if (u.rfind("NOAN", 0) == 0 || u == "NOTANOM") {
+            s.anomalous = false;
+        } else if (u == "FRAMES" || u == "SWEEP") {
+            const int f0 = static_cast<int>(value(i, "FRAMES"));
+            const int f1 = static_cast<int>(value(i, "FRAMES"));
+            state_.strategy_frames = std::pair(std::min(f0, f1), std::max(f0, f1));
+        } else if (u == "FULL") {
+            state_.strategy_frames.reset();
+        } else if (u.rfind("RES", 0) == 0) {
+            state_.strategy_dmin_A = value(i, "RESOLUTION");
+        } else if (u == "STEP") {
+            s.step_deg = std::max(0.1, value(i, "STEP"));
+        } else {
+            throw std::invalid_argument(
+                "CONTROL STRATEGY: unexpected '" + args[i] +
+                "' (ROTATE r, COMPLETENESS pct, ANOMALOUS, NOANOMALOUS, FRAMES first last, FULL, RESOLUTION d, "
+                "STEP deg)");
+        }
+    }
+    state_.strategy_pending = true;
 }
 
 void ControlSession::apply_keyword(
@@ -921,14 +967,7 @@ void ControlSession::apply_keyword(
         return;
     }
     if (key == "STRATEGY") {
-        state_.strategy_pending = true;
-        for (std::size_t i = 0; i < args.size(); ++i) {
-            const std::string u = upper(args[i]);
-            if ((u == "ANGLE" || u == "RANGE") && i + 1 < args.size()) {
-                state_.strategy_osc_range_deg =
-                    require_double(args[++i], "STRATEGY");
-            }
-        }
+        parse_strategy_args(args);
         return;
     }
     if (key == "MULTILATTICE" || key == "LATTICE") {
@@ -2351,6 +2390,144 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     };
 }
 
+void ControlSession::run_strategy(
+    const std::optional<std::filesystem::path>& image_override, ControlGoResult& out
+) {
+    if (!state_.has_matrix || !state_.has_cell) {
+        throw std::runtime_error(
+            "STRATEGY needs an orientation: AUTOINDEX first, or give MATRIX and CELL (or XPARM)"
+        );
+    }
+    const int first = state_.strategy_frames ? state_.strategy_frames->first
+                                             : std::max(1, state_.process_first);
+    std::filesystem::path path;
+    try {
+        path = resolve_image_path(image_override, first);
+    } catch (const std::runtime_error&) {
+        throw std::runtime_error("STRATEGY needs an image (IMAGE, TEMPLATE or --image) for the detector geometry");
+    }
+    const auto image = image::read_diffraction_image(path, first);
+    out.image_used = path;
+    if (!state_.has_wavelength && image.metadata.wavelength_angstrom > 0.0) {
+        state_.wavelength_A = image.metadata.wavelength_angstrom;
+        state_.has_wavelength = true;
+    }
+    if (state_.strategy_dmin_A > 0.0) {
+        state_.dmin_A = state_.strategy_dmin_A;
+    } else if (state_.dmin_explicit && state_.dmin_A > 0.0) {
+        // DMIN / RESOLUTION given: keep it.
+    } else {
+        // The nearest detector edge, as MOSFLM: beyond it only the corners
+        // record data, so no rotation could be complete there.
+        const DetectorGeometry det = process_limit_detector(state_, image.metadata);
+        double bx = 0.0;
+        double by = 0.0;
+        process_panel_beam(state_, image.metadata, det, bx, by);
+        const double edge_mm = std::min({bx, by, det.nfast * det.pixel_size_x_mm - bx,
+                                         det.nslow * det.pixel_size_y_mm - by});
+        const double two_theta = std::atan2(std::max(edge_mm, 1e-3), std::max(det.distance_mm, 1e-3));
+        state_.dmin_A = state_.wavelength_A / (2.0 * std::sin(0.5 * two_theta));
+    }
+    const auto req = make_process_request(image, first);
+    diffraction::PredictionRequest geometry{req.crystal, req.orientation, req.detector, req.scan, req.prediction};
+    geometry.settings.dmin_A = state_.dmin_A;  // PROCESS would use the farthest corner
+
+    auto settings = state_.strategy;
+    const double osc = state_.has_process_phi && state_.process_angle_deg > 0.0
+                           ? state_.process_angle_deg
+                           : (image.metadata.oscillation_range_deg > 0.0 ? image.metadata.oscillation_range_deg
+                                                                         : 1.0);
+    settings.osc_deg = osc;
+    const double phi_first = (state_.has_process_phi ? state_.process_start_phi_deg
+                                                     : image.metadata.oscillation_start_deg) + state_.phi_offset_deg;
+    if (state_.strategy_frames) {
+        const auto [f0, f1] = *state_.strategy_frames;
+        settings.sweep_deg = std::pair(phi_first, phi_first + (f1 - f0 + 1) * osc);
+    }
+    auto result = diffraction::compute_strategy(geometry, settings);
+    // Frames of the collected sweep for a segment (start frame from its φ).
+    const auto frames_of = [&](diffraction::StrategySegment& seg) {
+        if (!state_.strategy_frames) {
+            return;
+        }
+        const int f0 = first + static_cast<int>(std::lround((seg.start_deg - phi_first) / osc));
+        seg.frames = std::pair(f0, std::min(f0 + seg.images - 1, state_.strategy_frames->second));
+    };
+    if (result.target) {
+        frames_of(*result.target);
+    }
+    if (result.rotation) {
+        frames_of(*result.rotation);
+    }
+
+    const auto pct = [](double f) {
+        std::ostringstream o;
+        o << std::fixed << std::setprecision(1) << 100.0 * f;
+        return o.str();
+    };
+    std::cout << "\n ***** STRATEGY *****  rotation for "
+              << pct(settings.target_completeness) << "% " << (settings.anomalous ? "anomalous " : "")
+              << "completeness\n"
+              << "  Space group " << req.crystal.spacegroup->xhm() << ", resolution "
+              << std::fixed << std::setprecision(2) << result.dmax_A << "–" << result.dmin_A << " Å: "
+              << result.unique_possible << " unique reflections (" << result.acentric_possible << " acentric)\n";
+    if (settings.sweep_deg) {
+        std::cout << "  Within the collected frames " << state_.strategy_frames->first << "–"
+                  << state_.strategy_frames->second << " (φ " << std::setprecision(1) << settings.sweep_deg->first
+                  << "–" << settings.sweep_deg->second << "°), images of " << std::setprecision(3) << osc << "°\n";
+    } else {
+        std::cout << "  Planning on a full turn, images of " << std::setprecision(3) << osc << "°\n";
+    }
+    std::cout << "\n   Rotation   Start   Completeness   Anomalous\n";
+    const std::size_t n = result.curve.size();
+    const std::size_t stride = std::max<std::size_t>(1, n / 18);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (i % stride != 0 && i + 1 != n) {
+            continue;
+        }
+        const auto& pt = result.curve[i];
+        std::cout << "   " << std::setw(7) << std::setprecision(1) << pt.rotation_deg << "°  " << std::setw(6)
+                  << pt.start_deg << "°  " << std::setw(10) << pct(pt.completeness) << "%  " << std::setw(9)
+                  << pct(pt.anomalous_completeness) << "%\n";
+    }
+    const auto print_segment = [&](const char* what, const diffraction::StrategySegment& seg) {
+        std::cout << "\n  " << what << " gives " << pct(seg.completeness) << "% of unique data ("
+                  << pct(seg.anomalous_completeness) << "% of anomalous pairs), multiplicity "
+                  << std::setprecision(2) << seg.multiplicity << "\n"
+                  << "  From " << std::setprecision(1) << seg.start_deg << " to " << seg.end_deg << " degrees: "
+                  << seg.images << " images";
+        if (seg.frames) {
+            std::cout << ", frames " << seg.frames->first << "–" << seg.frames->second;
+        }
+        std::cout << "\n\n     d_low   d_high  Possible  Observed  Complete  Multiplicity  Anomalous\n";
+        for (const auto& sh : seg.shells) {
+            std::cout << "   " << std::setw(7) << std::setprecision(2) << sh.d_low_A << std::setw(8) << sh.d_high_A
+                      << std::setw(10) << sh.possible << std::setw(10) << sh.observed << std::setw(9)
+                      << pct(sh.completeness) << "%" << std::setw(13) << std::setprecision(2) << sh.multiplicity
+                      << std::setw(10) << pct(sh.anomalous_completeness) << "%\n";
+        }
+    };
+    if (result.rotation) {
+        print_segment(("Optimum rotation of " + pct(result.rotation->rotation_deg / 100.0) + "°").c_str(),
+                      *result.rotation);
+    }
+    if (result.target) {
+        print_segment("Smallest rotation for the target", *result.target);
+        out.message = pct(result.target->completeness) + "% in " +
+                      std::to_string(result.target->images) + " images from " + pct(result.target->start_deg / 100.0) +
+                      "°";
+    } else {
+        std::cout << "\n  *** WARNING ** no rotation reaches " << pct(settings.target_completeness)
+                  << "%: at most " << pct(settings.anomalous ? result.max_anomalous_completeness
+                                                             : result.max_completeness)
+                  << "% (the blind region or the collected range limits it)\n";
+        out.message = "target not reached, at most " + pct(result.max_completeness) + "%";
+    }
+    std::cout << std::defaultfloat;
+    state_.strategy_completeness_est = result.max_completeness;
+    out.strategy = std::move(result);
+}
+
 ControlGoResult ControlSession::go(
     const std::optional<std::filesystem::path>& image_override
 ) {
@@ -2409,16 +2586,12 @@ ControlGoResult ControlSession::go(
     }
 
     if (state_.strategy_pending) {
-        // Minimal STRATEGY: estimate completeness for cubic/random as
-        // osc_range / 90 clipped to 1 (placeholder until full port).
-        const double frac = state_.strategy_osc_range_deg / 90.0;
-        state_.strategy_completeness_est = std::min(1.0, std::max(0.0, frac));
+        // MOSFLM STRATEGY: the rotation recording the target completeness.
         state_.strategy_pending = false;
+        run_strategy(image_override, out);
         state_.strategy_done = true;
         state_.done_run = true;
         out.ran_strategy = true;
-        out.message = "STRATEGY completeness_est=" +
-                      std::to_string(state_.strategy_completeness_est);
         return out;
     }
 
@@ -2532,6 +2705,9 @@ ControlGoResult ControlSession::go(
         state_, first, last, path0, osc_log, start_log, image0.metadata
     );
     out.defpix = run_defpix_stage(image_override, image0, first, last, osc_log);
+    if (out.defpix && go_observer_.step_done) {
+        go_observer_.step_done(io::RunStep::DEFPIX, out, state_);
+    }
     // φ range actually integrated (rocking mode drops reflections centred
     // outside it after partials summation).
     double scan_lo = std::numeric_limits<double>::infinity();

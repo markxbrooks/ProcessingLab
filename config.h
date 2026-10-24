@@ -2,7 +2,7 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
 /* build date */
-#define BUILD_DATE "Saturday, October 24 2026 at 14:35"
+#define BUILD_DATE "Saturday, October 24 2026 at 16:31"
 
 /* build user */
 #define BUILD_USER "brooks"
@@ -15,13 +15,13 @@
 /* #undef FC_DUMMY_MAIN_EQ_F77 */
 
 /* executable file information */
-#define FMOSFLM_EXEC " ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=163d0e97f8031b12aea9fe30119126cbf7541ded, for GNU/Linux 3.2.0, with debug_info, not stripped"
+#define FMOSFLM_EXEC " Mach-O 64-bit executable arm64"
 
 /* fortran compiler */
-#define FORTRAN_COMPILER "f77"
+#define FORTRAN_COMPILER "gfortran"
 
 /* fortran compiler version */
-#define FORTRAN_VERSION "GNU Fortran (Ubuntu 15.2.0-16ubuntu1) 15.2.0 Copyright (C) 2025 Free Software Foundation, Inc. This is free software; see the source for copying conditions. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+#define FORTRAN_VERSION "GNU Fortran (Homebrew GCC 15.1.0) 15.1.0 Copyright (C) 2025 Free Software Foundation, Inc. This is free software; see the source for copying conditions. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
 
 /* Define to 1 if you have the <arpa/inet.h> header file. */
 #define HAVE_ARPA_INET_H 1
@@ -51,7 +51,7 @@
 #define HAVE_INTTYPES_H 1
 
 /* Define to 1 if you have the 'ccp4f' library (-lccp4f). */
-/* #undef HAVE_LIBCCP4F */
+#define HAVE_LIBCCP4F 1
 
 /* Define to 1 if you have the 'curses' library (-lcurses). */
 /* #undef HAVE_LIBCURSES */
@@ -63,13 +63,13 @@
 /* #undef HAVE_LIBHDF5_HL */
 
 /* Define to 1 if you have the 'jpeg' library (-ljpeg). */
-#define HAVE_LIBJPEG 1
+/* #undef HAVE_LIBJPEG */
 
 /* Define to 1 if you have the 'm' library (-lm). */
 #define HAVE_LIBM 1
 
 /* Define to 1 if you have the 'ncurses' library (-lncurses). */
-/* #undef HAVE_LIBNCURSES */
+#define HAVE_LIBNCURSES 1
 
 /* Define to 1 if you have the 'tinfo' library (-ltinfo). */
 /* #undef HAVE_LIBTINFO */
@@ -81,10 +81,10 @@
 /* #undef HAVE_LIBXDL_VIEW */
 
 /* Define to 1 if you have the <malloc.h> header file. */
-#define HAVE_MALLOC_H 1
+/* #undef HAVE_MALLOC_H */
 
 /* Define to 1 if you have the <malloc/malloc.h> header file. */
-/* #undef HAVE_MALLOC_MALLOC_H */
+#define HAVE_MALLOC_MALLOC_H 1
 
 /* Define to 1 if you have the <netdb.h> header file. */
 #define HAVE_NETDB_H 1
@@ -117,7 +117,7 @@
 #define HAVE_STRING_H 1
 
 /* Define to 1 if you have the <sys/malloc.h> header file. */
-/* #undef HAVE_SYS_MALLOC_H */
+#define HAVE_SYS_MALLOC_H 1
 
 /* Define to 1 if you have the <sys/socket.h> header file. */
 #define HAVE_SYS_SOCKET_H 1

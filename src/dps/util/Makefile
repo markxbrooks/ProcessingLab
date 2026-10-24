@@ -9,8 +9,8 @@
 CC = gcc
 # Pre-C99 DPS sources call undeclared functions; keep that a warning.
 CFLAGS = -g -O0  -Wno-error=implicit-function-declaration
-F77 = f77 -c
-FFLAGS = -g -O2 -fallow-argument-mismatch
+F77 = gfortran -c
+FFLAGS = -g -O2 -fno-second-underscore -fallow-argument-mismatch
 LIB = ../../../lib
 BIN = ../../../bin
 AR_FLAGS = ruv

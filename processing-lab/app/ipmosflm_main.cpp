@@ -380,6 +380,8 @@ void observe(mosflm::control::ControlSession& session, mosflm::io::ProcessRecord
         [&record](const mosflm::control::ControlGoResult& r, const mosflm::control::ControlState& st) {
             record.end_stage(r, st);
         },
+        [&record](mosflm::io::RunStep step, const mosflm::control::ControlGoResult& r,
+                  const mosflm::control::ControlState& st) { record.step_done(step, r, st); },
     });
 }
 

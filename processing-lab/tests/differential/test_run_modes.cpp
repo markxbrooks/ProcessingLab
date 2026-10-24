@@ -228,7 +228,9 @@ int main() {
         const std::string pj = slurp(work / "failed" / "process.json");
         CHECK(contains(pj, "\"status\": \"failed\""));
         CHECK(contains(pj, "\"error\": \"SpotList: cannot open"));
-        CHECK(contains(pj, "\"name\": \"process\",\n      \"status\": \"pending\""));
+        CHECK(contains(pj, "\"name\": \"indexing\",\n      \"status\": \"failed\""));
+        CHECK(contains(pj, "\"name\": \"defpix\",\n      \"status\": \"pending\""));
+        CHECK(contains(pj, "\"name\": \"integrate\",\n      \"status\": \"pending\""));
         CHECK(contains(slurp(work / "failed" / "process.md"), "**Status:** failed"));
     }
 
@@ -270,7 +272,8 @@ int main() {
         CHECK(contains(log, "Distance:      160.00 mm  [previous run]"));
         CHECK(contains(log, "Orientation:   refined matrix, no autoindexing  [previous run]"));
         const std::string pj = slurp(work / "from_xds" / "process.json");
-        CHECK(!contains(pj, "\"name\": \"autoindex\""));
+        CHECK(!contains(pj, "\"name\": \"indexing\""));
+        CHECK(contains(pj, "\"name\": \"defpix\",\n      \"status\": \"completed\""));
         const std::string ij = slurp(work / "from_xds" / "input.json");
         CHECK(contains(ij, "\"previous_run\": \"" + (work / "xds").string() + "\""));
         CHECK(contains(ij, "\"source\": \"previous_run\""));

@@ -11,7 +11,7 @@
 #define HAVE_ALLOCA_H 1
 
 /* Define to 1 if you have the 'floor' function. */
-/* #undef HAVE_FLOOR */
+#define HAVE_FLOOR 1
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #define HAVE_INTTYPES_H 1
@@ -24,7 +24,7 @@
 #define HAVE_MALLOC 1
 
 /* Define to 1 if you have the <malloc.h> header file. */
-#define HAVE_MALLOC_H 1
+/* #undef HAVE_MALLOC_H */
 
 /* Define to 1 if you have the 'memmove' function. */
 #define HAVE_MEMMOVE 1
@@ -33,7 +33,7 @@
 #define HAVE_MEMSET 1
 
 /* Define to 1 if you have the 'pow' function. */
-/* #undef HAVE_POW */
+#define HAVE_POW 1
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1

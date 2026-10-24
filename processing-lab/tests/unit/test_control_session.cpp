@@ -164,11 +164,16 @@ int main() {
         CHECK_EQ(s.state().nmasks_y, 4);
         s.parse_line("STRATEGY ANGLE 45");
         CHECK(s.state().strategy_pending);
-        auto r = s.go();
-        CHECK(r.ran_strategy);
-        CHECK(s.strategy_done());
-        CHECK(s.done_run());
-        CHECK(!s.needs_no_run_warning());
+        CHECK_CLOSE(s.state().strategy.rotation_deg, 45.0, 1e-12);
+        // A strategy needs the orientation and the detector (an image);
+        // tests/unit/test_strategy.cpp and test_ipmosflm_thin run real ones.
+        bool refused = false;
+        try {
+            (void)s.go();
+        } catch (const std::runtime_error& ex) {
+            refused = std::string(ex.what()).find("STRATEGY needs an orientation") != std::string::npos;
+        }
+        CHECK(refused);
     }
 
     {
@@ -215,11 +220,15 @@ int main() {
     {
         ControlSession s;
         s.set_output_directory(mosflm_test::output_dir("control_session_203"));
+        // RUN is GO: it runs the pending STRATEGY (which then needs an orientation).
         std::istringstream in("STRATEGY ANGLE 90\nRUN\nEXIT\n");
-        const auto runs = s.run_stream(in);
-        CHECK_EQ(static_cast<int>(runs.size()), 1);
-        CHECK(runs[0].ran_strategy);
-        CHECK(s.done_run());
+        bool ran = false;
+        try {
+            (void)s.run_stream(in);
+        } catch (const std::runtime_error& ex) {
+            ran = std::string(ex.what()).find("STRATEGY needs") != std::string::npos;
+        }
+        CHECK(ran);
     }
 
     return mosflm_test::finish("control_session");

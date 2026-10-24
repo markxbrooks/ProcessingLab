@@ -9,8 +9,8 @@ STDFLAGS = -g -O0
 UTIL_INC = ../../../src/dps/utils
 LIBDIR = ../../../lib
 BIN = ../../../bin
-F77 = f77 -c
-FFLAGS = -g -O2 -fallow-argument-mismatch
+F77 = gfortran -c
+FFLAGS = -g -O2 -fno-second-underscore -fallow-argument-mismatch
 CC = gcc -c
 # Pre-C99 DPS sources call undeclared functions; keep that a warning.
 CFLAGS = ${STDFLAGS} -I${UTIL_INC} -Wno-error=implicit-function-declaration
@@ -21,7 +21,7 @@ IOBJS = index.o error_exit.o \
 	ind_help.o ind_fortran.o
 DOBJS = dps_index.o dps_index_read.o
 FOBJS = dps_fortran_test.o
-LIBS = -ljpeg -lm 
+LIBS = -lm -lncurses 
 LOCALLIBS = libdps_index.a libdps.a libfftpack.a
 
 DIST-COMMON = Makefile.in

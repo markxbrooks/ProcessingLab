@@ -91,10 +91,23 @@ int main() {
     // Planned stages: GO runs the first pending step (FINDSPOTS, AUTOINDEX,
     // PROCESS, STRATEGY); nothing after EXIT.
     using mosflm::io::planned_stages;
+    using mosflm::io::RunStep;
+    using Steps = std::vector<RunStep>;
+    // PROCESS is DEFPIX then INTEGRATE, unless DEFPIX OFF.
     CHECK(planned_stages("FINDSPOTS FIND 1\nGO\nAUTOINDEX DPS\nGO\nPROCESS 1 TO 5\nGO\nEXIT\nSTRATEGY\nGO\n") ==
-          std::vector<std::string>({"findspots", "autoindex", "process"}));
+          Steps({RunStep::FIND_SPOTS, RunStep::INDEXING, RunStep::DEFPIX, RunStep::INTEGRATE}));
     CHECK(planned_stages("AUTOINDEX\nFINDSPOTS\n! comment\nGO\nrun\n") ==
-          std::vector<std::string>({"findspots", "autoindex"}));
+          Steps({RunStep::FIND_SPOTS, RunStep::INDEXING}));
+    CHECK(planned_stages("DEFPIX FRAMES 5 OFF\nPROCESS 1 TO 5\nGO\nDEFPIX\nPROCESS 6 TO 9\nGO\n") ==
+          Steps({RunStep::INTEGRATE, RunStep::DEFPIX, RunStep::INTEGRATE}));
+    // Names, record ids and the schema 1–2 stage names.
+    CHECK(std::string(mosflm::io::run_step_name(RunStep::DEFPIX)) == "RunStep.DEFPIX");
+    CHECK(std::string(mosflm::io::run_step_id(RunStep::FIND_SPOTS)) == "find_spots");
+    CHECK(mosflm::io::parse_run_step("RunStep.INDEXING") == RunStep::INDEXING);
+    CHECK(mosflm::io::parse_run_step("Integrate") == RunStep::INTEGRATE);
+    CHECK(mosflm::io::parse_run_step("autoindex") == RunStep::INDEXING);
+    CHECK(mosflm::io::parse_run_step("process") == RunStep::INTEGRATE);
+    CHECK(!mosflm::io::parse_run_step("scale"));
     CHECK(planned_stages("DISTANCE 100\nEXIT\n").empty());
 
     // Lifecycle: created running, stages pending; findspots completes,
@@ -103,7 +116,8 @@ int main() {
     input["mode"] = "run";
     input["warnings"] = Json(Json::Array{Json("Distance: XDS.INP 165 overrides image header 160")});
     {
-        ProcessRecord rec(dir, input, {"findspots", "autoindex", "process"});
+        using mosflm::io::RunStep;
+        ProcessRecord rec(dir, input, {RunStep::FIND_SPOTS, RunStep::INDEXING, RunStep::DEFPIX, RunStep::INTEGRATE});
         CHECK(fs::exists(dir / "input.json") && fs::exists(dir / "process.md"));
         std::string pj = slurp(dir / "process.json");
         CHECK(contains(pj, "\"status\": \"running\""));
@@ -111,7 +125,7 @@ int main() {
         CHECK(contains(pj, "Distance: XDS.INP 165"));  // input warnings carried over
         // Version 2: every stage key present from the start; validation is
         // separate from completion; the run directory is recorded.
-        CHECK(contains(pj, "\"schema_version\": 2"));
+        CHECK(contains(pj, "\"schema_version\": 3"));
         CHECK(contains(pj, "\"started_at\": \"20"));
         CHECK(contains(pj, "\"validation\": {\n    \"status\": \"not_assessed\""));
         CHECK(contains(pj, "\"run_directory\": \"" + fs::absolute(dir).lexically_normal().string() + "\""));
@@ -130,14 +144,14 @@ int main() {
         mosflm::control::ControlState st;
         st.findspots_pending = true;
         rec.begin_stage(st);
-        CHECK(contains(slurp(dir / "process.json"), "\"name\": \"findspots\",\n      \"status\": \"running\""));
+        CHECK(contains(slurp(dir / "process.json"), "\"name\": \"find_spots\",\n      \"status\": \"running\""));
         mosflm::control::ControlGoResult r;
         r.ran_findspots = true;
         st.findspots_pending = false;
         st.findspots_n_spots = 42;
         rec.end_stage(r, st);
         pj = slurp(dir / "process.json");
-        CHECK(contains(pj, "\"name\": \"findspots\",\n      \"status\": \"completed\""));
+        CHECK(contains(pj, "\"name\": \"find_spots\",\n      \"status\": \"completed\""));
         CHECK(contains(pj, "\"spots\": 42"));
         CHECK(Json::parse(pj).find("stages")->items()[0].find("duration_s")->is_number());
 
@@ -145,19 +159,58 @@ int main() {
         rec.begin_stage(st);
         rec.fail("indexing failed: too few spots");
         pj = slurp(dir / "process.json");
-        CHECK(contains(pj, "\"name\": \"autoindex\",\n      \"status\": \"failed\""));
+        CHECK(contains(pj, "\"name\": \"indexing\",\n      \"status\": \"failed\""));
         CHECK(contains(pj, "\"error\": \"indexing failed: too few spots\""));
-        CHECK(contains(pj, "\"name\": \"process\",\n      \"status\": \"pending\""));
+        CHECK(contains(pj, "\"name\": \"defpix\",\n      \"status\": \"pending\""));
+        CHECK(contains(pj, "\"name\": \"integrate\",\n      \"status\": \"pending\""));
         const std::string md = slurp(dir / "process.md");
         CHECK(contains(md, "**Status:** failed"));
         CHECK(contains(md, "> **Error:** indexing failed: too few spots"));
-        CHECK(contains(md, "| findspots | completed | 42 spots |"));
+        CHECK(contains(md, "| RunStep.FIND_SPOTS | completed | 42 spots |"));
+    }
+
+    // PROCESS: DEFPIX is recorded as its own stage, then INTEGRATE.
+    {
+        using mosflm::io::RunStep;
+        const fs::path dir3 = mosflm_test::output_dir("run_record_defpix");
+        ProcessRecord rec(dir3, input, {RunStep::DEFPIX, RunStep::INTEGRATE});
+        mosflm::control::ControlState st;
+        st.process_pending = true;
+        rec.begin_stage(st);
+        CHECK(contains(slurp(dir3 / "process.json"), "\"name\": \"defpix\",\n      \"status\": \"running\""));
+        mosflm::control::ControlGoResult r;
+        mosflm::control::DefpixSummary d;
+        d.trusted = 1000;
+        d.shaded = 40;
+        d.defective = 2;
+        r.defpix = d;
+        rec.step_done(RunStep::DEFPIX, r, st);
+        std::string pj = slurp(dir3 / "process.json");
+        CHECK(contains(pj, "\"name\": \"defpix\",\n      \"status\": \"completed\""));
+        CHECK(contains(pj, "\"ignored_pixels\": 42"));
+        CHECK(contains(pj, "\"name\": \"integrate\",\n      \"status\": \"running\""));
+        r.ran_process = true;
+        st.process_pending = false;
+        rec.end_stage(r, st);
+        rec.complete();
+        pj = slurp(dir3 / "process.json");
+        CHECK(contains(pj, "\"name\": \"integrate\",\n      \"status\": \"completed\""));
+        CHECK(contains(slurp(dir3 / "process.md"), "| RunStep.DEFPIX | completed | 42 pixels ignored, 1000 trusted |"));
+
+        // DEFPIX OFF: PROCESS is INTEGRATE alone.
+        const fs::path dir4 = mosflm_test::output_dir("run_record_no_defpix");
+        ProcessRecord off(dir4, input, {RunStep::INTEGRATE});
+        st.process_pending = true;
+        st.defpix.enabled = false;
+        off.begin_stage(st);
+        CHECK(contains(slurp(dir4 / "process.json"), "\"name\": \"integrate\",\n      \"status\": \"running\""));
+        CHECK(!contains(slurp(dir4 / "process.json"), "\"name\": \"defpix\""));
     }
 
     // Completing with stages never reached marks them skipped.
     {
         const fs::path dir2 = mosflm_test::output_dir("run_record_skip");
-        ProcessRecord rec(dir2, input, {"findspots", "process"});
+        ProcessRecord rec(dir2, input, {mosflm::io::RunStep::FIND_SPOTS, mosflm::io::RunStep::INTEGRATE});
         rec.complete();
         const std::string pj = slurp(dir2 / "process.json");
         CHECK(contains(pj, "\"status\": \"completed\""));
@@ -201,8 +254,8 @@ int main() {
   "refinement": {"detector_tilt_twist_mrad": {"tilt": 1.5, "twist": -2.5}},
   "outputs": [{"kind": "gxparm", "path": "GXPARM.XDS"}]})");
         CHECK(read_previous_run(prev).tilt_twist_mrad == std::pair(1.5, -2.5));
-        mosflm::io::write_file_atomic(prev / "process.json", R"({"schema_version": 3, "status": "completed"})");
-        CHECK(refused(prev, "schema_version 3 is newer"));
+        mosflm::io::write_file_atomic(prev / "process.json", R"({"schema_version": 4, "status": "completed"})");
+        CHECK(refused(prev, "schema_version 4 is newer"));
 
         // Schema 2 final model: carried forward only if it is complete and
         // self-consistent (matrix ↔ cell, cell ↔ space group, λ / pixel ↔
