@@ -64,6 +64,10 @@ enum class PixelStatus : std::uint8_t {
     /// High in every sampled frame, far above the background at its
     /// resolution.
     Hot,
+    /// Inside the beam halo: the disc around the beam where the radial
+    /// background falls from the flare of the unblocked beam to the outer
+    /// background (see :func:`find_beam_halo`).
+    Halo,
 };
 
 /// DEFPIX settings (CONTROL ``DEFPIX``, ``UNTRUSTED``, ``EXCLUDE``).
@@ -87,7 +91,70 @@ struct DefpixSettings {
     /// ``hot_factor`` × the mean background of its resolution ring.
     double hot_min_counts{10.0};
     double hot_factor{20.0};
+    /// Look for the beam halo (needs ≥ 3 frames).
+    bool find_halo{true};
+    /// The halo ends where the radial background's excess over the outer
+    /// floor falls to this fraction of its peak excess.
+    double halo_end_fraction{0.1};
+    /// A halo must peak at least this many times its outer floor.
+    double halo_min_excess{1.5};
+    /// The halo's peak is looked for within this radius (px) of the beam.
+    double halo_search_px{200.0};
+    /// The floor at a radius is the lowest background within this many px
+    /// further out.
+    double halo_window_px{100.0};
+    /// Integration's low-resolution limit sits this far (px) outside the
+    /// halo, so no measurement box reaches its remaining slope.
+    double halo_margin_px{10.0};
 };
+
+/// The beam halo found on a sweep's background.
+struct BeamHalo {
+    bool found{false};
+    /// Radius (px) inside which pixels are the halo.
+    double radius_px{0.0};
+    /// Radius (px) and level (counts per frame per pixel) of the halo's peak.
+    double peak_radius_px{0.0};
+    double peak_level{0.0};
+    /// Outer background level just beyond the peak.
+    double floor_level{0.0};
+    /// Width (px) of the rings of the radial profile.
+    int ring_px{0};
+};
+
+/**
+ * Find the beam halo: walk out from the beam along the radial background.
+ *
+ * The radial profile is each ring's mean background (its brightest 5% left
+ * out, for spots), smoothed over three rings; ring width grows as the counts
+ * fall. From the profile's peak within ``halo_search_px``, the walk stops
+ * where the excess over the floor (the lowest level within
+ * ``halo_window_px`` further out) is ``halo_end_fraction`` of the peak's.
+ * A ring wholly lit by flare is compared with itself by the shaded-block
+ * test, so this is the only test that finds it.
+ *
+ * :param background: Counts per frame per pixel, row-major; < 0 if unknown.
+ * :param usable: Non-zero where a pixel may enter the profile.
+ * :param width: Image width (px).
+ * :param height: Image height (px).
+ * :param beam_col: Beam position, fast (px).
+ * :param beam_row: Beam position, slow (px).
+ * :param row_scale: Slow pixel size over fast pixel size.
+ * :param n_frames: Frames the background was taken from.
+ * :param settings: The ``halo_*`` thresholds.
+ * :returns: The halo; ``found`` is false if the profile has no such peak.
+ */
+[[nodiscard]] BeamHalo find_beam_halo(
+    const std::vector<float>& background,
+    const std::vector<std::uint8_t>& usable,
+    int width,
+    int height,
+    double beam_col,
+    double beam_row,
+    double row_scale,
+    int n_frames,
+    const DefpixSettings& settings
+);
 
 /// Pixel classification over the sweep.
 struct DefpixResult {
@@ -102,6 +169,11 @@ struct DefpixResult {
     std::vector<int> frames_used;
     /// Edge of the square blocks the shadow test judged (px); 0 if not run.
     int shadow_block_px{0};
+    /// The beam halo, if one was found.
+    BeamHalo halo;
+    /// Low-resolution limit (Å) for integration just outside the halo; 0 if
+    /// there is no halo.
+    double halo_dmax_A{0.0};
 
     [[nodiscard]] std::size_t count(PixelStatus s) const;
     /// ``1`` = use (trusted, or masked by the detector, which the pixel
@@ -109,6 +181,10 @@ struct DefpixResult {
     [[nodiscard]] std::vector<std::uint8_t> trusted_mask() const;
     /// Pixels DEFPIX rejected (every status except Trusted / DetectorMasked).
     [[nodiscard]] std::size_t n_rejected() const;
+    /// ``1`` where spot finding may look: everything but shaded, halo,
+    /// untrusted, defective and hot pixels (excluded resolution ranges stay,
+    /// as their spots still index).
+    [[nodiscard]] std::vector<std::uint8_t> spot_search_mask() const;
 };
 
 /// ``n`` frames spread evenly over ``first``…``last`` (all if fewer).

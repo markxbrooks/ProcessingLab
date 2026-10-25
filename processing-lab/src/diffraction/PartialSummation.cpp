@@ -124,7 +124,12 @@ crystal::MosflmReflection sum_group(
         out.xdet_obs = static_cast<float>(xx / xw);
         out.ydet_obs = static_cast<float>(xy / xw);
     }
-    out.flag = flag | (out.ipr < 0.0f ? kIbadNegProfile : 0);
+    // MOSFLM sets this bit only for a profile intensity below −5σ. Slices
+    // may each be slightly negative; the test is on the summed IPR.
+    out.flag = flag;
+    if (out.sigipr > 0.0f && out.ipr < -5.0f * out.sigipr) {
+        out.flag |= kIbadNegProfile;
+    }
     return out;
 }
 

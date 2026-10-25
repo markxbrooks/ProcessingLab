@@ -14,17 +14,23 @@
 namespace mosflm::diffraction {
 namespace {
 
-/// F77 IGFLAG / IBAD bit mask (WRMTZ write policy).
+/// F77 IGFLAG / IBAD bit mask (WRMTZ write policy). Aimless rejects any
+/// non-zero flag, and reads these bits with MOSFLM's meanings.
 constexpr int kIbadBgratio = 1;
 constexpr int kIbadPkratio = 2;
+/// Set only when the profile intensity is below −5σ (MOSFLM
+/// ``ISPOTPRO < -5*ISIGPRO``). A merely negative I is a weak measurement.
 constexpr int kIbadNegProfile = 4;
 constexpr int kIbadBgGradient = 8;
-constexpr int kIbadOverlap = 16;
+/// MOSFLM OVRLFIT: a saturated pixel under the peak. Aimless reports bit
+/// 16 as "Profile-fitted overloads". Spatial overlaps are omitted instead.
+constexpr int kIbadOverload = 16;
 constexpr int kIbadEdge = 32;
 constexpr int kIbadFewBg = 64;
 constexpr int kOmitOffDetector = 128;
-/// Overloaded (saturated) pixel under the peak.
-constexpr int kIbadOverload = 256;
+/// MOSFLM default PKRAT (``control.f``): √(Σ residual² / counting variance).
+constexpr double kPkratioLimit = 5.0;
+constexpr double kNegProfileSigma = 5.0;
 
 /// Rotation about the predictor spindle (+X), same sense as
 /// :class:`ReflectionPredictor`.
@@ -401,17 +407,31 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             continue;
         }
 
-        int ibad = 0;
         const ProfileObservation* po = nullptr;
         if (request.use_profile && i < out.profile_observations.size()) {
             po = &out.profile_observations[i];
-            if (po->overlapped) {
-                ibad |= kIbadOverlap;
-            }
-            if (po->pkratio > 3.5) {
+        }
+        // A neighbour inside the measurement box mixes the two intensities.
+        // MOSFLM bit 16 means a profile-fitted overload, which is what
+        // Aimless rejects under that name, so overlaps are left out entirely.
+        const bool overlapped =
+            po != nullptr
+                ? po->overlapped
+                : (i < out.meas_observations.size() &&
+                   out.meas_observations[i].overlapped);
+        if (overlapped) {
+            ++out.n_omitted;
+            continue;
+        }
+
+        int ibad = 0;
+        if (po != nullptr) {
+            if (po->profile_gof > kPkratioLimit) {
                 ibad |= kIbadPkratio;
             }
-            if (po->profile_ok && po->profile_intensity < 0.0) {
+            if (po->profile_ok && po->profile_sigma > 0.0 &&
+                po->profile_intensity <
+                    -kNegProfileSigma * po->profile_sigma) {
                 ibad |= kIbadNegProfile;
             }
             // Non-flat background: many rim pixels rejected. Relative to the
@@ -427,14 +447,14 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             }
         } else if (i < out.meas_observations.size()) {
             const auto& m = out.meas_observations[i];
-            if (m.overlapped) {
-                ibad |= kIbadOverlap;
-            }
             if (m.n_bg_rejected > std::max(8, m.npix_bg / 10)) {
                 ibad |= kIbadBgratio;
             }
             if (m.npix_bg < 4) {
                 ibad |= kIbadFewBg;
+            }
+            if (m.n_overload > 0) {
+                ibad |= kIbadOverload;
             }
         }
 
@@ -472,7 +492,7 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
                     ? static_cast<double>(po->n_bg_rejected) /
                           static_cast<double>(po->npix_bg)
                     : 0.0;
-            row.bgpkratios = encode_bgpkratios(bgrat, po->pkratio);
+            row.bgpkratios = encode_bgpkratios(bgrat, po->profile_gof);
         } else {
             row.ipr = row.intensity;
             row.sigipr = row.sigma;
@@ -675,6 +695,8 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         }
 
         // FLAG: 0 good; else IBAD bits (Aimless rejects non-zero by default).
+        // Bit 4 is I_prf < −5σ. Bit 2 is profile χ² above 5. Bit 16 is a
+        // saturated peak pixel. Overlapped boxes were omitted above.
         row.flag = ibad;
 
         // ASUPUT-style ASU packing for output indices.

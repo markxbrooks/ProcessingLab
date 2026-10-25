@@ -76,16 +76,15 @@ int main() {
     );
     CHECK_MSG(text.find("total") != std::string::npos, "missing total row");
 
-    // Negative-profile flag (4) is kept; real misfits (e.g. overlap 16,
-    // overload 256, or 4 combined with them) are rejected.
+    // A weak negative with flag 0 is kept. Bit 4 now means I < −5σ and is
+    // rejected, as are overload (16) and any other non-zero flag.
     auto weak = make_ref(4, 2, 0, -3.0f, 2.0f);
-    weak.flag = 4;
-    auto overlap = make_ref(4, 2, 0, 30.0f, 2.0f);
-    overlap.flag = 16;
-    auto overload_neg = make_ref(4, 2, 0, -1.0f, 2.0f);
-    overload_neg.flag = 256 | 4;
+    auto neg5 = make_ref(6, 2, 0, -30.0f, 2.0f);
+    neg5.flag = 4;
+    auto overload = make_ref(4, 2, 0, 30.0f, 2.0f);
+    overload.flag = 16;
     const auto flagged = compute_data_quality(
-        crystal, {weak, overlap, overload_neg}, 200.0, 1.45, 9, -3.0
+        crystal, {weak, neg5, overload}, 200.0, 1.45, 9, -3.0
     );
     CHECK_EQ(flagged.n_accepted_obs, 1);
     CHECK_EQ(flagged.n_rejected_misfits, 2);

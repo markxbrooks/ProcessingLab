@@ -106,6 +106,8 @@ int main() {
     CHECK(obs[0].profile_intensity > 100.0);
     CHECK(obs[0].sigma > 0.0);
     CHECK(obs[0].pkratio < 2.0);
+    CHECK(obs[0].profile_gof > 0.0);
+    CHECK(obs[0].profile_gof < 5.0);
     CHECK_EQ(obs[0].profile_region, 0);
 
     // Multi-region: two differently shaped peaks in opposite corners.

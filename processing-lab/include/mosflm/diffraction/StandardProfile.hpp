@@ -19,6 +19,10 @@ struct ProfileObservation : MeasObservation {
     double summation_intensity{};
     double summation_sigma{};
     double pkratio{};  ///< ``|I_sum − I_prf| / max(|I_prf|,1)``
+    /// MOSFLM PKRATIO: ``√(Σ (od − model)² / max(1, |bg| + |I_sum|))`` over
+    /// valid peak pixels. About 1 when the profile matches counting
+    /// statistics. ``FLAG`` bit 2 is set above 5 (MOSFLM's default PKRAT).
+    double profile_gof{0.0};
     bool profile_ok{false};
     /// Detector-region index ``iy * n_bins_x + ix`` (0 if global-only).
     int profile_region{0};

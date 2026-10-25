@@ -46,6 +46,21 @@ int main() {
     CHECK(close(r.fractioncalc, 1.0, 1e-6));  // 1.04 capped
     CHECK(r.mpart == 0);
     CHECK(r.flag == 0);
+
+    // Bit 4 is recomputed on the sum: within 5σ it stays clear, below −5σ
+    // it is set. Each slice σ is 2, so two slices give σ = √8.
+    {
+        auto mild_a = slice(1, 0.5f, -2.0f, 10.0f, 4);
+        auto mild_b = slice(2, 0.5f, -2.0f, 10.2f, 0);
+        const auto mild = sum_partial_slices({mild_a, mild_b});
+        CHECK(mild.size() == 1u);
+        CHECK(mild[0].flag == 0);
+        auto hard_a = slice(1, 0.5f, -40.0f, 10.0f, 0);
+        auto hard_b = slice(2, 0.5f, -40.0f, 10.2f, 0);
+        const auto hard = sum_partial_slices({hard_a, hard_b});
+        CHECK(hard.size() == 1u);
+        CHECK((hard[0].flag & 4) != 0);
+    }
     // Re-centred with signed weights in the window: the −1 tail slice counts.
     const double phi = (25 * 9.925 + 50 * 10.075 + 23 * 10.225) / 98.0;
     CHECK(close(r.phi_obs, phi, 1e-4));

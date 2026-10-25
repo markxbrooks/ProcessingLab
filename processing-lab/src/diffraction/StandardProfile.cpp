@@ -554,6 +554,32 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         // inflates σ of weak reflections. Keep σ > 0 only.
         var = std::max(var, 1e-6);
         obs.profile_sigma = std::sqrt(var);
+        // MOSFLM PKRATIO = √(PEAKVAR / VARTOT), PEAKVAR = Σ (od − model)²
+        // on valid peak pixels, VARTOT = |background under the peak| + |I|.
+        // Gain and the instrument-error term are 1 and 0 (photon counts).
+        double peakvar = 0.0;
+        double bg_valid = 0.0;
+        for (int dr = -peak_half; dr <= peak_half; ++dr) {
+            for (int dc = -peak_half; dc <= peak_half; ++dc) {
+                const std::int32_t raw = pixel_at(image, c0 + dc, r0 + dr);
+                if (raw < 0) {
+                    continue;
+                }
+                const double Pk = P[static_cast<std::size_t>(
+                    (dr + peak_half) * side + (dc + peak_half)
+                )];
+                const double b = bg.a * static_cast<double>(dc) +
+                                 bg.b * static_cast<double>(dr) + bg.c;
+                const double delta =
+                    static_cast<double>(raw) - (b + k_fit * Pk);
+                peakvar += delta * delta;
+                bg_valid += b;
+            }
+        }
+        const double vartot = std::max(
+            1.0, std::fabs(bg_valid) + std::fabs(obs.summation_intensity)
+        );
+        obs.profile_gof = std::sqrt(peakvar / vartot);
         obs.pkratio =
             std::fabs(obs.summation_intensity - iprf) /
             std::max(std::fabs(iprf), 1.0);

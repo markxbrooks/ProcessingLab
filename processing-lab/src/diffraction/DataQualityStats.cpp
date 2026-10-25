@@ -13,11 +13,6 @@
 namespace mosflm::diffraction {
 namespace {
 
-/// FLAG bit for a negative profile-fitted intensity (ProcessPipeline). A
-/// negative I is a valid measurement of a weak reflection, not a misfit:
-/// rejecting it empties the high-resolution shells and biases them upward.
-constexpr int kFlagNegProfile = 4;
-
 using Miller = std::tuple<int, int, int>;
 
 struct Obs {
@@ -384,7 +379,10 @@ DataQualityReport compute_data_quality(
     int n_sysabs_isigi = 0;
 
     for (const auto& row : reflections) {
-        if ((row.flag & ~kFlagNegProfile) != 0) {
+        // Any non-zero FLAG is a MOSFLM misfit (Aimless rejects it). Bit 4
+        // is set only for a profile intensity below −5σ, so a weak negative
+        // measurement is written with flag 0 and kept here.
+        if (row.flag != 0) {
             ++report.n_rejected_misfits;
             continue;
         }

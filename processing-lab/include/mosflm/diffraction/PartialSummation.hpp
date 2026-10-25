@@ -26,9 +26,10 @@ struct PartialSummationSettings {
 /// variances added over the core slices, ``FRACTIONCALC`` = summed fraction (capped at 1),
 /// ``BATCH``/``XDET``/``YDET``/``LP`` from the slice holding the largest
 /// fraction, ``phi_obs`` and the observed centroid intensity-weighted over
-/// slices. Overlap / background / peak-ratio flags are OR-ed over the main
-/// slices; the negative-profile flag is recomputed on the sum. Reflections
-/// with no core slice (core frames masked or rejected) are dropped.
+/// slices. Background and peak-ratio flags are OR-ed over the main slices;
+/// the negative-profile flag is recomputed on the sum and set only when the
+/// summed profile intensity is below −5σ. Reflections with no core slice
+/// (core frames masked or rejected) are dropped.
 ///
 /// :param slices: Per-frame rows (order irrelevant).
 /// :param settings: Options.
