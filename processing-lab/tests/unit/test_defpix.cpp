@@ -213,6 +213,10 @@ int main() {
                                             "EXCLUDE RESOLUTION 3.93 3.87",
                                             "DEFPIX VALUE_RANGE 7000. 30000."};
         CHECK(g.trusted_region_control == want);
+        // XDS's "unknown" cell and space group are not a cell or space group.
+        const auto unknown = mosflm::io::XdsInpImporter::parse_string(
+            "DATA_RANGE= 1 10\nUNIT_CELL_CONSTANTS= 0 0 0 0 0 0\nSPACE_GROUP_NUMBER= 0\n");
+        CHECK(!unknown.has_cell && !unknown.has_symmetry);
         mosflm::control::ControlSession s;
         for (const auto& line : g.to_control_lines()) {
             s.parse_line(line);

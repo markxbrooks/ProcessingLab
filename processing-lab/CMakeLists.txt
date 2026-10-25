@@ -359,6 +359,7 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             src/indexing/DiffVectorIndex.cpp
             src/indexing/Fft3dIndex.cpp
             src/indexing/LocalIndexAssign.cpp
+            src/indexing/MaxCell.cpp
             src/indexing/IdxrefRefine.cpp
             src/indexing/SpotToRlp.cpp
             src/indexing/SupercellReduce.cpp
@@ -1285,6 +1286,16 @@ if(BUILD_TESTING)
         add_test(
             NAME supercell_reduce
             COMMAND test_supercell_reduce
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_max_cell
+            tests/unit/test_max_cell.cpp
+        )
+        target_link_libraries(test_max_cell PRIVATE processinglab_indexing)
+        add_test(
+            NAME max_cell
+            COMMAND test_max_cell
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
 

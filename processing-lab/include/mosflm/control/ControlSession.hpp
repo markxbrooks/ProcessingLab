@@ -111,6 +111,9 @@ struct ControlState {
     double dmin_A{0.0};
     bool dmin_explicit{false};
     double dmax_A{200.0};
+    /// Set by ``DMAX`` / two-value ``RESOLUTION``. Without it AUTOINDEX
+    /// estimates the largest cell edge from the spots (DIALS max_cell).
+    bool dmax_explicit{false};
     /// Predictor φ sample step (degrees); 0.025 matches known_indexed_insulin.
     double phi_step_deg{0.025};
     /// Detector fiducials (neutral by default; insulin oracle via CONTROL

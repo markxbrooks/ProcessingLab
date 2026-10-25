@@ -4,8 +4,11 @@
 #include "mosflm/image/ImageIO.hpp"
 #include "mosflm/indexing/AutoIndexer.hpp"
 #include "mosflm/indexing/BravaisSelect.hpp"
+#include "mosflm/indexing/MaxCell.hpp"
 #include "mosflm/indexing/SpotList.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -74,6 +77,37 @@ void run_autoindex(
     geo.beam_y_mm = state.beam_y_mm;
     geo.pixel_mm = state.pixel_x_mm;
     geo.dmax_A = state.dmax_A;
+    if (!state.dmax_explicit) {
+        // DIALS find_max_cell: a fixed 200 Å lost 76c1b's 187 Å axis. Only
+        // raise the bound, so small cells index as before.
+        const MaxCellSettings mcs;
+        if (state.has_cell) {
+            // A known cell bounds the search directly (DIALS: multiplier ×
+            // longest edge).
+            const double edge = std::max({state.cell.a, state.cell.b, state.cell.c});
+            geo.dmax_A = std::max(geo.dmax_A, std::ceil(mcs.tolerance * edge));
+            std::cout << std::fixed << std::setprecision(1) << "  AUTOINDEX: max cell "
+                      << mcs.tolerance * edge << " Å from CELL → DMAX " << geo.dmax_A << '\n';
+        } else {
+            const MaxCellEstimate mc = estimate_max_cell(
+                spots,
+                {geo.distance_mm, geo.wavelength_A,
+                 geo.beam_x_mm > 0.0 ? geo.beam_x_mm : spots.header.beam_x_mm,
+                 geo.beam_y_mm > 0.0 ? geo.beam_y_mm : spots.header.beam_y_mm},
+                mcs
+            );
+            if (mc.ok) {
+                geo.dmax_A = std::max(geo.dmax_A, std::ceil(mc.max_cell_A));
+                std::cout << std::fixed << std::setprecision(1)
+                          << "  AUTOINDEX: nearest-neighbour max cell " << mc.max_cell_A << " Å ("
+                          << mc.n_reflections << " reflections, " << mc.n_ice << " ice, "
+                          << mc.n_overlaps << " overlapping) → DMAX " << geo.dmax_A << '\n';
+            } else {
+                std::cout << "  AUTOINDEX: too few reflections for a max cell estimate; DMAX "
+                          << geo.dmax_A << '\n';
+            }
+        }
+    }
 
     AutoIndexSettings settings;
     settings.min_isigi = state.autoindex.min_isigi;

@@ -107,16 +107,25 @@ ImportedSweepGeometry XdsInpImporter::parse_string(std::string_view text) {
             has_orgy = true;
             orgy = std::stod(toks[0]);
         } else if (key == "UNIT_CELL_CONSTANTS" && toks.size() >= 6) {
-            out.has_cell = true;
-            out.cell_a = std::stod(toks[0]);
-            out.cell_b = std::stod(toks[1]);
-            out.cell_c = std::stod(toks[2]);
-            out.cell_alpha = std::stod(toks[3]);
-            out.cell_beta = std::stod(toks[4]);
-            out.cell_gamma = std::stod(toks[5]);
+            // XDS writes 0 0 0 0 0 0 for "unknown": autoindex then.
+            const double a = std::stod(toks[0]), b = std::stod(toks[1]), c = std::stod(toks[2]);
+            const double al = std::stod(toks[3]), be = std::stod(toks[4]), ga = std::stod(toks[5]);
+            if (a > 0.0 && b > 0.0 && c > 0.0 && al > 0.0 && be > 0.0 && ga > 0.0) {
+                out.has_cell = true;
+                out.cell_a = a;
+                out.cell_b = b;
+                out.cell_c = c;
+                out.cell_alpha = al;
+                out.cell_beta = be;
+                out.cell_gamma = ga;
+            }
         } else if (key == "SPACE_GROUP_NUMBER" && !toks.empty()) {
-            out.has_symmetry = true;
-            out.symmetry_number = std::stoi(toks[0]);
+            // 0 = unknown (XDS determines it in IDXREF / CORRECT).
+            const int n = std::stoi(toks[0]);
+            if (n >= 1 && n <= 230) {
+                out.has_symmetry = true;
+                out.symmetry_number = n;
+            }
         } else if (key == "DATA_RANGE" && toks.size() >= 2) {
             out.has_process_range = true;
             out.process_first = std::stoi(toks[0]);

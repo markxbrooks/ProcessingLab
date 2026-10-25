@@ -292,6 +292,23 @@ EXIT
 it and writes `XPARM.XDS`; `GO` after `PROCESS` integrates and writes MTZ /
 `GXPARM.XDS`.
 
+Without `DMAX` (or a two-value `RESOLUTION`), `AUTOINDEX` sets the largest
+cell edge it searches for as DIALS `find_max_cell` does. With a `CELL`, it is
+1.3 × the longest edge. Otherwise it is estimated from the spots:
+
+1. Repeats of a reflection on adjacent frames (within 3 px and 0.5°) are
+   merged into one centroid.
+2. Reflections at hexagonal-ice ring resolutions (±0.002 Å⁻² in 1/d²) and
+   overlapping reflections are dropped.
+3. Within 45° blocks of φ, and separately on each side of the rotation axis,
+   each reciprocal-lattice point's nearest neighbour gives a direct-space
+   distance.
+4. The distances are histogrammed (about 5 per bin, longest 1% dropped), and
+   1.3 × the far edge of the last bin above 25% of the tallest is the estimate.
+
+Either way it only raises the 200 Å default. It is
+logged as `AUTOINDEX: nearest-neighbour max cell … → DMAX …`.
+
 ### Geometry and crystal
 
 | Keyword | Meaning |

@@ -796,6 +796,7 @@ void ControlSession::apply_keyword(
             throw std::invalid_argument("CONTROL DMAX needs 1 value");
         }
         state_.dmax_A = require_double(args[0], "DMAX");
+        state_.dmax_explicit = true;
         return;
     }
     if (key == "DMIN") {
@@ -816,6 +817,7 @@ void ControlSession::apply_keyword(
         if (args.size() >= 2) {
             state_.dmax_A = require_double(args[0], "RESOLUTION");
             state_.dmin_A = require_double(args[1], "RESOLUTION");
+            state_.dmax_explicit = true;
         } else {
             state_.dmin_A = require_double(args[0], "RESOLUTION");
         }
