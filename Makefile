@@ -8,7 +8,7 @@
 #
 # Autotools variables below remain for the optional oracle path.
 #-----------------------------------------------------------------------------
-prefix =  /home/brooks/.local/bin
+prefix =  /home/brooks/.local
 exec_prefix = ${prefix}
 bindir  = ${exec_prefix}/bin
 MOSHOME = .

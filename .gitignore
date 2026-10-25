@@ -1,7 +1,7 @@
 # Compiled object files
 *.o
 *.obj
-
+.idea/
 # Compiled libraries
 *.a
 *.so
