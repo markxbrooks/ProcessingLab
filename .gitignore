@@ -1,7 +1,7 @@
 # Compiled object files
 *.o
 *.obj
-
+.idea/
 # Compiled libraries
 *.a
 *.so
@@ -30,3 +30,16 @@ ROGUES
 *.cbf
 *.class
 *.pyc
+# Automake files
+Makefile
+Makefile.in
+aclocal.m4
+autom4te.cache/
+compile
+config.guess
+config.sub
+configure
+depcomp
+install-sh
+missing
+texinfo.tex

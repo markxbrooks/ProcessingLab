@@ -279,7 +279,7 @@ Target: aarch64-apple-darwin24
 Configured with: ../configure --prefix=/opt/homebrew/opt/gcc --libdir=/opt/homebrew/opt/gcc/lib/gcc/current --disable-nls --enable-checking=release --with-gcc-major-version-only --enable-languages=c,c++,objc,obj-c++,fortran --program-suffix=-15 --with-gmp=/opt/homebrew/opt/gmp --with-mpfr=/opt/homebrew/opt/mpfr --with-mpc=/opt/homebrew/opt/libmpc --with-isl=/opt/homebrew/opt/isl --with-zstd=/opt/homebrew/opt/zstd --with-pkgversion='Homebrew GCC 15.1.0' --with-bugurl=https://github.com/Homebrew/homebrew-core/issues --with-system-zlib --build=aarch64-apple-darwin24 --with-sysroot=/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk
 Thread model: posix
 Supported LTO compression algorithms: zlib zstd
-gcc version 15.1.0 (Homebrew GCC 15.1.0) 
+gcc version 15.1.0 (Homebrew GCC 15.1.0)
 configure:4906: $? = 0
 configure:4895: gfortran -V >&5
 gfortran: error: unrecognized command-line option '-V'
@@ -358,7 +358,7 @@ Target: aarch64-apple-darwin24
 Configured with: ../configure --prefix=/opt/homebrew/opt/gcc --libdir=/opt/homebrew/opt/gcc/lib/gcc/current --disable-nls --enable-checking=release --with-gcc-major-version-only --enable-languages=c,c++,objc,obj-c++,fortran --program-suffix=-15 --with-gmp=/opt/homebrew/opt/gmp --with-mpfr=/opt/homebrew/opt/mpfr --with-mpc=/opt/homebrew/opt/libmpc --with-isl=/opt/homebrew/opt/isl --with-zstd=/opt/homebrew/opt/zstd --with-pkgversion='Homebrew GCC 15.1.0' --with-bugurl=https://github.com/Homebrew/homebrew-core/issues --with-system-zlib --build=aarch64-apple-darwin24 --with-sysroot=/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk
 Thread model: posix
 Supported LTO compression algorithms: zlib zstd
-gcc version 15.1.0 (Homebrew GCC 15.1.0) 
+gcc version 15.1.0 (Homebrew GCC 15.1.0)
 COLLECT_GCC_OPTIONS='-o' 'conftest' '-g' '-O2' '-v' '-mmacosx-version-min=16.0.0' '-asm_macosx_version_min=16.0' '-nodefaultexport' '-mcpu=apple-m1' '-mlittle-endian' '-mabi=lp64'
  /opt/homebrew/Cellar/gcc/15.1.0/bin/../libexec/gcc/aarch64-apple-darwin24/15/f951 conftest.f -ffixed-form -fPIC -quiet -dumpbase conftest.f -dumpbase-ext .f -mmacosx-version-min=16.0.0 -mcpu=apple-m1 -mlittle-endian -mabi=lp64 -g -O2 -version -fintrinsic-modules-path /opt/homebrew/Cellar/gcc/15.1.0/bin/../lib/gcc/current/gcc/aarch64-apple-darwin24/15/finclude -o /var/folders/55/82w9chx902d3rfddr_dlx1yw0000gn/T//ccG1mz0Z.s
 GNU Fortran (Homebrew GCC 15.1.0) version 15.1.0 (aarch64-apple-darwin24)
@@ -390,7 +390,7 @@ Target: aarch64-apple-darwin24
 Configured with: ../configure --prefix=/opt/homebrew/opt/gcc --libdir=/opt/homebrew/opt/gcc/lib/gcc/current --disable-nls --enable-checking=release --with-gcc-major-version-only --enable-languages=c,c++,objc,obj-c++,fortran --program-suffix=-15 --with-gmp=/opt/homebrew/opt/gmp --with-mpfr=/opt/homebrew/opt/mpfr --with-mpc=/opt/homebrew/opt/libmpc --with-isl=/opt/homebrew/opt/isl --with-zstd=/opt/homebrew/opt/zstd --with-pkgversion='Homebrew GCC 15.1.0' --with-bugurl=https://github.com/Homebrew/homebrew-core/issues --with-system-zlib --build=aarch64-apple-darwin24 --with-sysroot=/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk
 Thread model: posix
 Supported LTO compression algorithms: zlib zstd
-gcc version 15.1.0 (Homebrew GCC 15.1.0) 
+gcc version 15.1.0 (Homebrew GCC 15.1.0)
 COLLECT_GCC_OPTIONS='-o' 'conftest' '-g' '-O2' '-v' '-mmacosx-version-min=16.0.0' '-asm_macosx_version_min=16.0' '-nodefaultexport' '-mcpu=apple-m1' '-mlittle-endian' '-mabi=lp64'
  /opt/homebrew/Cellar/gcc/15.1.0/bin/../libexec/gcc/aarch64-apple-darwin24/15/f951 conftest.f -ffixed-form -fPIC -quiet -dumpbase conftest.f -dumpbase-ext .f -mmacosx-version-min=16.0.0 -mcpu=apple-m1 -mlittle-endian -mabi=lp64 -g -O2 -version -fintrinsic-modules-path /opt/homebrew/Cellar/gcc/15.1.0/bin/../lib/gcc/current/gcc/aarch64-apple-darwin24/15/finclude -o /var/folders/55/82w9chx902d3rfddr_dlx1yw0000gn/T//cclKLJ0Q.s
 GNU Fortran (Homebrew GCC 15.1.0) version 15.1.0 (aarch64-apple-darwin24)
@@ -1049,12 +1049,12 @@ configure: failed program was:
 | /* end confdefs.h.  */
 | #include <X11/Xlib.h>
 | #ifdef F77_DUMMY_MAIN
-| 
+|
 | #  ifdef __cplusplus
 |      extern "C"
 | #  endif
 |    int F77_DUMMY_MAIN() { return 1; }
-| 
+|
 | #endif
 | int
 | main (void)
@@ -1158,12 +1158,12 @@ configure: failed program was:
 | /* end confdefs.h.  */
 | #include <X11/Xlib.h>
 | #ifdef F77_DUMMY_MAIN
-| 
+|
 | #  ifdef __cplusplus
 |      extern "C"
 | #  endif
 |    int F77_DUMMY_MAIN() { return 1; }
-| 
+|
 | #endif
 | int
 | main (void)
@@ -1218,19 +1218,19 @@ configure: failed program was:
 | #define HAVE_RINT 1
 | #define HAVE_SOCKET 1
 | /* end confdefs.h.  */
-| 
+|
 | #ifdef F77_DUMMY_MAIN
-| 
+|
 | #  ifdef __cplusplus
 |      extern "C"
 | #  endif
 |    int F77_DUMMY_MAIN() { return 1; }
-| 
+|
 | #endif
 | int
 | main (void)
 | {
-| 
+|
 |   ;
 |   return 0;
 | }
@@ -1280,19 +1280,19 @@ configure: failed program was:
 | #define HAVE_RINT 1
 | #define HAVE_SOCKET 1
 | /* end confdefs.h.  */
-| 
+|
 | #ifdef F77_DUMMY_MAIN
-| 
+|
 | #  ifdef __cplusplus
 |      extern "C"
 | #  endif
 |    int F77_DUMMY_MAIN() { return 1; }
-| 
+|
 | #endif
 | int
 | main (void)
 | {
-| 
+|
 |   ;
 |   return 0;
 | }
