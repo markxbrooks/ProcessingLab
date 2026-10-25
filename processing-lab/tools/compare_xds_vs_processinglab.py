@@ -39,12 +39,36 @@ from typing import Any, Mapping, MutableMapping, Optional, Sequence
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PL = ROOT / "bin" / "ProcessingLab"
-DEFAULT_XDS = Path.home() / "Downloads" / "XDS-gfortran_Linux_x86_64" / "xds"
+
+
+def _first_existing(*candidates: Path | str | None) -> Path:
+    """The first candidate that is a file (the last one if none is)."""
+    paths = [Path(c) for c in candidates if c]
+    return next((c for c in paths if c.is_file()), paths[-1])
+
+
+# PATH first, then the usual macOS (Apple-silicon XDS, /Applications CCP4)
+# and Linux locations.
+DEFAULT_XDS = _first_existing(
+    shutil.which("xds"),
+    Path.home() / "Downloads" / "XDS-Apple_M1" / "xds",
+    Path.home() / "Downloads" / "XDS-gfortran_Linux_x86_64" / "xds",
+)
 DEFAULT_IMAGE = (
     Path.home() / "projects" / "76c1b_0002212" / "76c1b_0002212_1_0001.cbf"
 )
-DEFAULT_POINTLESS = Path("/apps/ccp4/ccp4-9/bin/pointless")
-DEFAULT_AIMLESS = Path("/apps/ccp4/ccp4-9/bin/aimless")
+DEFAULT_POINTLESS = _first_existing(
+    shutil.which("pointless"),
+    Path(os.environ.get("CBIN", "/nonexistent")) / "pointless",
+    Path("/Applications/ccp4-9/bin/pointless"),
+    Path("/apps/ccp4/ccp4-9/bin/pointless"),
+)
+DEFAULT_AIMLESS = _first_existing(
+    shutil.which("aimless"),
+    Path(os.environ.get("CBIN", "/nonexistent")) / "aimless",
+    Path("/Applications/ccp4-9/bin/aimless"),
+    Path("/apps/ccp4/ccp4-9/bin/aimless"),
+)
 
 # Pilatus 6M geometry for 76c1b_0002212 (CBF header). Used when no --xds-inp.
 DEFAULT_GEOMETRY = {
@@ -95,6 +119,7 @@ def _run(
     cwd: Path,
     log: Path,
     env: Optional[Mapping[str, str]] = None,
+    stdin_text: str = "",
 ) -> float:
     """Run a command, tee stdout/stderr to *log*, return wall seconds.
 
@@ -102,6 +127,8 @@ def _run(
     :param cwd: working directory
     :param log: log file path
     :param env: optional environment overlay
+    :param stdin_text: keywords for the program's standard input (CCP4
+        programs read keywords until end of file; empty = none)
     :return: elapsed wall-clock seconds
     :raises subprocess.CalledProcessError: on non-zero exit
     """
@@ -117,6 +144,8 @@ def _run(
         proc = subprocess.run(
             list(cmd),
             cwd=str(cwd),
+            input=stdin_text,
+            text=True,
             stdout=fh,
             stderr=subprocess.STDOUT,
             env=merged,
@@ -378,32 +407,40 @@ def run_xds(
 
 def run_aimless(
     *,
-    mtz: Path,
+    hkl: Path,
     out_dir: Path,
     pointless: Path,
     aimless: Path,
+    xds_ascii: bool = False,
+    space_group: Optional[str] = None,
+    resolution: Optional[float] = None,
 ) -> float:
-    """Run Pointless then Aimless on an unmerged MTZ.
+    """Run Pointless then Aimless on an unmerged MTZ or XDS_ASCII.HKL.
 
+    :param hkl: Unmerged MTZ (``HKLIN``) or XDS ``XDS_ASCII.HKL`` (``XDSIN``).
+    :param xds_ascii: *hkl* is an XDS_ASCII file.
+    :param space_group: Force this space group in Pointless (e.g. ``"P 1 2 1"``),
+        so both programs' data are scaled in the same group.
+    :param resolution: Aimless high-resolution cutoff (Å), or ``None``.
     :return: wall-clock seconds
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     pointless_mtz = out_dir / "pointless.mtz"
     aimless_mtz = out_dir / "aimless.mtz"
     t0 = time.perf_counter()
+    # CCP4 logical names are separate arguments (``HKLIN file``, not
+    # ``HKLIN=file``), and the programs read keywords from stdin until EOF.
     _run(
-        [str(pointless), f"HKLIN={mtz}", f"HKLOUT={pointless_mtz}"],
+        [str(pointless), "XDSIN" if xds_ascii else "HKLIN", str(hkl), "HKLOUT", str(pointless_mtz)],
         cwd=out_dir,
         log=out_dir / "pointless.log",
+        stdin_text=f"SPACEGROUP {space_group}\n" if space_group else "",
     )
     _run(
-        [
-            str(aimless),
-            f"HKLIN={pointless_mtz}",
-            f"HKLOUT={aimless_mtz}",
-        ],
+        [str(aimless), "HKLIN", str(pointless_mtz), "HKLOUT", str(aimless_mtz)],
         cwd=out_dir,
         log=out_dir / "aimless.log",
+        stdin_text=f"RESOLUTION HIGH {resolution}\n" if resolution else "",
     )
     return time.perf_counter() - t0
 
@@ -697,6 +734,7 @@ def print_summary(summary: Mapping[str, Any]) -> None:
     pl = summary.get("processinglab") or {}
     xds = summary.get("xds") or {}
     aim = summary.get("aimless") or {}
+    aim_x = summary.get("aimless_xds") or {}
 
     rows = [
         ("Index cell", _fmt_cell(pl.get("cell_index")), _fmt_cell(xds.get("cell_index"))),
@@ -725,12 +763,14 @@ def print_summary(summary: Mapping[str, Any]) -> None:
     for name, a, b in rows:
         print(f"{name:<18} {str(a):<36} {str(b):<36}")
 
-    if aim:
-        print("\nAimless (PL MTZ):")
+    if aim or aim_x:
+        print("\nPointless + Aimless (the same programs and settings for both):")
+        print(f"{'metric':<18} {'ProcessingLab':<36} {'XDS (XDS_ASCII.HKL)':<36}")
+        print("-" * 90)
         for k in ("space_group", "rmeas", "cc12", "isigi", "completeness_pct",
                   "multiplicity", "observed", "unique"):
-            if k in aim:
-                print(f"  {k}: {aim[k]}")
+            if k in aim or k in aim_x:
+                print(f"{k:<18} {str(aim.get(k, '—')):<36} {str(aim_x.get(k, '—')):<36}")
     print()
 
 
@@ -821,7 +861,18 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--aimless",
         action="store_true",
-        help="run Pointless+Aimless on ProcessingLab process.mtz",
+        help="run Pointless+Aimless on ProcessingLab's process.mtz and XDS's XDS_ASCII.HKL",
+    )
+    ap.add_argument(
+        "--aimless-spacegroup",
+        default=None,
+        help="force this space group in Pointless for both (e.g. 'P 1 2 1')",
+    )
+    ap.add_argument(
+        "--aimless-resolution",
+        type=float,
+        default=None,
+        help="Aimless high-resolution cutoff (Å) for both",
     )
     ap.add_argument("--pointless", type=Path, default=DEFAULT_POINTLESS)
     ap.add_argument("--aimless-exe", type=Path, default=DEFAULT_AIMLESS)
@@ -949,13 +1000,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 ccp4_dir = workdir / "ccp4"
                 try:
                     summary["aimless_wall_s"] = run_aimless(
-                        mtz=mtz,
+                        hkl=mtz,
                         out_dir=ccp4_dir,
                         pointless=args.pointless,
                         aimless=args.aimless_exe,
+                        space_group=args.aimless_spacegroup,
+                        resolution=args.aimless_resolution,
                     )
                 except subprocess.CalledProcessError as exc:
                     print(f"warning: Aimless failed: {exc}", file=sys.stderr)
+
+        ascii_hkl = xds_dir / "XDS_ASCII.HKL"
+        if args.aimless and not args.skip_xds and ascii_hkl.is_file() and args.aimless_exe.is_file():
+            print("== Pointless + Aimless (XDS) ==")
+            try:
+                summary["aimless_xds_wall_s"] = run_aimless(
+                    hkl=ascii_hkl,
+                    out_dir=workdir / "ccp4_xds",
+                    pointless=args.pointless,
+                    aimless=args.aimless_exe,
+                    xds_ascii=True,
+                    space_group=args.aimless_spacegroup,
+                    resolution=args.aimless_resolution,
+                )
+            except subprocess.CalledProcessError as exc:
+                print(f"warning: Aimless (XDS) failed: {exc}", file=sys.stderr)
 
     # Parse whatever exists
     if pl_dir.is_dir():
@@ -1001,6 +1070,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 break
     if ccp4_dir.is_dir():
         summary["aimless"] = parse_aimless(ccp4_dir)
+    if (workdir / "ccp4_xds").is_dir():
+        summary["aimless_xds"] = parse_aimless(workdir / "ccp4_xds")
 
     print_summary(summary)
 
