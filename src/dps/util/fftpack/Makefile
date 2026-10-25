@@ -1,8 +1,8 @@
 LIBDIR = ../../../../lib
 AR_FLAGS = ruv
-F77    = f77 -c
+F77    = gfortran -c
 LFLAGS = 
-FFLAGS = -g -O2 -fallow-argument-mismatch
+FFLAGS = -g -O2 -fno-second-underscore -fallow-argument-mismatch
 #
 
 

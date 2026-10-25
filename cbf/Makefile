@@ -247,7 +247,7 @@
 # Crystallography                                                    #
 ######################################################################
 
-SHELL = /bin/bash
+SHELL = /bin/sh
 
 #
 # Set the compiler and flags

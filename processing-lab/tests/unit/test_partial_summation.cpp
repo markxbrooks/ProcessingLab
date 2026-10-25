@@ -101,6 +101,36 @@ int main() {
         CHECK(!fit_rocking_width({rows2.begin(), rows2.begin() + 30}, w_now, osc).has_value());
     }
 
+    // Predicted too wide (W = 2.0°, so many tail frames) with a small
+    // positive background bias on every slice: the bias must not read as
+    // heavier tails. Without a baseline in the fit this fed back through
+    // MOSAIC → reach and ran away (76c1b: 0.96° → 2.0°; XDS 1.04°).
+    {
+        using mosflm::diffraction::fit_rocking_width;
+        const double osc = 0.2, zeta = 0.5, w_now = 2.0, w_true = 1.0;
+        const double s_now = w_now / (2.355 * zeta);
+        const double s_true = w_true / (2.355 * zeta);
+        auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
+        std::vector<MosflmReflection> rows3;
+        for (int n = 0; n < 60; ++n) {
+            const double phic = 10.0 + 4.0 * n + 0.037 * n;
+            const double reach = 4.0 * s_now + 2.0 * osc;
+            for (int f = static_cast<int>(std::floor((phic - reach) / osc)); f * osc <= phic + reach; ++f) {
+                const double f0 = f * osc - phic, f1 = f0 + osc;
+                auto r = slice(f, 0.0f, 0.0f, 0.0f, 0);
+                r.h = r.h0 = n;
+                r.rot = static_cast<float>(phic);
+                r.width = static_cast<float>(6.0 * s_now);
+                r.fractioncalc = static_cast<float>(cdf(f1 / s_now) - cdf(f0 / s_now));
+                r.intensity = static_cast<float>(2000.0 * (cdf(f1 / s_true) - cdf(f0 / s_true)) + 8.0);
+                r.phi_obs = static_cast<float>(f * osc + 0.5 * osc);
+                rows3.push_back(r);
+            }
+        }
+        const auto fit = fit_rocking_width(rows3, w_now, osc);
+        CHECK(fit.has_value() && close(fit->width_deg, w_true, 0.05));
+    }
+
     // Incomplete edge reflection stays partial.
     const auto edge = sum_partial_slices({slice(1, 0.3f, 30.0f, 0.075f, 0)});
     CHECK(edge.size() == 1u && edge[0].mpart == 1 && close(edge[0].fractioncalc, 0.3, 1e-6));

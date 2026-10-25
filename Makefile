@@ -8,18 +8,18 @@
 #
 # Autotools variables below remain for the optional oracle path.
 #-----------------------------------------------------------------------------
-prefix =  /home/brooks/.local
+prefix =  /Users/brooks/.local
 exec_prefix = ${prefix}
 bindir  = ${exec_prefix}/bin
 MOSHOME = .
 RANLIB  = ranlib
-INSTALL = /usr/bin/install -c
+INSTALL = /opt/homebrew/bin/ginstall -c
 INSTALL_PROGRAM = ${INSTALL}
 
 # FFTW3 from ./configure (--with-fftw / --without-fftw).
 HAVE_FFTW = yes
-FFTW_CFLAGS = 
-FFTW_LIBS = -lfftw3
+FFTW_CFLAGS = -I/opt/homebrew/Cellar/fftw/3.3.11/include
+FFTW_LIBS = -L/opt/homebrew/Cellar/fftw/3.3.11/lib -lfftw3
 
 CPP_BUILD = processing-lab/build
 # C++ release binary; F77 oracle remains ``ipmosflm``.

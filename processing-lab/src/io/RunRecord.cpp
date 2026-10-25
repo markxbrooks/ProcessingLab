@@ -211,29 +211,29 @@ std::string md_num(const Json* v, int prec, const std::string& suffix = "") {
 
 }  // namespace
 
-std::string pending_stage(const control::ControlState& st) {
+std::optional<RunStep> pending_stage(const control::ControlState& st) {
     if (st.findspots_pending) {
-        return "findspots";
+        return RunStep::FIND_SPOTS;
     }
     if (st.autoindex_pending) {
-        return "autoindex";
+        return RunStep::INDEXING;
     }
     if (st.process_pending) {
-        return "process";
+        return RunStep::INTEGRATE;
     }
     if (st.strategy_pending) {
-        return "strategy";
+        return RunStep::STRATEGY;
     }
-    return "go";
+    return std::nullopt;
 }
 
-std::vector<std::string> planned_stages(const std::string& control_text) {
+std::vector<RunStep> planned_stages(const std::string& control_text) {
     // GO runs the first pending step in this order (ControlSession::go).
-    static const std::vector<std::pair<std::string, std::string>> order{
-        {"FINDSPOTS", "findspots"}, {"AUTOINDEX", "autoindex"},
-        {"PROCESS", "process"}, {"STRATEGY", "strategy"}};
-    std::vector<std::string> pending;
-    std::vector<std::string> stages;
+    static const std::vector<RunStep> order{RunStep::FIND_SPOTS, RunStep::INDEXING, RunStep::INTEGRATE,
+                                            RunStep::STRATEGY};
+    std::vector<RunStep> pending;
+    std::vector<RunStep> stages;
+    bool defpix = true;
     std::istringstream in(control_text);
     std::string line;
     while (std::getline(in, line)) {
@@ -241,20 +241,48 @@ std::vector<std::string> planned_stages(const std::string& control_text) {
         if (key == "EXIT" || key == "QUIT" || key == "END") {
             break;
         }
+        if (key == "DEFPIX") {
+            // DEFPIX [ON|OFF] …: the last ON / OFF wins; DEFPIX alone turns it on.
+            std::istringstream words(line.substr(0, line.find('!')));
+            std::string w;
+            words >> w;
+            bool any = false;
+            while (words >> w) {
+                std::transform(w.begin(), w.end(), w.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                if (w == "ON" || w == "OFF") {
+                    defpix = w == "ON";
+                    any = true;
+                } else if (w == "FILE" || w == "FRAMES" || w == "SHADOWS" || w == "DEFECTS") {
+                    words >> w;  // its value
+                    any = true;
+                } else if (w == "VALUE_RANGE") {
+                    words >> w >> w;
+                    any = true;
+                }
+            }
+            if (!any) {
+                defpix = true;
+            }
+            continue;
+        }
         if (key == "GO" || key == "RUN") {
-            for (const auto& [kw, name] : order) {
-                const auto it = std::find(pending.begin(), pending.end(), name);
+            for (const RunStep step : order) {
+                const auto it = std::find(pending.begin(), pending.end(), step);
                 if (it != pending.end()) {
-                    stages.push_back(name);
+                    if (step == RunStep::INTEGRATE && defpix) {
+                        stages.push_back(RunStep::DEFPIX);
+                    }
+                    stages.push_back(step);
                     pending.erase(it);
                     break;
                 }
             }
             continue;
         }
-        for (const auto& [kw, name] : order) {
-            if (key == kw && std::find(pending.begin(), pending.end(), name) == pending.end()) {
-                pending.push_back(name);
+        for (const RunStep step : order) {
+            if (key == run_step_keyword(step) && std::find(pending.begin(), pending.end(), step) == pending.end()) {
+                pending.push_back(step);
             }
         }
     }
@@ -377,7 +405,7 @@ Json input_record(
 }
 
 ProcessRecord::ProcessRecord(
-    std::filesystem::path dir, Json input, const std::vector<std::string>& stages
+    std::filesystem::path dir, Json input, const std::vector<RunStep>& stages
 )
     : dir_(std::move(dir)), input_(std::move(input)) {
     doc_["schema_version"] = kRunRecordSchemaVersion;
@@ -389,8 +417,8 @@ ProcessRecord::ProcessRecord(
     // Operational completion is not scientific validation; no checks run yet.
     doc_["validation"] = Json(Json::Object{{"status", "not_assessed"}, {"checks", Json::array()}});
     Json st = Json::array();
-    for (const auto& name : stages) {
-        st.push_back(stage_json(name));
+    for (const RunStep step : stages) {
+        st.push_back(stage_json(run_step_id(step)));
     }
     doc_["stages"] = std::move(st);
     doc_["experiment"] = Json();
@@ -398,6 +426,7 @@ ProcessRecord::ProcessRecord(
     doc_["refinement"] = Json();
     doc_["integration"] = Json();
     doc_["quality"] = Json();
+    doc_["strategy"] = Json();
     doc_["warnings"] = Json::array();
     for (const auto& w : input_["warnings"].items()) {
         doc_["warnings"].push_back(w);
@@ -408,8 +437,9 @@ ProcessRecord::ProcessRecord(
     write();
 }
 
-Json& ProcessRecord::stage(const std::string& name) {
+Json& ProcessRecord::stage(RunStep step) {
     // The first stage of that name not yet finished; unplanned ones are added.
+    const std::string name = run_step_id(step);
     auto& arr = doc_["stages"].elements();
     for (auto& s : arr) {
         const std::string status = s.find("status") ? s.find("status")->string() : "";
@@ -422,17 +452,55 @@ Json& ProcessRecord::stage(const std::string& name) {
     return arr.back();
 }
 
-void ProcessRecord::begin_stage(const control::ControlState& state) {
-    running_ = pending_stage(state);
-    Json& s = stage(running_);
+void ProcessRecord::start(RunStep step) {
+    running_ = step;
+    Json& s = stage(step);
     s["status"] = "running";
     s["started_at"] = now_rfc3339();
     stage_start_ = std::chrono::steady_clock::now();
     write();
 }
 
+void ProcessRecord::begin_stage(const control::ControlState& state) {
+    const auto step = pending_stage(state);
+    if (!step) {
+        running_.reset();
+        return;
+    }
+    // PROCESS classifies the pixels first (RunStep::DEFPIX), then integrates.
+    start(*step == RunStep::INTEGRATE && state.defpix.enabled ? RunStep::DEFPIX : *step);
+}
+
+void ProcessRecord::step_done(RunStep step, const control::ControlGoResult& r, const control::ControlState&) {
+    if (step != RunStep::DEFPIX || running_ != RunStep::DEFPIX || !r.defpix) {
+        return;
+    }
+    const auto& d = *r.defpix;
+    const std::size_t ignored =
+        d.untrusted_region + d.excluded_resolution + d.shaded + d.defective + d.hot;
+    Json& s = stage(RunStep::DEFPIX);
+    s["status"] = "completed";
+    s["finished_at"] = now_rfc3339();
+    s["duration_s"] = seconds_since(stage_start_);
+    s["message"] = std::to_string(ignored) + " pixels ignored, " + std::to_string(d.trusted) + " trusted";
+    s["results"] = Json(Json::Object{{"trusted_pixels", d.trusted}, {"ignored_pixels", ignored}});
+    if (!d.image.empty()) {
+        add_output(d.image, "defpix_image");
+    }
+    start(RunStep::INTEGRATE);
+}
+
 void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::ControlState& st) {
-    Json& s = stage(running_);
+    if (!running_) {
+        return;
+    }
+    if (running_ == RunStep::DEFPIX) {
+        // PROCESS ended without classifying pixels (e.g. DEFPIX turned off later).
+        Json& d = stage(RunStep::DEFPIX);
+        d["status"] = "skipped";
+        start(RunStep::INTEGRATE);
+    }
+    Json& s = stage(*running_);
     s["status"] = "completed";
     s["finished_at"] = now_rfc3339();
     s["duration_s"] = seconds_since(stage_start_);
@@ -444,6 +512,62 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
         res["spots"] = st.findspots_n_spots;
         s["results"] = std::move(res);
         add_output(control::output_path(st, st.findspots.spot_file), "spot_list");
+    }
+    if (r.ran_strategy && r.strategy) {
+        const auto& sr = *r.strategy;
+        const auto pct = [](double f) { return std::round(f * 1000.0) / 10.0; };
+        const auto segment = [&](const std::optional<diffraction::StrategySegment>& seg) {
+            if (!seg) {
+                return Json();
+            }
+            Json shells = Json::array();
+            for (const auto& sh : seg->shells) {
+                shells.push_back(Json(Json::Object{
+                    {"d_low_angstrom", sh.d_low_A}, {"d_high_angstrom", sh.d_high_A},
+                    {"possible", sh.possible}, {"observed", sh.observed},
+                    {"completeness_pct", pct(sh.completeness)}, {"multiplicity", sh.multiplicity},
+                    {"anomalous_completeness_pct", pct(sh.anomalous_completeness)}}));
+            }
+            return Json(Json::Object{
+                {"start_deg", seg->start_deg}, {"end_deg", seg->end_deg}, {"rotation_deg", seg->rotation_deg},
+                {"images", seg->images},
+                {"frames", seg->frames ? Json(Json::Object{{"first", seg->frames->first},
+                                                           {"last", seg->frames->second}})
+                                       : Json()},
+                {"completeness_pct", pct(seg->completeness)},
+                {"anomalous_completeness_pct", pct(seg->anomalous_completeness)},
+                {"multiplicity", seg->multiplicity}, {"shells", std::move(shells)}});
+        };
+        Json curve = Json::array();
+        for (const auto& pt : sr.curve) {
+            curve.push_back(Json(Json::Object{{"rotation_deg", pt.rotation_deg}, {"start_deg", pt.start_deg},
+                                              {"completeness_pct", pct(pt.completeness)},
+                                              {"anomalous_completeness_pct", pct(pt.anomalous_completeness)}}));
+        }
+        const auto& set = st.strategy;
+        Json j = Json::object();
+        j["target_completeness_pct"] = pct(set.target_completeness);
+        j["anomalous"] = set.anomalous;
+        j["oscillation_deg"] = sr.osc_deg;
+        j["frames_collected"] = st.strategy_frames
+                                    ? Json(Json::Object{{"first", st.strategy_frames->first},
+                                                        {"last", st.strategy_frames->second}})
+                                    : Json();
+        j["resolution_angstrom"] = Json(Json::Object{{"low", sr.dmax_A}, {"high", sr.dmin_A}});
+        j["unique_possible"] = sr.unique_possible;
+        j["acentric_possible"] = sr.acentric_possible;
+        j["max_completeness_pct"] = pct(sr.max_completeness);
+        j["max_anomalous_completeness_pct"] = pct(sr.max_anomalous_completeness);
+        j["target"] = segment(sr.target);
+        j["rotation"] = segment(sr.rotation);
+        j["curve"] = std::move(curve);
+        doc_["strategy"] = std::move(j);
+        s["results"] = sr.target ? Json(Json::Object{{"completeness_pct", pct(sr.target->completeness)},
+                                                     {"rotation_deg", sr.target->rotation_deg},
+                                                     {"start_deg", sr.target->start_deg},
+                                                     {"images", sr.target->images}})
+                                 : Json(Json::Object{{"completeness_pct", Json()},
+                                                     {"max_completeness_pct", pct(sr.max_completeness)}});
     }
     if (r.ran_autoindex) {
         // Stage summary; the full solution is in ``indexing``.
@@ -493,7 +617,7 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
         doc_["experiment"] = final_experiment(input_, st, r.process_first, r.process_last);
         // What PROCESS did to each parameter (the policy it ran with).
         Json ref = Json::object();
-        ref["stage"] = "process";
+        ref["stage"] = run_step_id(RunStep::INTEGRATE);
         Json params = Json::object();
         params["orientation"] = st.refine_orientation ? "refined" : "fixed";
         params["unit_cell"] = st.refine_cell ? "refined" : "fixed";
@@ -583,7 +707,7 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
             add_output(st.xparm_out, "gxparm");
         }
     }
-    running_.clear();
+    running_.reset();
     write();
 }
 
@@ -614,8 +738,8 @@ void ProcessRecord::add_warning(const std::string& w) {
 }
 
 void ProcessRecord::fail(const std::string& error) {
-    if (!running_.empty()) {
-        Json& s = stage(running_);
+    if (running_) {
+        Json& s = stage(*running_);
         s["status"] = "failed";
         s["finished_at"] = now_rfc3339();
         s["duration_s"] = seconds_since(stage_start_);
@@ -719,7 +843,9 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
         if (const auto* r = s.find("results"); r != nullptr && r->find("spots")) {
             detail = md_value(*r->find("spots")) + " spots";
         }
-        md << "| " << str(s.find("name")) << " | " << str(s.find("status")) << " | "
+        // RunStep.FIND_SPOTS, …; a name this build doesn't know as recorded.
+        const auto step = parse_run_step(str(s.find("name")));
+        md << "| " << (step ? run_step_name(*step) : str(s.find("name"))) << " | " << str(s.find("status")) << " | "
            << (detail.empty() ? "—" : detail) << " |\n";
     }
 
@@ -782,6 +908,27 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
                << md_value(*px.find("shaded")) << " shaded, " << md_value(*px.find("defective"))
                << " defective, " << md_value(*px.find("hot")) << " hot; "
                << md_value(*px.find("detector_masked")) << " masked by the detector\n";
+        }
+    }
+
+    if (const auto* sg = pr.find("strategy"); sg != nullptr && !sg->is_null()) {
+        md << "\n## Strategy\n\n";
+        const Json* t = sg->find("target");
+        md << "- Target: " << md_value(*sg->find("target_completeness_pct")) << "% "
+           << (sg->find("anomalous")->boolean() ? "anomalous " : "") << "completeness to "
+           << md_num(sg->find("resolution_angstrom")->find("high"), 2) << " Å ("
+           << md_value(*sg->find("unique_possible")) << " unique reflections)\n";
+        if (t != nullptr && !t->is_null()) {
+            md << "- Rotate " << md_num(t->find("rotation_deg"), 1) << "° from φ " << md_num(t->find("start_deg"), 1)
+               << "°: " << md_value(*t->find("images")) << " images";
+            if (const auto* f = t->find("frames"); f != nullptr && !f->is_null()) {
+                md << " (frames " << md_value(*f) << ")";
+            }
+            md << ", " << md_num(t->find("completeness_pct"), 1) << "% complete, "
+               << md_num(t->find("anomalous_completeness_pct"), 1) << "% of anomalous pairs, multiplicity "
+               << md_num(t->find("multiplicity"), 2) << "\n";
+        } else {
+            md << "- Not reachable: at most " << md_num(sg->find("max_completeness_pct"), 1) << "%\n";
         }
     }
 

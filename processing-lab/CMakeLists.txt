@@ -255,6 +255,7 @@ set(MOSFLM_GEOMETRY_SOURCES
     src/diffraction/MeasurementBox.cpp
     src/diffraction/TrustedRegion.cpp
     src/diffraction/Defpix.cpp
+    src/diffraction/Strategy.cpp
     src/diffraction/DetectorInit.cpp
     src/diffraction/StandardProfile.cpp
     src/diffraction/Shoebox.cpp
@@ -565,6 +566,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(test_defpix PRIVATE processinglab_geometry)
     add_test(NAME defpix COMMAND test_defpix)
+
+    add_executable(test_strategy
+        tests/unit/test_strategy.cpp
+    )
+    target_link_libraries(test_strategy PRIVATE processinglab_geometry)
+    add_test(NAME strategy COMMAND test_strategy)
 
     add_executable(test_detector_init
         tests/unit/test_detector_init.cpp

@@ -116,24 +116,35 @@ int main() {
                   "EXIT-only should still warn no RUN");
     }
 
-    // STRATEGY RUN clears no-RUN warning.
-    {
+    // STRATEGY RUN clears no-RUN warning: the known-indexed insulin geometry
+    // (cpp_process.in without its PROCESS) and STRATEGY.
+    if (fs::exists(find_insulin_img())) {
         const fs::path script =
             fs::temp_directory_path() / "mosflm_e3_strategy.in";
         {
+            std::ifstream in("testdata/images/known_indexed/cpp_process.in");
             std::ofstream out(script);
-            out << "STRATEGY ANGLE 90\nRUN\nEXIT\n";
+            for (std::string line; std::getline(in, line);) {
+                if (line.rfind("PROCESS", 0) == 0 || line == "GO" || line == "EXIT") {
+                    continue;
+                }
+                out << line << '\n';
+            }
+            out << "STRATEGY COMPLETENESS 90 ANGLE 90\nRUN\nEXIT\n";
         }
         const fs::path out =
             fs::temp_directory_path() / "mosflm_e3_strategy.out";
-        const std::string cmd = "cd " + mosflm_test::output_dir("ipmosflm_thin_run").string() + " && " + bin.string() + " " + std::filesystem::absolute(script).string() + " >" +
-                                out.string() + " 2>/dev/null";
+        const std::string cmd = "cd " + mosflm_test::output_dir("ipmosflm_thin_run").string() + " && " + bin.string() +
+                                " --image " + find_insulin_img().string() + " " +
+                                std::filesystem::absolute(script).string() + " >" + out.string() + " 2>/dev/null";
         CHECK_EQ(run_cmd(cmd), 0);
         const std::string text = slurp(out);
         CHECK_MSG(text.find("NO \"RUN\" CARD GIVEN") == std::string::npos,
                   "STRATEGY RUN should not warn no RUN");
-        CHECK_MSG(text.find("STRATEGY") != std::string::npos,
+        CHECK_MSG(text.find("***** STRATEGY *****") != std::string::npos,
                   "missing STRATEGY output");
+        CHECK_MSG(text.find("Optimum rotation of 90.0° gives") != std::string::npos,
+                  "missing STRATEGY ROTATE segment");
     }
 
     const auto img = find_insulin_img();

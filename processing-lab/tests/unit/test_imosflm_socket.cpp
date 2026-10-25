@@ -8,8 +8,14 @@ int main() {
     CHECK(!srv.listen());  // disabled when port == 0
     srv.handle_control_line("STRATEGY ANGLE 45");
     CHECK(srv.session().state().strategy_pending);
-    const auto r = srv.session().go();
-    CHECK(r.ran_strategy);
+    // GO runs it; without an orientation and image it says what it needs.
+    bool refused = false;
+    try {
+        (void)srv.session().go();
+    } catch (const std::runtime_error& ex) {
+        refused = std::string(ex.what()).find("STRATEGY needs") != std::string::npos;
+    }
+    CHECK(refused);
 
     ImosflmSocketServer live(9009);
     CHECK(live.listen());

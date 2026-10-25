@@ -4,6 +4,7 @@
 #include "mosflm/io/ExperimentModel.hpp"
 #include "mosflm/io/Json.hpp"
 #include "mosflm/io/RunMode.hpp"
+#include "mosflm/io/RunStep.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -18,7 +19,9 @@ namespace mosflm::io {
 /// 2: RFC 3339 ``*_at`` timestamps and durations, uniform stage objects,
 /// separate length/angle units, ``space_group`` objects, run-relative output
 /// paths, defined integration / quality counts, ``validation``.
-inline constexpr int kRunRecordSchemaVersion = 2;
+/// 3: stages named by :func:`run_step_id` (``find_spots``, ``indexing``,
+/// ``defpix``, ``integrate``, ``strategy``), DEFPIX a stage of its own.
+inline constexpr int kRunRecordSchemaVersion = 3;
 
 /// How a run was invoked, for ``input.json``.
 struct RunContext {
@@ -33,13 +36,14 @@ struct RunContext {
     std::optional<std::filesystem::path> previous_run;  ///< ``run --from``
 };
 
-/// Stage name for the step a ``GO`` will run (``"findspots"``,
-/// ``"autoindex"``, ``"process"``, ``"strategy"``), from the pending flags.
-[[nodiscard]] std::string pending_stage(const control::ControlState& state);
+/// The step a ``GO`` will run, from the pending flags (``INTEGRATE`` for
+/// ``PROCESS``, which starts with ``DEFPIX``), or none.
+[[nodiscard]] std::optional<RunStep> pending_stage(const control::ControlState& state);
 
-/// Stages a CONTROL text will run, in order, by parsing it without running
-/// (``XPARMOUT`` is skipped: it writes a file when parsed).
-[[nodiscard]] std::vector<std::string> planned_stages(const std::string& control_text);
+/// Steps a CONTROL text will run, in order, by scanning it without running:
+/// each ``GO`` runs the first pending step, and ``PROCESS`` is ``DEFPIX``
+/// then ``INTEGRATE`` (``INTEGRATE`` alone after ``DEFPIX OFF``).
+[[nodiscard]] std::vector<RunStep> planned_stages(const std::string& control_text);
 
 /// Effective settings (indexing, integration, refinement) from a parsed
 /// CONTROL state.
@@ -65,11 +69,15 @@ struct RunContext {
 class ProcessRecord {
 public:
     /// Writes ``input.json``, then ``process.json`` and ``process.md``.
-    ProcessRecord(std::filesystem::path dir, Json input, const std::vector<std::string>& stages);
+    ProcessRecord(std::filesystem::path dir, Json input, const std::vector<RunStep>& stages);
 
-    /// A ``GO`` is starting (step still pending in ``state``).
+    /// A ``GO`` is starting (step still pending in ``state``). ``PROCESS``
+    /// starts with ``DEFPIX`` unless ``DEFPIX OFF``.
     void begin_stage(const control::ControlState& state);
-    /// It finished: record results and outputs.
+    /// A step inside the ``GO`` finished (``DEFPIX``): record it and start
+    /// the next (``INTEGRATE``).
+    void step_done(RunStep step, const control::ControlGoResult& result, const control::ControlState& state);
+    /// The ``GO`` finished: record results and outputs.
     void end_stage(const control::ControlGoResult& result, const control::ControlState& state);
     /// Processing failed (the running stage, if any, fails too).
     void fail(const std::string& error);
@@ -84,12 +92,13 @@ public:
 
 private:
     void write();
-    Json& stage(const std::string& name);
+    Json& stage(RunStep step);
+    void start(RunStep step);
 
     std::filesystem::path dir_;
     Json input_;
     Json doc_;
-    std::string running_;
+    std::optional<RunStep> running_;
     std::chrono::steady_clock::time_point run_start_{std::chrono::steady_clock::now()};
     std::chrono::steady_clock::time_point stage_start_{run_start_};
 };

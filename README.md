@@ -384,9 +384,9 @@ Every information type has one home:
 - reflections: `process.mtz`.
 
 The JSON records give applications and pipelines a stable interface. Both
-carry `"schema_version": 2`; every field, unit and count is defined in
+carry `"schema_version": 3`; every field, unit and count is defined in
 [processing-lab/docs/RUN_RECORDS.md](processing-lab/docs/RUN_RECORDS.md).
-`--from` also reads version 1 runs.
+`--from` also reads version 1 and 2 runs.
 
 `process.json` starts as `"status": "running"` with every stage `pending`.
 Each stage then moves to `running` and on to `completed` or `failed`, and

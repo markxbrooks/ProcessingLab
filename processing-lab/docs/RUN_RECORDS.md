@@ -1,4 +1,4 @@
-# Run records: `input.json` and `process.json` (schema version 2)
+# Run records: `input.json` and `process.json` (schema version 3)
 
 Every `ProcessingLab run`, and every CONTROL script run with `--output-dir`,
 writes two JSON records into its output directory:
@@ -20,8 +20,19 @@ writes two JSON records into its output directory:
   version.
 - **Unknown fields:** readers must ignore them, so new fields can be added
   without a version change.
-- **Older runs:** `run --from` reads version 1 and version 2 runs. It refuses
+- **Older runs:** `run --from` reads version 1, 2 and 3 runs. It refuses
   a newer version, rather than guessing at its layout.
+- **Changes in version 3:** stages are named after the `RunStep` they run,
+  and DEFPIX is a stage of its own, before integration:
+
+  | Version 2 | Version 3 |
+  | --------- | --------- |
+  | `stages[].name` `findspots` | `find_spots` |
+  | `autoindex` | `indexing` |
+  | `process` | `defpix` (unless `DEFPIX OFF`), then `integrate` |
+  | `strategy` | `strategy` |
+  | `refinement.stage` `process` | `integrate` |
+
 - **Changes in version 2:**
 
   | Version 1 | Version 2 |
@@ -85,16 +96,18 @@ writes two JSON records into its output directory:
 
 ### Stages
 
-`stages` lists the planned steps in order. Each is an object with the same
-keys:
+`stages` lists the planned steps in order. Each is a step of ProcessingLab's
+`RunStep` (`include/mosflm/io/RunStep.hpp`; DiffractionLab mirrors it as
+`diffraction_lab.run_step.RunStep`), named by its id, and is an object with
+the same keys:
 
 | Key | Meaning |
 | --- | ------- |
-| `name` | `findspots`, `autoindex`, `process` or `strategy` |
+| `name` | `find_spots` (`RunStep.FIND_SPOTS`, CONTROL `FINDSPOTS`), `indexing` (`RunStep.INDEXING`, `AUTOINDEX`), `defpix` (`RunStep.DEFPIX`, the start of `PROCESS`), `integrate` (`RunStep.INTEGRATE`, `PROCESS`) or `strategy` (`RunStep.STRATEGY`, `STRATEGY`) |
 | `status` | `pending` → `running` → `completed` or `failed`; `skipped` if the run finished without reaching it |
 | `started_at`, `finished_at`, `duration_s` | Stage timing, or `null` |
 | `message` | Human-readable summary, or `null`. Facts are in `results`; don't parse this. |
-| `results` | Machine-readable summary, or `null`. `findspots`: `{spots}`. `autoindex`: `{lattice, indexed_fraction, rmsd_hkl}`. `process`: `{integrated_reflections}`. |
+| `results` | Machine-readable summary, or `null`. `find_spots`: `{spots}`. `indexing`: `{lattice, indexed_fraction, rmsd_hkl}`. `strategy`: `{completeness_pct, rotation_deg, start_deg, images}` (`completeness_pct: null` and `max_completeness_pct` when the target can't be reached). `defpix`: `{trusted_pixels, ignored_pixels}` (the counts by kind are in `integration.defpix`). `integrate`: `{integrated_reflections}`. |
 | `error` | The stage's error, or `null` |
 
 A completed stage means it ran. It doesn't mean its result is right: a
@@ -159,7 +172,7 @@ What `PROCESS` did to each parameter: the policy it ran with.
 
 | Field | Meaning |
 | ----- | ------- |
-| `stage` | `process` |
+| `stage` | `integrate` |
 | `parameters` | `orientation`, `unit_cell`, `detector_distance`, `beam_centre`, `detector_tilt_twist`: each `refined` or `fixed`. `mosaicity`: `estimated` from the data or `fixed` |
 | `unit_cell_constraint` | `space_group_metric` when the cell is held to the space group's metric, otherwise `none` |
 
@@ -228,6 +241,27 @@ directly:
 | `integrated_reflections` | Reflections written to the MTZ, after partials are summed |
 
 `profile_fitted_observations` can therefore exceed `integrated_reflections`.
+
+### `strategy`
+
+Written by `STRATEGY` (`RunStep.STRATEGY`); `null` otherwise.
+
+| Field | Meaning |
+| ----- | ------- |
+| `target_completeness_pct`, `anomalous` | The completeness asked for, and whether it is anomalous completeness (acentric pairs with both Friedel mates) |
+| `oscillation_deg` | Image width used to count images |
+| `frames_collected` | `{first, last}` the rotation was chosen within, or `null` (planned on a full turn) |
+| `resolution_angstrom` | `{low, high}`: the lowest-resolution reflection and the limit |
+| `unique_possible`, `acentric_possible` | Unique (and acentric) reflections to that resolution, absences excluded |
+| `max_completeness_pct`, `max_anomalous_completeness_pct` | The most any rotation records (the blind region, or the collected range, limits it) |
+| `target` | The smallest rotation reaching the target, or `null`: `start_deg`, `end_deg`, `rotation_deg`, `images`, `frames` (`{first, last}` within the collected frames, else `null`), `completeness_pct`, `anomalous_completeness_pct`, `multiplicity` and `shells` |
+| `rotation` | The same for `STRATEGY ROTATE r`, or `null` |
+| `curve` | For each total rotation (1° steps): `rotation_deg`, the best `start_deg`, its `completeness_pct` and `anomalous_completeness_pct` |
+
+`shells` are of equal reciprocal volume: `d_low_angstrom`, `d_high_angstrom`,
+`possible`, `observed`, `completeness_pct`, `multiplicity`,
+`anomalous_completeness_pct`. These are predictions from the orientation and
+detector geometry, not measurements.
 
 ### `quality`
 
