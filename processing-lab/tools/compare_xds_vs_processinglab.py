@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Optional, Sequence
 
-# ROOT = Path(__file__).resolve().parents[2]
+# If local version exists, use that, if not use system version
 ROOT = Path.home() / ".local"
 DEFAULT_PL = ROOT / "bin" / "ProcessingLab"
 if not DEFAULT_PL.exists():
