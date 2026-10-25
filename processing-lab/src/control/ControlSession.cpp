@@ -932,6 +932,12 @@ void ControlSession::apply_keyword(
         state_.phi_offset_deg = require_double(args[0], "PHI_OFFSET");
         return;
     }
+    if (key == "APERTURE") {
+        // APERTURE ON|OFF: divide intensities by the fraction of the spot
+        // flux the measured peak box encloses (default ON).
+        state_.aperture_correction = args.empty() || upper(args[0]) == "ON";
+        return;
+    }
     if (key == "PEAKHALF" || key == "PEAK_HALF") {
         if (args.size() < 1) {
             throw std::invalid_argument("CONTROL PEAKHALF needs 1 integer");
@@ -2342,6 +2348,10 @@ diffraction::ProcessRequest ControlSession::make_process_request(
             diffraction::build_trusted_mask(image, det, tr);
         measurement.trusted_width = image.metadata.width;
         // DEFPIX: its rejected pixels are neither background nor peak.
+        if (state_.aperture_correction && state_.aperture && state_.peak_half_px < 1 &&
+            state_.aperture->half_box == measurement.peak_half_px) {
+            measurement.aperture = state_.aperture;
+        }
         if (defpix_mask_ && defpix_width_ == image.metadata.width &&
             defpix_mask_->size() == measurement.trusted_mask.size()) {
             auto& tm = measurement.trusted_mask;
@@ -2844,6 +2854,19 @@ ControlGoResult ControlSession::go(
         const int probe_last = std::min(first + 9, last);
         const auto probe = integrate_frames(first, probe_last, sigmab, sigmar);
         diffraction::SpotExtentEstimator est;
+        {
+            // Bin strong spots by distance from the rotation axis (tails
+            // lengthen with it) for the aperture correction.
+            const DetectorGeometry gdet = process_limit_detector(state_, image0.metadata);
+            double bx = 0.0;
+            double by = 0.0;
+            process_panel_beam(state_, image0.metadata, gdet, bx, by);
+            // Detector omega 270 / 90: axis along the fast (column) direction.
+            const double om = std::fmod(std::fabs(image0.metadata.rotation_axis_omega_deg), 180.0);
+            est.set_axis({bx / std::max(gdet.pixel_size_x_mm, 1e-9), by / std::max(gdet.pixel_size_y_mm, 1e-9),
+                          std::fabs(om - 90.0) < 45.0},
+                         image0.metadata.width, image0.metadata.height);
+        }
         for (std::size_t k = 0; k < probe.size(); ++k) {
             if (!probe[k].ok) {
                 continue;
@@ -2885,6 +2908,18 @@ ControlGoResult ControlSession::go(
                       << probe.size() << " frame(s), sigma " << ext->sigma_x << " x "
                       << ext->sigma_y << " px → peak ±(2σ̄ + 1) = " << 2 * half + 1
                       << "x" << 2 * half + 1 << '\n';
+            if (const auto ap = est.aperture(half); ap && state_.aperture_correction) {
+                // Long spot tails fall outside a box sized for precision;
+                // intensities are divided by the enclosed fraction.
+                std::cout << "  APERTURE CORRECTION: the " << 2 * half + 1 << "x" << 2 * half + 1
+                          << " box holds this fraction of a spot's flux, by distance from the rotation axis"
+                          << " (strong spots per bin):\n   ";
+                for (std::size_t i = 0; i < ap->fraction.size(); ++i) {
+                    std::cout << ' ' << std::setprecision(3) << ap->fraction[i] << " (" << ap->n_spots[i] << ')';
+                }
+                std::cout << "; overall " << ap->overall << '\n';
+                state_.aperture = ap;
+            }
         }
     }
 

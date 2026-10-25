@@ -47,6 +47,13 @@ struct XparmGeometry {
     bool has_direct_beam{false};
     double beam_fast_px{0.0};
     double beam_slow_px{0.0};
+    /// Detector TILT / TWIST (mrad) in ProcessingLab's frame (beam +z, axis
+    /// +x), from the detector normal there. Non-zero
+    /// when XDS's beam is not along the detector normal (76c1b: a 10 mrad
+    /// beam tilt left predictions 2 px out at the detector edge).
+    bool has_tilt_twist{false};
+    double tilt_mrad{0.0};
+    double twist_mrad{0.0};
     /// Orientation: 3×3 A matrix (MOSFLM-like rows) if known. From a classic
     /// XDS file it is expressed in the frame with the beam along +z and the
     /// rotation axis along +x (ProcessingLab's lab frame).

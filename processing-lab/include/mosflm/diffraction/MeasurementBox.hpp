@@ -3,6 +3,7 @@
 #include "mosflm/diffraction/SummationIntegrator.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
 
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <utility>
@@ -56,6 +57,40 @@ struct BackgroundPlane {
     int trusted_width = 0
 );
 
+/// Where the rotation axis crosses the detector, for :class:`ApertureMap`.
+struct RotationAxisLine {
+    double beam_col{0.0};  ///< Beam position (px).
+    double beam_row{0.0};
+    bool along_fast{false};  ///< Axis along image columns (Pilatus "X"); else along rows.
+
+    /// Distance (px) of pixel (``col``, ``row``) from the axis line through the beam.
+    [[nodiscard]] double distance(double col, double row) const {
+        return along_fast ? std::abs(row - beam_row) : std::abs(col - beam_col);
+    }
+};
+
+/// Fraction of a spot's flux a peak box encloses, by distance from the
+/// rotation axis.
+///
+/// Spots have long, faint tails along the rotation direction (76c1b: a
+/// σ ≈ 1 px core with tails to ±10 px), longer the further they are from the
+/// axis, which a box sized for precision cuts off. Dividing by the enclosed
+/// fraction measured on strong spots (an aperture correction) restores that
+/// flux without enlarging the box, which would add background noise.
+struct ApertureMap {
+    RotationAxisLine axis;
+    double max_distance{1.0};  ///< Distance covered by the bins (px).
+    int half_box{0};  ///< The peak box the fractions are for.
+    /// Enclosed fraction per distance bin (equal widths from 0 to
+    /// ``max_distance``); bins with too few strong spots take ``overall``.
+    std::vector<double> fraction;
+    std::vector<std::size_t> n_spots;
+    double overall{1.0};
+
+    /// Fraction at pixel (``col``, ``row``), linear between bin centres.
+    [[nodiscard]] double at(double col, double row) const;
+};
+
 /// MOSFLM MEAS-inspired measurement-box / background / overlap controls.
 ///
 /// Mirrors the SEPARATION keyword and a simplified BGREJECT / OVERLAP contract
@@ -92,6 +127,9 @@ struct MeasurementBoxSettings {
     /// DEFPIX mask (row-major, 1 = ok, ``trusted_width`` wide): a rejected
     /// pixel under the peak rejects the reflection, as a masked one does.
     std::shared_ptr<const std::vector<std::uint8_t>> defpix_mask{};
+    /// Aperture correction: intensities are divided by the fraction of the
+    /// spot's flux the peak box encloses at that position (unset: none).
+    std::optional<ApertureMap> aperture{};
 };
 
 /// Extra fields filled by :class:`MeasIntegrator`.
@@ -187,6 +225,13 @@ public:
     );
     /// Extent so far, or ``std::nullopt`` if too few strong spots.
     [[nodiscard]] std::optional<SpotExtent> result() const;
+    /// Bin the spots by distance from this axis line (before :meth:`add`), for :meth:`aperture`.
+    void set_axis(const RotationAxisLine& axis, int width, int height);
+    /// Fraction of the flux a ±``half_box`` box encloses, by distance from
+    /// the rotation axis; the total is the average spot summed to
+    /// ``window_half − 3`` px (the ring beyond is its background).
+    /// ``std::nullopt`` if too few strong spots or no axis was set.
+    [[nodiscard]] std::optional<ApertureMap> aperture(int half_box) const;
 
 private:
     struct Acc {
@@ -200,6 +245,10 @@ private:
     double threshold_frac_;
     std::size_t min_spots_;
     Acc all_;
+    std::vector<Acc> bins_;  ///< By distance from the rotation axis.
+    std::optional<RotationAxisLine> axis_;
+    double max_distance_{1.0};
+    [[nodiscard]] double enclosed_fraction(const Acc& acc, int half_box) const;
 };
 
 /// Random-access measurement boxes (MEAS science contract without the

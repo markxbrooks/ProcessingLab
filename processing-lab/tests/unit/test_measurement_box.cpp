@@ -7,6 +7,7 @@
 #include "test_util.hpp"
 
 #include <cmath>
+#include <iostream>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -194,6 +195,56 @@ int main() {
         }
         const std::vector<std::pair<double, double>> few(centres.begin(), centres.begin() + 5);
         CHECK(!mosflm::diffraction::estimate_spot_extent(img, few, 12).has_value());
+    }
+
+    // Aperture correction: spots with tails along the rotation direction
+    // that lengthen with distance from the axis (76c1b). The enclosed
+    // fraction of a ±4 px box falls with that distance; bins without spots
+    // take the nearest measured bin.
+    {
+        using mosflm::diffraction::RotationAxisLine;
+        using mosflm::diffraction::SpotExtentEstimator;
+        mosflm::image::DiffractionImage img;
+        img.metadata.width = 600;
+        img.metadata.height = 420;
+        img.pixels.assign(600u * 420u, 2);
+        const RotationAxisLine axis{300.0, 200.0, true};  // axis along the fast direction, row 200
+        std::vector<std::pair<double, double>> centres;
+        for (const int dist : {10, 60, 125, 180}) {  // bins 0, 1, 3, 4 of 6 (36.7 px each)
+            const double tail = 1.0 + dist / 30.0;  // tail decay length (px) along the rows
+            for (int k = 0; k < 24; ++k) {
+                const int col = 30 + 22 * k;
+                const int row = 200 + (k % 2 == 0 ? dist : -dist);
+                centres.emplace_back(col, row);
+                for (int dr = -12; dr <= 12; ++dr) {
+                    for (int dc = -12; dc <= 12; ++dc) {
+                        const double core = 3000.0 * std::exp(-0.5 * (dc * dc + dr * dr));
+                        const double t = dc == 0 ? 150.0 * std::exp(-std::abs(dr) / tail) : 0.0;
+                        img.pixels[static_cast<std::size_t>(row + dr) * 600u + static_cast<std::size_t>(col + dc)] +=
+                            static_cast<std::int32_t>(core + t);
+                    }
+                }
+            }
+        }
+        SpotExtentEstimator est;
+        est.set_axis(axis, 600, 420);
+        est.add(img, centres);
+        const auto ap = est.aperture(4);
+        CHECK(ap.has_value());
+        if (ap) {
+            CHECK_EQ(static_cast<int>(ap->fraction.size()), 6);
+            CHECK(ap->fraction[0] > ap->fraction[1] && ap->fraction[1] > ap->fraction[3] &&
+                  ap->fraction[3] > ap->fraction[4]);
+            CHECK(ap->fraction[0] < 1.0 && ap->fraction[4] > 0.3);
+            // Empty bins take the nearest measured one (not the overall mean).
+            CHECK_CLOSE(ap->fraction[2], ap->fraction[1], 1e-12);
+            CHECK_CLOSE(ap->fraction[5], ap->fraction[4], 1e-12);
+            // Interpolated between bin centres, constant beyond the outer ones.
+            CHECK_CLOSE(ap->at(300.0, 200.0), ap->fraction[0], 1e-12);
+            const double mid = ap->at(300.0, 200.0 + 1.0 * ap->max_distance / 6.0);
+            CHECK(mid <= ap->fraction[0] && mid >= ap->fraction[1]);
+            CHECK_CLOSE(axis.distance(10.0, 150.0), 50.0, 1e-12);
+        }
     }
 
     return mosflm_test::finish("measurement_box");

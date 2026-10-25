@@ -387,6 +387,12 @@ ExperimentModel resolve_experiment(const ExperimentInputs& in) {
     }
     if (in.tilt_twist_mrad) {
         m.tilt_twist_mrad = {*in.tilt_twist_mrad, in.xparm_source};
+    } else if (in.xparm) {
+        // XDS's beam direction relative to the detector: a detector tilt in
+        // ProcessingLab's frame (beam along +z).
+        if (const auto g = read_xparm(*in.xparm); g.has_tilt_twist) {
+            m.tilt_twist_mrad = {{g.tilt_mrad, g.twist_mrad}, in.xparm_source};
+        }
     }
     if (in.previous) {
         const auto& p = *in.previous;

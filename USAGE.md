@@ -374,7 +374,8 @@ GO
 | Keyword | Meaning |
 | ------- | ------- |
 | `SEPARATION x [y]` | Measurement-box size (mm). |
-| `PEAKHALF n` | Peak half-width (pixels); clamped to half `SEPARATION`. |
+| `PEAKHALF n` | Peak half-width (pixels); clamped to half `SEPARATION`. Without it the box is sized from the strong spots at the start of PROCESS. |
+| `APERTURE ON\|OFF` | Aperture correction (default ON): intensities are divided by the fraction of a spot's flux the measured peak box holds, measured on strong spots by distance from the rotation axis (spot tails along the rotation direction lengthen with it). The log's `APERTURE CORRECTION` line gives the fractions; 1.0 for compact spots (CCP4 insulin), about 0.5–0.7 on 76c1b. Not applied with `PEAKHALF`. |
 | `MINFRAC` | Drop reflections with `FRACTIONCALC` below this (default 0.5). |
 | `PARTIALSCALE ON\|OFF` | Scale `I`/`σ` by `1/FRACTIONCALC` (default ON). |
 | `POLARIZATION ρ` | LP polarisation fraction (default 0.98). |

@@ -192,6 +192,10 @@ struct ControlState {
     /// Peak half-width (px) measured from the strong spots at the start of
     /// PROCESS (MOSFLM/XDS-style); used when PEAKHALF is not set. 0 = none.
     int spot_peak_half_px{0};
+    /// Fraction of the spot flux that box encloses, by distance from the
+    /// rotation axis, measured with it (aperture correction; ``APERTURE OFF``).
+    std::optional<diffraction::ApertureMap> aperture;
+    bool aperture_correction{true};
 
     /// DEFPIX, run once per PROCESS GO: untrusted regions, excluded
     /// resolution, shaded / defective / hot pixels (CONTROL ``DEFPIX``,

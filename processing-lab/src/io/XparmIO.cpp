@@ -254,6 +254,14 @@ bool try_parse_xds_classic(
             g.beam_fast_px = g.orgx_px + p.dot(dx) / g.qx_mm;
             g.beam_slow_px = g.orgy_px + p.dot(dy) / g.qy_mm;
             g.has_direct_beam = true;
+            // The detector normal in the frame of xds_to_lab_frame (rows −x,
+            // y = z × x, z) gives TILT / TWIST: n = (−TWIST, −TILT, 1000)/1000
+            // (checked on 76c1b, where refining them from zero converged on
+            // the same values).
+            const Eigen::Vector3d nl = xds_to_lab_frame(g.beam_dir, g.rot_axis) * n;
+            g.tilt_mrad = -1000.0 * nl.y() / nl.z();
+            g.twist_mrad = -1000.0 * nl.x() / nl.z();
+            g.has_tilt_twist = std::fabs(g.tilt_mrad) > 1e-3 || std::fabs(g.twist_mrad) > 1e-3;
         }
     }
 
@@ -557,6 +565,12 @@ void apply_xparm(
     }
     if (const auto b = xparm_beam_mm(g)) {
         line << "BEAM " << b->first << ' ' << b->second;
+        emit();
+    }
+    if (g.has_tilt_twist) {
+        line << "TILT " << g.tilt_mrad;
+        emit();
+        line << "TWIST " << g.twist_mrad;
         emit();
     }
     for (const auto& l : xparm_orientation_lines(g)) {

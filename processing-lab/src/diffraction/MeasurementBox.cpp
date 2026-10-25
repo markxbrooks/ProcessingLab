@@ -357,6 +357,7 @@ SpotExtentEstimator::SpotExtentEstimator(
     const auto cells = static_cast<std::size_t>((2 * R_ + 1) * (2 * R_ + 1));
     all_.avg.assign(cells, 0.0);
     all_.cnt.assign(cells, 0.0);
+    bins_.assign(6, all_);
 }
 
 void SpotExtentEstimator::add(
@@ -517,6 +518,11 @@ void SpotExtentEstimator::add(
         };
         if (snr >= min_snr_) {
             deposit(all_);
+            if (axis_) {
+                const int nb = static_cast<int>(bins_.size());
+                const int b = std::clamp(static_cast<int>(axis_->distance(pc, pr) / max_distance_ * nb), 0, nb - 1);
+                deposit(bins_[static_cast<std::size_t>(b)]);
+            }
         }
     }
 }
@@ -590,6 +596,79 @@ std::optional<SpotExtent> SpotExtentEstimator::extent_of(
 
 std::optional<SpotExtent> SpotExtentEstimator::result() const {
     return extent_of(all_, min_spots_);
+}
+
+double SpotExtentEstimator::enclosed_fraction(const Acc& acc, int half_box) const {
+    const int R = R_;
+    const int side = 2 * R + 1;
+    const int outer = std::max(R - 3, half_box);
+    double box = 0.0;
+    double total = 0.0;
+    for (int dr = -outer; dr <= outer; ++dr) {
+        for (int dc = -outer; dc <= outer; ++dc) {
+            const auto k = static_cast<std::size_t>((dr + R) * side + (dc + R));
+            const double v = acc.cnt[k] > 0.0 ? acc.avg[k] / acc.cnt[k] : 0.0;
+            total += v;
+            if (std::abs(dc) <= half_box && std::abs(dr) <= half_box) {
+                box += v;
+            }
+        }
+    }
+    return total > 0.0 ? std::clamp(box / total, 0.3, 1.0) : 1.0;
+}
+
+void SpotExtentEstimator::set_axis(const RotationAxisLine& axis, int width, int height) {
+    axis_ = axis;
+    // The farthest a pixel can be from the axis line.
+    max_distance_ = std::max({axis.distance(0, 0), axis.distance(width, height), 1.0});
+}
+
+std::optional<ApertureMap> SpotExtentEstimator::aperture(int half_box) const {
+    if (all_.n < min_spots_ || !axis_) {
+        return std::nullopt;
+    }
+    ApertureMap map;
+    map.axis = *axis_;
+    map.max_distance = max_distance_;
+    map.half_box = half_box;
+    map.overall = enclosed_fraction(all_, half_box);
+    std::vector<int> measured;
+    for (std::size_t i = 0; i < bins_.size(); ++i) {
+        map.n_spots.push_back(bins_[i].n);
+        map.fraction.push_back(bins_[i].n >= min_spots_ ? enclosed_fraction(bins_[i], half_box) : -1.0);
+        if (map.fraction.back() >= 0.0) {
+            measured.push_back(static_cast<int>(i));
+        }
+    }
+    // Bins without enough strong spots take the nearest measured bin's value
+    // (the trend with distance continues; the overall mean would jump back).
+    for (std::size_t i = 0; i < map.fraction.size(); ++i) {
+        if (map.fraction[i] >= 0.0) {
+            continue;
+        }
+        if (measured.empty()) {
+            map.fraction[i] = map.overall;
+            continue;
+        }
+        const int near = *std::min_element(measured.begin(), measured.end(), [&](int a, int b) {
+            return std::abs(a - static_cast<int>(i)) < std::abs(b - static_cast<int>(i));
+        });
+        map.fraction[i] = map.fraction[static_cast<std::size_t>(near)];
+    }
+    return map;
+}
+
+double ApertureMap::at(double col, double row) const {
+    const int nb = static_cast<int>(fraction.size());
+    if (nb == 0) {
+        return overall;
+    }
+    // Bin centres at (i + ½)·max/nb; held constant beyond the outer centres.
+    const double f = std::clamp(axis.distance(col, row) / max_distance * nb - 0.5, 0.0, nb - 1.0);
+    const int i = std::min(static_cast<int>(f), std::max(nb - 2, 0));
+    const double t = nb > 1 ? f - i : 0.0;
+    return nb > 1 ? (1.0 - t) * fraction[static_cast<std::size_t>(i)] + t * fraction[static_cast<std::size_t>(i + 1)]
+                  : fraction[0];
 }
 
 std::optional<SpotExtent> estimate_spot_extent(

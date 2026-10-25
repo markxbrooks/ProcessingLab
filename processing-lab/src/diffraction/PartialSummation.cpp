@@ -232,74 +232,146 @@ std::optional<RockingWidthFit> fit_rocking_width(
     }
     auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
     // Σ over reflections of the unexplained fraction of Σ w I² after fitting
-    // the model profile with a free amplitude and a free per-slice baseline.
-    // The baseline absorbs a background bias in the per-frame intensities:
-    // without it a slight positive bias in the outer slices reads as heavier
-    // tails, the fit widens, the wider model adds more outer slices, and the
-    // width runs away (76c1b: 0.96° → 2.0°, XDS 1.04°).
-    auto cost = [&](double width) {
+    // the model profile, with a free amplitude and a free per-slice baseline,
+    // to the slices within ``window`` of the centre (in ε = ζ·Δφ, degrees).
+    //
+    // - The baseline absorbs a background bias in the per-frame intensities,
+    //   which otherwise reads as heavier tails.
+    // - The window: real rocking curves have heavier tails than a Gaussian
+    //   (76c1b: 17% of the peak at |ε| 2–3°). Fitted to every slice the
+    //   prediction reaches, the Gaussian came out ~0.25° wider than the width
+    //   predicted with, at every re-estimate, so MOSAIC crept up without
+    //   end (0.5° → 1.5° in 100 frames). Fitting within ±1.5 FWHM of the
+    //   width being fitted has a fixed point, found by iterating below.
+    // - Robust (Tukey biweight, two reweightings): a slice holding a
+    //   neighbour's spot is down-weighted instead of read as tail.
+    auto cost = [&](double width, double window) {
         double c = 0.0;
+        std::vector<double> p;
+        std::vector<double> u;
+        std::vector<double> e;
+        std::vector<const Slice*> in;
         for (const auto& r : refl) {
-            const double sig = r.sigma_now * width / width_now_deg;
-            double sw = 0.0, sp = 0.0, si = 0.0, spp = 0.0, sip = 0.0, sii = 0.0;
+            // ζ from the width the slices were predicted with: σφ = W / (2.355 ζ).
+            const double zeta = width_now_deg / (2.355 * r.sigma_now);
+            in.clear();
             for (const auto& s : r.s) {
-                const double pj = cdf(s.hi / sig) - cdf(s.lo / sig);
-                sw += s.w;
-                sp += s.w * pj;
-                si += s.w * s.i;
-                spp += s.w * pj * pj;
-                sip += s.w * s.i * pj;
-                sii += s.w * s.i * s.i;
+                if (std::fabs(0.5 * (s.lo + s.hi)) * zeta <= window) {
+                    in.push_back(&s);
+                }
             }
-            if (!(sii > 0.0) || !(sw > 0.0)) {
+            const std::size_t n = in.size();
+            if (n < 3) {
                 continue;
             }
-            // Weighted least squares for I ≈ t·p + b; residual Σ w (I − t p − b)².
-            const double cpp = spp - sp * sp / sw;
-            const double cip = sip - si * sp / sw;
-            const double cii = sii - si * si / sw;
-            const double resid = cpp > 0.0 ? cii - cip * cip / cpp : cii;
-            c += std::max(resid, 0.0) / sii;
+            const double sig = r.sigma_now * width / width_now_deg;
+            p.resize(n);
+            for (std::size_t j = 0; j < n; ++j) {
+                p[j] = cdf(in[j]->hi / sig) - cdf(in[j]->lo / sig);
+            }
+            u.assign(n, 1.0);
+            double t = 0.0;
+            double b = 0.0;
+            for (int pass = 0; pass < 3; ++pass) {
+                // Weighted least squares for I ≈ t·p + b with weights w·u.
+                double sw = 0.0, sp = 0.0, si = 0.0, spp = 0.0, sip = 0.0;
+                for (std::size_t j = 0; j < n; ++j) {
+                    const double w = in[j]->w * u[j];
+                    sw += w;
+                    sp += w * p[j];
+                    si += w * in[j]->i;
+                    spp += w * p[j] * p[j];
+                    sip += w * in[j]->i * p[j];
+                }
+                if (!(sw > 0.0)) {
+                    break;
+                }
+                const double cpp = spp - sp * sp / sw;
+                t = cpp > 0.0 ? (sip - si * sp / sw) / cpp : 0.0;
+                b = (si - t * sp) / sw;
+                if (pass == 2 || n < 5) {
+                    break;
+                }
+                // Tukey biweight on residuals standardised by σ and by their
+                // robust spread (MAD).
+                e.resize(n);
+                for (std::size_t j = 0; j < n; ++j) {
+                    e[j] = std::fabs(in[j]->i - t * p[j] - b) * std::sqrt(in[j]->w);
+                }
+                std::vector<double> sorted = e;
+                std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(n / 2), sorted.end());
+                const double scale = std::max(1.4826 * sorted[n / 2], 1.0);
+                for (std::size_t j = 0; j < n; ++j) {
+                    const double z = e[j] / (4.685 * scale);
+                    u[j] = z < 1.0 ? (1.0 - z * z) * (1.0 - z * z) : 0.0;
+                }
+            }
+            double num = 0.0;
+            double den = 0.0;
+            for (std::size_t j = 0; j < n; ++j) {
+                const double w = in[j]->w * u[j];
+                const double res = in[j]->i - t * p[j] - b;
+                num += w * res * res;
+                den += w * in[j]->i * in[j]->i;
+            }
+            if (den > 0.0) {
+                c += num / den;
+            }
         }
         return c;
     };
-    // Coarse log grid, then golden-section between the best's neighbours.
-    constexpr int kGrid = 48;
-    const double x0 = std::log(0.02);
-    const double x1 = std::log(3.0);
-    const double dx = (x1 - x0) / (kGrid - 1);
-    int best = 0;
-    double best_c = std::numeric_limits<double>::infinity();
-    for (int k = 0; k < kGrid; ++k) {
-        const double c = cost(std::exp(x0 + dx * k));
-        if (c < best_c) {
-            best_c = c;
-            best = k;
+    // Best width for one window: coarse log grid, then golden section
+    // between the best's neighbours.
+    const auto minimise = [&](double window) {
+        constexpr int kGrid = 48;
+        const double x0 = std::log(0.02);
+        const double x1 = std::log(3.0);
+        const double dx = (x1 - x0) / (kGrid - 1);
+        int best = 0;
+        double best_c = std::numeric_limits<double>::infinity();
+        for (int k = 0; k < kGrid; ++k) {
+            const double c = cost(std::exp(x0 + dx * k), window);
+            if (c < best_c) {
+                best_c = c;
+                best = k;
+            }
+        }
+        double a = x0 + dx * std::max(best - 1, 0);
+        double b = x0 + dx * std::min(best + 1, kGrid - 1);
+        const double gr = 0.5 * (std::sqrt(5.0) - 1.0);
+        double c1 = b - gr * (b - a);
+        double c2 = a + gr * (b - a);
+        double f1 = cost(std::exp(c1), window);
+        double f2 = cost(std::exp(c2), window);
+        for (int it = 0; it < 40 && b - a > 1e-4; ++it) {
+            if (f1 < f2) {
+                b = c2;
+                c2 = c1;
+                f2 = f1;
+                c1 = b - gr * (b - a);
+                f1 = cost(std::exp(c1), window);
+            } else {
+                a = c1;
+                c1 = c2;
+                f1 = f2;
+                c2 = a + gr * (b - a);
+                f2 = cost(std::exp(c2), window);
+            }
+        }
+        return std::exp(0.5 * (a + b));
+    };
+    // Fixed point of "fit within ±1.5 FWHM of the width", from width_now.
+    constexpr double kWindowFwhm = 1.5;
+    double width = width_now_deg;
+    for (int it = 0; it < 12; ++it) {
+        const double next = minimise(kWindowFwhm * width);
+        const bool done = std::fabs(next - width) < 0.005 * width;
+        width = next;
+        if (done) {
+            break;
         }
     }
-    double a = x0 + dx * std::max(best - 1, 0);
-    double b = x0 + dx * std::min(best + 1, kGrid - 1);
-    const double gr = 0.5 * (std::sqrt(5.0) - 1.0);
-    double c1 = b - gr * (b - a);
-    double c2 = a + gr * (b - a);
-    double f1 = cost(std::exp(c1));
-    double f2 = cost(std::exp(c2));
-    for (int it = 0; it < 40 && b - a > 1e-4; ++it) {
-        if (f1 < f2) {
-            b = c2;
-            c2 = c1;
-            f2 = f1;
-            c1 = b - gr * (b - a);
-            f1 = cost(std::exp(c1));
-        } else {
-            a = c1;
-            c1 = c2;
-            f1 = f2;
-            c2 = a + gr * (b - a);
-            f2 = cost(std::exp(c2));
-        }
-    }
-    return RockingWidthFit{std::exp(0.5 * (a + b)), refl.size()};
+    return RockingWidthFit{width, refl.size()};
 }
 
 }  // namespace mosflm::diffraction

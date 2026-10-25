@@ -87,6 +87,13 @@ int main() {
     CHECK(c.has_direct_beam);
     CHECK_MSG(std::fabs(c.beam_fast_px - 1244.1) < 0.5, "direct beam fast");
     CHECK_MSG(std::fabs(c.beam_slow_px - 1209.8) < 0.5, "direct beam slow");
+    // The beam is ~10 mrad off the detector normal: in ProcessingLab's frame
+    // (beam +z) that is a detector TILT / TWIST. Refining them from zero on
+    // 76c1b converged on 4.4 / −10.0 mrad; with these, predictions agree
+    // with XDS INTEGRATE.HKL to 0.3 px.
+    CHECK(c.has_tilt_twist);
+    CHECK_MSG(std::fabs(c.tilt_mrad - 3.87) < 0.05, "classic tilt " + std::to_string(c.tilt_mrad));
+    CHECK_MSG(std::fabs(c.twist_mrad + 9.83) < 0.05, "classic twist " + std::to_string(c.twist_mrad));
 
     mosflm::control::ControlSession s2;
     apply_xparm(s2, c);
@@ -98,6 +105,8 @@ int main() {
         std::fabs(s2.state().beam_y_mm - c.beam_slow_px * 0.172) < 1e-6,
         "classic BEAM y = direct beam slow"
     );
+    CHECK_CLOSE(s2.state().tilt_mrad, c.tilt_mrad, 1e-6);
+    CHECK_CLOSE(s2.state().twist_mrad, c.twist_mrad, 1e-6);
     CHECK(!s2.state().spt_invertx);
     // XDS INTEGRATE style: orientation only, periodic refinement kept on.
     CHECK(s2.state().refine_orientation && !s2.state().refine_cell);

@@ -638,6 +638,19 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             row.ydet_obs = static_cast<float>(po->yobs_px);
         }
 
+        // Aperture correction: the peak box holds only this fraction of a
+        // spot with long tails (measured on strong spots at this distance
+        // from the rotation axis).
+        if (request.measurement.aperture) {
+            const double f = request.measurement.aperture->at(xdet, ydet);
+            if (f > 0.0 && f < 1.0) {
+                row.intensity = static_cast<float>(row.intensity / f);
+                row.sigma = static_cast<float>(row.sigma / f);
+                row.ipr = static_cast<float>(row.ipr / f);
+                row.sigipr = static_cast<float>(row.sigipr / f);
+            }
+        }
+
         if (request.integration.rotation_lp) {
             // Rotation-method LP: s1 from UB·h rotated to the reflecting φ.
             const double lam = request.detector.wavelength_A;
