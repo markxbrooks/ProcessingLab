@@ -231,25 +231,35 @@ std::optional<RockingWidthFit> fit_rocking_width(
         return std::nullopt;
     }
     auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
-    // Σ over reflections of the unexplained fraction of Σ w I² after a free
-    // amplitude fit of the model profile.
+    // Σ over reflections of the unexplained fraction of Σ w I² after fitting
+    // the model profile with a free amplitude and a free per-slice baseline.
+    // The baseline absorbs a background bias in the per-frame intensities:
+    // without it a slight positive bias in the outer slices reads as heavier
+    // tails, the fit widens, the wider model adds more outer slices, and the
+    // width runs away (76c1b: 0.96° → 2.0°, XDS 1.04°).
     auto cost = [&](double width) {
         double c = 0.0;
         for (const auto& r : refl) {
             const double sig = r.sigma_now * width / width_now_deg;
-            double sip = 0.0, spp = 0.0, sii = 0.0;
+            double sw = 0.0, sp = 0.0, si = 0.0, spp = 0.0, sip = 0.0, sii = 0.0;
             for (const auto& s : r.s) {
                 const double pj = cdf(s.hi / sig) - cdf(s.lo / sig);
-                sip += s.w * s.i * pj;
+                sw += s.w;
+                sp += s.w * pj;
+                si += s.w * s.i;
                 spp += s.w * pj * pj;
+                sip += s.w * s.i * pj;
                 sii += s.w * s.i * s.i;
             }
-            if (!(sii > 0.0)) {
+            if (!(sii > 0.0) || !(sw > 0.0)) {
                 continue;
             }
-            const double t = spp > 0.0 ? sip / spp : 0.0;
-            // Σ w (I − t p)² = Σ w I² − t Σ w I p (at the optimal t).
-            c += (sii - t * sip) / sii;
+            // Weighted least squares for I ≈ t·p + b; residual Σ w (I − t p − b)².
+            const double cpp = spp - sp * sp / sw;
+            const double cip = sip - si * sp / sw;
+            const double cii = sii - si * si / sw;
+            const double resid = cpp > 0.0 ? cii - cip * cip / cpp : cii;
+            c += std::max(resid, 0.0) / sii;
         }
         return c;
     };

@@ -54,7 +54,9 @@ struct RockingWidthFit {
 /// (``6σφ`` at ``width_now_deg``). The amplitude is free per reflection, so
 /// a rocking curve truncated by the measurement reach is modelled rather
 /// than mistaken for a narrow one, and background noise in the outer slices
-/// enters symmetrically instead of inflating a second moment. Minimises the
+/// enters symmetrically instead of inflating a second moment. A free
+/// per-slice baseline absorbs a background bias, which would otherwise read
+/// as heavier tails and widen the fit at every re-estimate. Minimises the
 /// summed, per-reflection normalised misfit over ``W`` in [0.02°, 3°].
 ///
 /// :param slices: Per-frame rocking-mode rows (``rot`` = φ calc, ``phi_obs``

@@ -1952,6 +1952,13 @@ DetectorGeometry process_limit_detector(
     return det;
 }
 
+/// Peak half-width (px) before the spots are measured: half SEPARATION, at most 5.
+int sizing_fallback_half_px(const ControlState& state, const image::ImageMetadata& meta) {
+    const double px = std::max(state.has_pixel ? state.pixel_x_mm : meta.pixel_size_x_mm, 1e-6);
+    const double half_sep_px = 0.5 * std::min(state.separation_x_mm, state.separation_y_mm) / px;
+    return std::min(5, std::max(1, static_cast<int>(std::floor(half_sep_px + 1e-9))));
+}
+
 /// Explicit DMIN/RESOLUTION, otherwise the farthest inset detector corner.
 double resolved_dmin_A(
     const ControlState& state,
@@ -2844,7 +2851,15 @@ ControlGoResult ControlSession::go(
             std::vector<std::pair<double, double>> centres;
             std::vector<std::pair<double, double>> others;
             for (const auto& r : probe[k].result.mosflm_reflections) {
-                (r.fractioncalc >= 0.5f ? centres : others).emplace_back(r.xdet, r.ydet);
+                // The slice on the frame holding the calculated φ is the
+                // spot's centre. Not FRACTIONCALC ≥ 0.5: with a rocking curve
+                // wider than two frames (MOSAIC 1.04° on 0.2° frames) no
+                // slice reaches it, no spot was measured, and the box fell
+                // back to half SEPARATION (3×3 px on a Pilatus).
+                const bool centre = std::isfinite(r.phi_obs) && std::isfinite(r.rot)
+                                        ? std::fabs(static_cast<double>(r.phi_obs) - r.rot) <= 0.5 * osc_log
+                                        : r.fractioncalc >= 0.5f;
+                (centre ? centres : others).emplace_back(r.xdet, r.ydet);
             }
             const int frame = first + static_cast<int>(k);
             if (frame == first) {
@@ -2856,7 +2871,13 @@ ControlGoResult ControlSession::go(
                 );
             }
         }
-        if (const auto ext = est.result()) {
+        const auto ext = est.result();
+        if (!ext) {
+            std::cerr << " *** WARNING **   MEASUREMENT BOX: no strong spots measured on frames " << first << "–"
+                      << probe_last << "; peak box ±" << sizing_fallback_half_px(state_, image0.metadata)
+                      << " px from SEPARATION (set PEAKHALF if spots are larger)\n";
+        }
+        if (ext) {
             const int half = std::clamp(ext->half_box, 2, 14);
             state_.spot_peak_half_px = half;
             std::cout << std::fixed << std::setprecision(2)
