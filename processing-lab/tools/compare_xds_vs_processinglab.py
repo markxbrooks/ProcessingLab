@@ -335,8 +335,9 @@ def run_processinglab(
         "--output-dir",
         str(workdir.resolve()),
     ]
-    if exclude_ice:
-        cmd.append("--exclude-ice")
+    # The ice rings are in xds_inp (EXCLUDE_RESOLUTION_RANGE=), which
+    # ProcessingLab reads; --exclude-ice would add them a second time.
+    del exclude_ice
     env = {"OMP_NUM_THREADS": str(nproc)}
     # ProcessingLab writes its own process.log inside workdir; keep a
     # wrapper log next to it for the launcher argv / timing.
