@@ -37,8 +37,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Optional, Sequence
 
-ROOT = Path(__file__).resolve().parents[2]
+# ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path.home() / ".local"
 DEFAULT_PL = ROOT / "bin" / "ProcessingLab"
+if not DEFAULT_PL.exists():
+    ROOT = Path(__file__).resolve().parents[2]
+    DEFAULT_PL = ROOT / "bin" / "ProcessingLab"
 
 
 def _first_existing(*candidates: Path | str | None) -> Path:
@@ -197,6 +201,7 @@ def write_xds_inp(
     seed: Optional[Path],
     include_resolution: tuple[float, float],
     exclude_ice: bool,
+    cell: Optional[Sequence[float]] = None,
 ) -> None:
     """Write an ``XDS.INP`` for the comparison run.
 
@@ -210,11 +215,15 @@ def write_xds_inp(
     :param seed: optional existing XDS.INP to copy geometry from
     :param include_resolution: ``INCLUDE_RESOLUTION_RANGE``
     :param exclude_ice: add standard ice-ring excludes
+    :param cell: ``UNIT_CELL_CONSTANTS`` to use (XDS needs them with a
+        space group), or ``None`` to keep the seed's
     """
     lines: list[str] = [
         f"! compare_xds_vs_processinglab.py  {datetime.now(timezone.utc).isoformat()}",
         f"JOB= {job}",
     ]
+    if seed is not None and cell is not None:
+        lines.append("UNIT_CELL_CONSTANTS=" + " ".join(f"{v:.3f}" for v in cell))
     if seed is not None:
         for raw in seed.read_text().splitlines():
             s = raw.strip()
@@ -233,6 +242,8 @@ def write_xds_inp(
                 "INCLUDE_RESOLUTION_RANGE",
                 "STRONG_PIXEL",  # obsolete in recent XDS
             }:
+                continue
+            if key == "UNIT_CELL_CONSTANTS" and cell is not None:
                 continue
             if key.startswith("EXCLUDE_RESOLUTION_RANGE") and exclude_ice:
                 continue
@@ -263,7 +274,7 @@ def write_xds_inp(
                 "SEPMIN=6.0",
                 "CLUSTER_RADIUS=2",
                 "VALUE_RANGE_FOR_TRUSTED_DETECTOR_PIXELS=7000 30000",
-                "UNIT_CELL_CONSTANTS=0 0 0 0 0 0",
+                "UNIT_CELL_CONSTANTS=" + (" ".join(f"{v:.3f}" for v in cell) if cell else "0 0 0 0 0 0"),
                 "REFINE(IDXREF)=BEAM AXIS ORIENTATION CELL",
                 "REFINE(INTEGRATE)=POSITION BEAM ORIENTATION CELL",
                 "REFINE(CORRECT)=DISTANCE BEAM AXIS ORIENTATION CELL",
@@ -332,6 +343,59 @@ def run_processinglab(
     return _run(cmd, cwd=workdir.parent, log=workdir.parent / "pl_launch.log", env=env)
 
 
+def bravais_for_space_group(number: int) -> str:
+    """XDS Bravais-lattice symbol (``mP``, ``oC``, ``hR``, …) of space group *number*."""
+    system = ("a" if number <= 2 else "m" if number <= 15 else "o" if number <= 74 else
+              "t" if number <= 142 else "h" if number <= 194 else "c")
+    try:
+        import gemmi
+
+        centring = gemmi.find_spacegroup_by_number(number).hm[0]
+    except Exception:  # noqa: BLE001 - gemmi missing: primitive
+        centring = "P"
+    if system == "a":
+        return "aP"
+    if centring == "R":
+        return "hR"
+    return system + centring
+
+
+def idxref_cell(idxref_lp: Path, number: int) -> Optional[list[float]]:
+    """The best-fitting cell IDXREF found for space group *number*'s lattice,
+    constrained to its crystal system, or ``None``.
+
+    :param idxref_lp: ``IDXREF.LP`` of a P1 indexing run.
+    :param number: Space group number.
+    """
+    lattice = bravais_for_space_group(number)
+    best: Optional[tuple[float, list[float]]] = None
+    for line in idxref_lp.read_text(errors="replace").splitlines():
+        parts = line.replace("*", " ").split()
+        if len(parts) == 9 and parts[1] == lattice:
+            try:
+                quality = float(parts[2])
+                cell = [float(v) for v in parts[3:9]]
+            except ValueError:
+                continue
+            if best is None or quality < best[0]:
+                best = (quality, cell)
+    if best is None:
+        return None
+    a, b, c, al, be, ga = best[1]
+    if lattice[0] == "m":
+        return [a, b, c, 90.0, be, 90.0]
+    if lattice[0] == "o":
+        return [a, b, c, 90.0, 90.0, 90.0]
+    if lattice[0] == "t":
+        return [(a + b) / 2, (a + b) / 2, c, 90.0, 90.0, 90.0]
+    if lattice[0] == "h":
+        return [(a + b) / 2, (a + b) / 2, c, 90.0, 90.0, 120.0]
+    if lattice[0] == "c":
+        m = (a + b + c) / 3
+        return [m, m, m, 90.0, 90.0, 90.0]
+    return [a, b, c, al, be, ga]
+
+
 def run_xds(
     *,
     exe: Path,
@@ -357,7 +421,7 @@ def run_xds(
     xds_dir.mkdir(parents=True, exist_ok=True)
     times: dict[str, float] = {}
 
-    def write(job: str, sg: int) -> Path:
+    def write(job: str, sg: int, cell: Optional[Sequence[float]] = None) -> Path:
         inp = xds_dir / "XDS.INP"
         write_xds_inp(
             inp,
@@ -370,8 +434,21 @@ def run_xds(
             seed=seed,
             include_resolution=include_resolution,
             exclude_ice=exclude_ice,
+            cell=cell,
         )
         return inp
+
+    def integrate_pass(sg: int) -> None:
+        # A space group needs its cell: take IDXREF's best cell for that
+        # lattice and re-run IDXREF with both (fast: it reuses SPOT.XDS).
+        if sg:
+            cell = idxref_cell(xds_dir / "IDXREF.LP", sg)
+            if cell is None:
+                raise subprocess.CalledProcessError(1, f"no {bravais_for_space_group(sg)} cell in IDXREF.LP")
+            write("IDXREF DEFPIX INTEGRATE CORRECT", sg, cell)
+        else:
+            write("DEFPIX INTEGRATE CORRECT", sg)
+        times["integrate_correct"] = _run([str(exe)], cwd=xds_dir, log=xds_dir / "xds_integrate.log")
 
     if two_pass:
         write("XYCORR INIT COLSPOT IDXREF", space_group_index)
@@ -379,10 +456,7 @@ def run_xds(
             [str(exe)], cwd=xds_dir, log=xds_dir / "xds_idxref.log"
         )
         # Keep refined XPARM; switch JOB for integrate.
-        write("DEFPIX INTEGRATE CORRECT", space_group_correct)
-        times["integrate_correct"] = _run(
-            [str(exe)], cwd=xds_dir, log=xds_dir / "xds_integrate.log"
-        )
+        integrate_pass(space_group_correct)
     else:
         write(
             "XYCORR INIT COLSPOT IDXREF DEFPIX INTEGRATE CORRECT",
@@ -394,10 +468,7 @@ def run_xds(
             times["idxref"] = _run(
                 [str(exe)], cwd=xds_dir, log=xds_dir / "xds_idxref.log"
             )
-            write("DEFPIX INTEGRATE CORRECT", space_group_correct)
-            times["integrate_correct"] = _run(
-                [str(exe)], cwd=xds_dir, log=xds_dir / "xds_integrate.log"
-            )
+            integrate_pass(space_group_correct)
         else:
             times["all"] = _run(
                 [str(exe)], cwd=xds_dir, log=xds_dir / "xds_all.log"
@@ -989,7 +1060,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"error: XDS failed: {exc}", file=sys.stderr)
                 return 1
 
-        if args.aimless and not args.skip_pl:
+        if args.aimless:
             mtz = pl_dir / "process.mtz"
             if not mtz.is_file():
                 print(f"warning: no MTZ at {mtz}; skipping Aimless", file=sys.stderr)
@@ -1011,7 +1082,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     print(f"warning: Aimless failed: {exc}", file=sys.stderr)
 
         ascii_hkl = xds_dir / "XDS_ASCII.HKL"
-        if args.aimless and not args.skip_xds and ascii_hkl.is_file() and args.aimless_exe.is_file():
+        if args.aimless and ascii_hkl.is_file() and args.aimless_exe.is_file():
             print("== Pointless + Aimless (XDS) ==")
             try:
                 summary["aimless_xds_wall_s"] = run_aimless(
