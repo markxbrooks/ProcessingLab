@@ -514,7 +514,10 @@ def run_aimless(
         [str(pointless), "XDSIN" if xds_ascii else "HKLIN", str(hkl), "HKLOUT", str(pointless_mtz)],
         cwd=out_dir,
         log=out_dir / "pointless.log",
-        stdin_text=f"SPACEGROUP {space_group}\n" if space_group else "",
+        # CHOOSE picks the group from Pointless's own symmetry analysis and
+        # reindexes to it, so it works from lower symmetry (a P1 MTZ) too;
+        # SPACEGROUP is refused unless the input is in the same crystal system.
+        stdin_text=f"CHOOSE SPACEGROUP {space_group}\n" if space_group else "",
     )
     aimless_kw = "GO\n"
     if resolution:

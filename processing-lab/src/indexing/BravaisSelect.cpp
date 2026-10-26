@@ -318,9 +318,12 @@ int find_lastgood_rank(const std::vector<BravaisCandidate>& candidates) {
         );
         float testgood = 0.0f;
         if (merit_i <= 100) {
-            // Second solution is often another aP with MERIT 0 — ignore.
-            if (i == 2 && merit_i == 0 &&
-                candidates[idx].system_id == "aP") {
+            // A later aP is the same symmetry-free lattice in another reduced
+            // form (e.g. γ 79° vs its supplement 101°): it says nothing about
+            // where the good solutions end, whatever its raw penalty. MOSFLM
+            // skips it at MERIT 0; on 76c1b it scored 104, and the "jump" from
+            // it to mP (389, metric departure 0.8 %) made it LASTGOOD.
+            if (candidates[idx].system_id == "aP") {
                 testgood = maxgood;
             } else {
                 const std::size_t idx_next =

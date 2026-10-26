@@ -105,7 +105,10 @@ public:
 /// Dectris Eiger NeXus / ``*_master.h5`` and DLS-style ``.nxs`` reader.
 ///
 /// Requires HDF5 at build time (``MOSFLM_HAS_HDF5``). Registers vendored
-/// bitshuffle + LZ4 filters. ``frame`` is 1-based (MOSFLM PROCESS convention).
+/// bitshuffle + LZ4 filters, and decodes one-frame bitshuffle-LZ4 chunks
+/// itself. Reads DECTRIS ``data_NNNNNN`` blocks or one NXmx ``data`` dataset,
+/// applies ``pixel_mask`` (−1) and honours ``units`` (adapted in part from
+/// durin; see durin/LICENSE). ``frame`` is 1-based (MOSFLM PROCESS convention).
 class Hdf5ImageReader {
 public:
     [[nodiscard]] DiffractionImage read(

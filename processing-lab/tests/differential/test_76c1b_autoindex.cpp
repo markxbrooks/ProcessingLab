@@ -60,8 +60,12 @@ int main() {
     session.parse_line("DIRECTORY " + dir.string());
     session.parse_line("TEMPLATE 76c1b_0002212_1_####.cbf");
     session.parse_line("DMAX 320");
-    // Prefer Xia2/XDS index-stage geometry when present (beam is critical for
-    // Δ-vector / DPS on large cells). Opt out with MOSFLM_76C1B_XDS_BEAM=0.
+    // Prefer XDS's geometry (beam is critical for Δ-vector / DPS on large
+    // cells): the direct beam where XDS's refined beam direction meets the
+    // detector, pixel (1244.71, 1209.76) of GXPARM.XDS. (XDS INTEGRATE's
+    // first-batch detector origin, 210.24 206.64 mm, is not the beam: it goes
+    // with a 9.6 mrad tilted beam this model lacks.) Opt out with
+    // MOSFLM_76C1B_XDS_BEAM=0 to use the image header's beam.
     const bool use_xds_beam = [] {
         if (const char* e = std::getenv("MOSFLM_76C1B_XDS_BEAM")) {
             return e[0] != '0';
@@ -69,12 +73,12 @@ int main() {
         return true;
     }();
     if (use_xds_beam) {
-        session.parse_line("DISTANCE 384.979");
+        session.parse_line("DISTANCE 385.19");
         session.parse_line("WAVELENGTH 0.979490");
         session.parse_line("PIXEL 0.172 0.172");
-        session.parse_line("BEAM 210.2356 206.6442");
+        session.parse_line("BEAM 214.0902 208.0787");
     }
-    // Per-frame 3D COLSPOT (no xy merge) — matches XDS_BRIDGE indexing advice.
+    // MULTIFRAME COLSPOT: each reflection's frames merge into one 3D spot.
     session.parse_line(
         "FINDSPOTS THRESHOLD 5 MAXSPOTS 1500 FIND 1 FILE " +
         (work / "76c1b.spt").string() + " MULTIFRAME RANGE 1 50"

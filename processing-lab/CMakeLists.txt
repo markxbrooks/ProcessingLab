@@ -263,6 +263,7 @@ set(MOSFLM_GEOMETRY_SOURCES
     src/diffraction/ProfileFitter.cpp
     src/diffraction/LpCorrection.cpp
     src/diffraction/DataQualityStats.cpp
+    src/diffraction/SystematicAbsences.cpp
     src/refinement/PostRefinement.cpp
     src/refinement/PositionalRefinement.cpp
     src/control/ControlSession.cpp
@@ -718,6 +719,25 @@ if(BUILD_TESTING)
     add_executable(test_image_io tests/unit/test_image_io.cpp)
     target_link_libraries(test_image_io PRIVATE processinglab_geometry)
     add_test(NAME image_io COMMAND test_image_io)
+
+    if(MOSFLM_HAS_HDF5)
+        # Writes synthetic NeXus files, so it needs HDF5 and bitshuffle directly.
+        add_executable(test_hdf5_reader tests/unit/test_hdf5_reader.cpp)
+        target_include_directories(test_hdf5_reader PRIVATE
+            ${HDF5_INCLUDE_DIRS}
+            ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle
+        )
+        target_link_libraries(test_hdf5_reader PRIVATE processinglab_geometry
+            ${HDF5_LIBRARIES})
+        if(TARGET hdf5::hdf5_hl)
+            target_link_libraries(test_hdf5_reader PRIVATE hdf5::hdf5_hl)
+        elseif(HDF5_HL_LIBRARIES)
+            target_link_libraries(test_hdf5_reader PRIVATE ${HDF5_HL_LIBRARIES})
+        else()
+            target_link_libraries(test_hdf5_reader PRIVATE hdf5_hl)
+        endif()
+        add_test(NAME hdf5_reader COMMAND test_hdf5_reader)
+    endif()
 
     add_executable(test_imosflm_socket tests/unit/test_imosflm_socket.cpp)
     target_link_libraries(test_imosflm_socket PRIVATE processinglab_geometry)
@@ -1286,6 +1306,16 @@ if(BUILD_TESTING)
         add_test(
             NAME supercell_reduce
             COMMAND test_supercell_reduce
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        add_executable(test_multiframe_spot_finder
+            tests/unit/test_multiframe_spot_finder.cpp
+        )
+        target_link_libraries(test_multiframe_spot_finder PRIVATE processinglab_indexing)
+        add_test(
+            NAME multiframe_spot_finder
+            COMMAND test_multiframe_spot_finder
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
 

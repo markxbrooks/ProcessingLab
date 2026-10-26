@@ -2,6 +2,7 @@
  * DiffractionLab-style SpotFinder + SpotList::write_spt round-trip.
  */
 
+#include "mosflm/indexing/MultiFrameSpotFinder.hpp"
 #include "mosflm/indexing/SpotFinder.hpp"
 #include "mosflm/indexing/SpotList.hpp"
 #include "test_util.hpp"
@@ -109,6 +110,39 @@ int main() {
         const SpotList local_found = SpotFinder{}.find(halo, judged);
         CHECK(!near(local_found, 0.8, 5.0));
         CHECK(near(local_found, 1.8, 5.0));
+    }
+
+    // MULTIFRAME: one reflection on frames 2–4 (rocking 1000, 3000, 1000)
+    // merges into one 3D spot at the weighted φ; another on frame 5 alone.
+    {
+        const auto frame = [](int f) {
+            DiffractionImage img = make_synthetic_frame();
+            img.pixels.assign(64U * 64U, 10);
+            img.metadata.oscillation_start_deg = 0.2 * (f - 1);
+            img.metadata.oscillation_range_deg = 0.2;
+            const int rock[] = {0, 0, 1000, 3000, 1000, 0, 0};
+            if (rock[f] > 0) {
+                img.pixels[20U * 64U + static_cast<std::size_t>(20 + (f == 4 ? 1 : 0))] = rock[f];
+            }
+            if (f == 5) {
+                img.pixels[44U * 64U + 40U] = 2000;
+            }
+            return img;
+        };
+        mosflm::indexing::MultiFrameSpotSettings mfs;
+        mfs.per_frame = settings;
+        mfs.merge_xy_mm = 0.25;  // 2.5 px
+        const SpotList merged = mosflm::indexing::find_spots_multiframe(1, 6, frame, mfs);
+        CHECK_EQ(merged.spots.size(), std::size_t{2});
+        if (merged.spots.size() == 2) {
+            const auto& r = merged.spots[0];  // brightest first
+            CHECK_CLOSE(r.intensity, 3000.0, 1.0);  // the brightest frame's peak
+            CHECK_CLOSE(r.phi_end_deg, 0.5, 0.02);  // (0.3·1 + 0.5·3 + 0.7·1) / 5
+            CHECK_CLOSE(r.x_mm, 2.02, 0.005);       // (20·4000 + 21·1000) / 5000 px on frame 4's shift
+            CHECK_CLOSE(merged.spots[1].phi_end_deg, 0.9, 1e-6);
+        }
+        mfs.merge_xy_mm = 0.0;  // per-frame spots kept
+        CHECK_EQ(mosflm::indexing::find_spots_multiframe(1, 6, frame, mfs).spots.size(), std::size_t{4});
     }
 
     // Oracle .spt round-trip write preserves spot count.

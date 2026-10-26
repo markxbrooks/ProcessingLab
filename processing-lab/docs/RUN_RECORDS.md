@@ -103,11 +103,11 @@ the same keys:
 
 | Key | Meaning |
 | --- | ------- |
-| `name` | `find_spots` (`RunStep.FIND_SPOTS`, CONTROL `FINDSPOTS`), `indexing` (`RunStep.INDEXING`, `AUTOINDEX`), `defpix` (`RunStep.DEFPIX`, the start of `PROCESS`), `integrate` (`RunStep.INTEGRATE`, `PROCESS`) or `strategy` (`RunStep.STRATEGY`, `STRATEGY`) |
+| `name` | `find_spots` (`RunStep.FIND_SPOTS`, CONTROL `FINDSPOTS`), `indexing` (`RunStep.INDEXING`, `AUTOINDEX`), `defpix` (`RunStep.DEFPIX`, the start of `PROCESS`), `integrate` (`RunStep.INTEGRATE`, `PROCESS`), `correct` (`RunStep.CORRECT`, `CORRECT`) or `strategy` (`RunStep.STRATEGY`, `STRATEGY`) |
 | `status` | `pending` → `running` → `completed` or `failed`; `skipped` if the run finished without reaching it |
 | `started_at`, `finished_at`, `duration_s` | Stage timing, or `null` |
 | `message` | Human-readable summary, or `null`. Facts are in `results`; don't parse this. |
-| `results` | Machine-readable summary, or `null`. `find_spots`: `{spots}`. `indexing`: `{lattice, indexed_fraction, rmsd_hkl}`. `strategy`: `{completeness_pct, rotation_deg, start_deg, images}` (`completeness_pct: null` and `max_completeness_pct` when the target can't be reached). `defpix`: `{trusted_pixels, ignored_pixels}` (the counts by kind are in `integration.defpix`). `integrate`: `{integrated_reflections}`. |
+| `results` | Machine-readable summary, or `null`. `find_spots`: `{spots}`. `indexing`: `{lattice, indexed_fraction, rmsd_hkl}`. `correct`: axial Fourier scores and any suggested/applied space group. `strategy`: `{completeness_pct, rotation_deg, start_deg, images}` (`completeness_pct: null` and `max_completeness_pct` when the target can't be reached). `defpix`: `{trusted_pixels, ignored_pixels}` (the counts by kind are in `integration.defpix`). `integrate`: `{integrated_reflections}`. |
 | `error` | The stage's error, or `null` |
 
 A completed stage means it ran. It doesn't mean its result is right: a

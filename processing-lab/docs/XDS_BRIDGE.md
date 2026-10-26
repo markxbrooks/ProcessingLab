@@ -67,9 +67,20 @@ GO
 
 `MULTIFRAME` without `RANGE` defaults to a 50-frame wedge from `FIND`.
 For CBF/SMV templates, each frame path is resolved separately (HDF5 masters
-still use the frame index). Default `MERGE_XY 0` keeps per-frame 3D spots
-and **φ-stratifies** `MAXSPOTS` so the brightest frames do not starve later φ.
-Set `MERGE_XY` / `MERGE_PHI` only when clustering persistent peaks.
+still use the frame index). Each reflection's frames are merged into one 3D
+spot (DIALS-style). A spot continues a reflection's track from the previous
+frame when it lies within 2.5 pixels of the track's last spot (and within
+four times that of its running centroid), and only when the match is
+one-to-one: a spot with two candidate tracks, or a track with two candidate
+spots, starts a new track instead. A frame without a match ends a track. The
+track becomes one spot at its intensity-weighted position and φ, with its
+brightest frame's intensity and σ (so `AUTOINDEX THRESHOLD` keeps its
+per-frame meaning). `MAXSPOTS` then counts reflections, brightest first;
+`MAXSPOTS` ≤ 0 means no limit.
+On 76c1b this halved the indexing φ residual (0.85° → 0.46°) against
+per-frame spots at each frame's centre φ. `MERGE_XY mm` sets the distance;
+`MERGE_XY 0` keeps per-frame spots, φ-stratified so the brightest frames do
+not starve later φ. `MERGE_PHI` is no longer used.
 DiffractionLab `build_findspots_commands(..., for_indexing=True)` emits the
 same MULTIFRAME pattern with `MAXSPOTS 1500`.
 

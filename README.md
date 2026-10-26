@@ -358,9 +358,12 @@ DEFPIX finds the beamstop arm (146,355 pixels; XDS: 146,012), and a stuck
 pixel at the counter's maximum and a flickering one, both next to the beam.
 
 Images also say which pixels are not measurements: module gaps and the
-detector's bad-pixel mask (Pilatus −1 and −2, Eiger 2ⁿ−1) are masked, and
-pixels at or above the overload (CBF `Count_cutoff`, HDF5
-`saturation_value`) are overloaded.
+detector's bad-pixel mask (Pilatus −1 and −2; HDF5 `pixel_mask`, and Eiger
+2ⁿ−1 when it lies above `saturation_value`) are masked, and pixels at or
+above the overload (CBF `Count_cutoff`, HDF5 `saturation_value`) are
+overloaded. Where 2ⁿ−1 is also the saturation value and the file has no
+usable `pixel_mask`, gaps read as overloads, and DEFPIX masks the pixels that
+stay overloaded on every sampled frame.
 
 ## Processing records
 

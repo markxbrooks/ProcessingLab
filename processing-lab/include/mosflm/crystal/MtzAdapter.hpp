@@ -82,7 +82,8 @@ public:
         const CrystalMetadata& crystal,
         const std::vector<MosflmReflection>& reflections,
         double wavelength_A = 0.0,
-        const std::vector<BatchScan>& scans = {}
+        const std::vector<BatchScan>& scans = {},
+        bool reindex_to_asu = false
     );
 
     /// Read H K L I SIGI from an MTZ (works for simple or full MOSFLM files).

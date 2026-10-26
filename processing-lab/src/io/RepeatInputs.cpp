@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <system_error>
 
@@ -17,6 +18,15 @@ namespace {
 std::string num(double v, int prec) {
     std::ostringstream s;
     s << std::fixed << std::setprecision(prec) << v;
+    return s.str();
+}
+
+/// ``v`` to full double precision, so a repeat run reads back the same
+/// number: the beam centre feeds IDXREF, whose search over a flat optimum
+/// (one frame, few spots) ends elsewhere for a 1e-6 mm difference.
+std::string exact(double v) {
+    std::ostringstream s;
+    s << std::setprecision(std::numeric_limits<double>::max_digits10) << v;
     return s.str();
 }
 
@@ -120,8 +130,8 @@ std::string xds_inp_text(const ExperimentModel& m) {
         o << "NX=" << m.detector_nx << " NY=" << m.detector_ny << " QX=" << num(m.pixel_mm.value.first, 6)
           << " QY=" << num(m.pixel_mm.value.second, 6) << '\n';
         if (m.beam_mm.set()) {
-            o << "ORGX=" << num(m.beam_mm.value.first / m.pixel_mm.value.first, 2)
-              << " ORGY=" << num(m.beam_mm.value.second / m.pixel_mm.value.second, 2) << '\n';
+            o << "ORGX=" << exact(m.beam_mm.value.first / m.pixel_mm.value.first)
+              << " ORGY=" << exact(m.beam_mm.value.second / m.pixel_mm.value.second) << '\n';
         }
     }
     o << "ROTATION_AXIS=" << xds_rotation_axis(m) << '\n'
@@ -205,7 +215,7 @@ std::string xinfo_text(const ExperimentModel& m) {
       << "IMAGE " << m.image.value.filename().string() << '\n'
       << "START_END " << f0 << ' ' << f1 << '\n';
     if (m.beam_mm.set() && overridden(m.beam_mm.source)) {
-        o << "BEAM " << num(m.beam_mm.value.first, 3) << ' ' << num(m.beam_mm.value.second, 3) << '\n';
+        o << "BEAM " << exact(m.beam_mm.value.first) << ' ' << exact(m.beam_mm.value.second) << '\n';
     }
     if (m.distance_mm.set() && overridden(m.distance_mm.source)) {
         o << "DISTANCE " << num(m.distance_mm.value, 3) << '\n';

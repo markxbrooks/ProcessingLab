@@ -725,12 +725,13 @@ void ProcessPipeline::write_mtz(
     const std::filesystem::path& path,
     const crystal::CrystalMetadata& crystal,
     const ProcessResult& result,
-    double wavelength_A
+    double wavelength_A,
+    bool reindex_to_asu
 ) {
     if (!result.mosflm_reflections.empty()) {
         crystal::MtzAdapter::write_mosflm(
             path, crystal, result.mosflm_reflections, wavelength_A,
-            result.batch_scans
+            result.batch_scans, reindex_to_asu
         );
     } else {
         crystal::MtzAdapter::write_simple(

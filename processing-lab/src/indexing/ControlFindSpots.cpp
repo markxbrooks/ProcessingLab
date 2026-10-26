@@ -259,7 +259,12 @@ void run_findspots(
     if (state.findspots.multiframe && last > first) {
         MultiFrameSpotSettings mfs;
         mfs.per_frame = settings;
-        mfs.merge_xy_mm = state.findspots.merge_xy_mm;
+        // A reflection barely moves between frames: 2.5 pixels joins its
+        // frames without joining neighbours (spots stay ≥ MINDIST apart).
+        constexpr double kMergePx = 2.5;
+        mfs.merge_xy_mm = state.findspots.merge_xy_mm < 0.0
+                              ? kMergePx * (state.has_pixel ? state.pixel_x_mm : probe.metadata.pixel_size_x_mm)
+                              : state.findspots.merge_xy_mm;
         mfs.merge_phi_tol_deg = state.findspots.merge_phi_tol_deg;
         mfs.min_frames = state.findspots.min_frames;
         mfs.max_spots = state.findspots.max_spots;

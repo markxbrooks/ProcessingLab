@@ -32,7 +32,10 @@ struct IdxrefGeometry {
 };
 
 struct IdxrefSettings {
-    int max_iterations{10};
+    /// Passes over all parameters (a safety cap: the search stops once every
+    /// step has shrunk to ``1/min_step_fraction`` of its ``fd_*`` start).
+    int max_iterations{400};
+    double min_step_fraction{64.0};
     double fd_misset_deg{0.05};
     double fd_cell_len{0.05};      ///< Å
     double fd_cell_ang{0.05};      ///< degrees

@@ -312,6 +312,10 @@ void report_runs(
             std::cout << "  STRATEGY: " << r.message << '\n';
             continue;
         }
+        if (r.ran_correct) {
+            std::cout << "  CORRECT: " << r.message << '\n';
+            continue;
+        }
         if (!r.ran_process) {
             continue;
         }
@@ -711,7 +715,8 @@ int run_command(int argc, char** argv) {
         if (m.oscillation_deg.set() && m.oscillation_deg.source != mosflm::io::MetadataSource::ImageHeader) {
             control << " ANGLE " << m.oscillation_deg.value;
         }
-        control << "\nGO\nEXIT\n";
+        // CORRECT screens the integrated sweep and writes correct.mtz.
+        control << "\nGO\nCORRECT\nGO\nEXIT\n";
 
         std::ostringstream header;
         header << "\n Run mode:        " << mosflm::io::run_mode_name(run_mode) << "  (parameters from "

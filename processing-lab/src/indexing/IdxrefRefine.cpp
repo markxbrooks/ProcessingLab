@@ -370,11 +370,17 @@ IdxrefResult refine_idxref(
     ResidualStats best_st = st0;
     Params best_p = p;
 
-    auto try_step = [&](double* value, double delta, double lo, double hi) {
+    // Pattern search: each parameter has its own step, doubled while moves
+    // keep improving the cost and halved when they don't, until every step
+    // is a small fraction of its start. (Ten passes of ±1–2 fixed steps
+    // could move the beam at most 0.4 mm and a cell edge 1 Å, so the search
+    // stopped short and pushed the rest into other parameters: on 76c1b b
+    // stayed 1 % short of XDS's with the beam pinned 0.40 mm off.)
+    auto try_step = [&](double* value, double& delta, double lo, double hi) {
         const double v0 = *value;
         double best_v = v0;
         double best_cost = best_st.cost;
-        bool improved = false;
+        double best_s = 0.0;
         for (double s : {-1.0, 1.0, -2.0, 2.0}) {
             *value = v0 + s * delta;
             if (*value < lo || *value > hi) {
@@ -394,65 +400,61 @@ IdxrefResult refine_idxref(
                 best_cost = st.cost;
                 best_v = *value;
                 best_st = st;
-                improved = true;
+                best_s = s;
             }
         }
         *value = best_v;
-        return improved;
+        if (best_s == 0.0) {
+            delta *= 0.5;
+        } else if (std::fabs(best_s) > 1.5) {
+            delta *= 2.0;
+        }
+        return best_s != 0.0;
     };
 
     const double d0 = geometry.distance_mm;
     const double d_lo = d0 * (1.0 - settings.distance_frac_bound);
     const double d_hi = d0 * (1.0 + settings.distance_frac_bound);
 
+    struct Axis {
+        double* value;
+        double step;
+        double start;
+        double lo;
+        double hi;
+    };
+    std::vector<Axis> axes{
+        {&p.dphix, settings.fd_misset_deg, settings.fd_misset_deg, -2.0, 2.0},
+        {&p.dphiy, settings.fd_misset_deg, settings.fd_misset_deg, -2.0, 2.0},
+        {&p.dphiz, settings.fd_misset_deg, settings.fd_misset_deg, -2.0, 2.0},
+        {&p.cell.a, settings.fd_cell_len, settings.fd_cell_len, 0.85 * cell0.a, 1.15 * cell0.a},
+        {&p.cell.b, settings.fd_cell_len, settings.fd_cell_len, 0.85 * cell0.b, 1.15 * cell0.b},
+        {&p.cell.c, settings.fd_cell_len, settings.fd_cell_len, 0.85 * cell0.c, 1.15 * cell0.c},
+        {&p.cell.alpha_deg, settings.fd_cell_ang, settings.fd_cell_ang, cell0.alpha_deg - 8.0,
+         cell0.alpha_deg + 8.0},
+        {&p.cell.beta_deg, settings.fd_cell_ang, settings.fd_cell_ang, cell0.beta_deg - 8.0,
+         cell0.beta_deg + 8.0},
+        {&p.cell.gamma_deg, settings.fd_cell_ang, settings.fd_cell_ang, cell0.gamma_deg - 8.0,
+         cell0.gamma_deg + 8.0},
+        {&p.beam_x, settings.fd_beam_mm, settings.fd_beam_mm, geometry.beam_x_mm - 2.0,
+         geometry.beam_x_mm + 2.0},
+        {&p.beam_y, settings.fd_beam_mm, settings.fd_beam_mm, geometry.beam_y_mm - 2.0,
+         geometry.beam_y_mm + 2.0},
+    };
+    if (refine_f) {
+        axes.push_back({&p.distance_mm, settings.fd_distance_mm, settings.fd_distance_mm, d_lo, d_hi});
+    }
+
     for (int iter = 0; iter < settings.max_iterations; ++iter) {
-        bool improved = false;
-        improved |= try_step(
-            &p.dphix, settings.fd_misset_deg, -2.0, 2.0
-        );
-        improved |= try_step(
-            &p.dphiy, settings.fd_misset_deg, -2.0, 2.0
-        );
-        improved |= try_step(
-            &p.dphiz, settings.fd_misset_deg, -2.0, 2.0
-        );
-        improved |= try_step(
-            &p.cell.a, settings.fd_cell_len, 0.85 * cell0.a, 1.15 * cell0.a
-        );
-        improved |= try_step(
-            &p.cell.b, settings.fd_cell_len, 0.85 * cell0.b, 1.15 * cell0.b
-        );
-        improved |= try_step(
-            &p.cell.c, settings.fd_cell_len, 0.85 * cell0.c, 1.15 * cell0.c
-        );
-        improved |= try_step(
-            &p.cell.alpha_deg, settings.fd_cell_ang,
-            cell0.alpha_deg - 8.0, cell0.alpha_deg + 8.0
-        );
-        improved |= try_step(
-            &p.cell.beta_deg, settings.fd_cell_ang, cell0.beta_deg - 8.0,
-            cell0.beta_deg + 8.0
-        );
-        improved |= try_step(
-            &p.cell.gamma_deg, settings.fd_cell_ang,
-            cell0.gamma_deg - 8.0, cell0.gamma_deg + 8.0
-        );
-        improved |= try_step(
-            &p.beam_x, settings.fd_beam_mm, geometry.beam_x_mm - 2.0,
-            geometry.beam_x_mm + 2.0
-        );
-        improved |= try_step(
-            &p.beam_y, settings.fd_beam_mm, geometry.beam_y_mm - 2.0,
-            geometry.beam_y_mm + 2.0
-        );
-        if (refine_f) {
-            // Smaller relative steps to limit beam–distance coupling.
-            improved |= try_step(
-                &p.distance_mm, settings.fd_distance_mm, d_lo, d_hi
-            );
+        bool still_moving = false;
+        for (auto& ax : axes) {
+            (void)try_step(ax.value, ax.step, ax.lo, ax.hi);
+            // Never coarser than the bounds allow.
+            ax.step = std::min(ax.step, 0.25 * (ax.hi - ax.lo));
+            still_moving |= ax.step * settings.min_step_fraction > ax.start;
         }
         best_p = p;
-        if (!improved) {
+        if (!still_moving) {
             break;
         }
     }

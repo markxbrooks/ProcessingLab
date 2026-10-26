@@ -2,6 +2,7 @@
 
 #include "mosflm/crystal/SpaceGroupInfo.hpp"
 #include "mosflm/diffraction/DataQualityStats.hpp"
+#include "mosflm/diffraction/SystematicAbsences.hpp"
 #include "mosflm/diffraction/Defpix.hpp"
 #include "mosflm/diffraction/DetectorInit.hpp"
 #include "mosflm/diffraction/PartialSummation.hpp"
@@ -976,6 +977,11 @@ void ControlSession::apply_keyword(
     }
     if (key == "STRATEGY") {
         parse_strategy_args(args);
+        return;
+    }
+    if (key == "CORRECT") {
+        state_.correct_pending = true;
+        state_.correct_done = false;
         return;
     }
     if (key == "MULTILATTICE" || key == "LATTICE") {
@@ -2669,7 +2675,87 @@ ControlGoResult ControlSession::go(
         return out;
     }
 
-    if (state_.strategy_pending) {
+    if (state_.correct_pending && !state_.process_pending) {
+        state_.correct_pending = false;
+        const auto& rows = state_.last_integrated_reflections;
+        if (rows.empty())
+            throw std::runtime_error("CONTROL CORRECT: run PROCESS first");
+        const bool tetragonal =
+            std::fabs(state_.cell.a - state_.cell.b) /
+                    std::max(state_.cell.a, state_.cell.b) < 0.02 &&
+            std::fabs(state_.cell.alpha_deg - 90.0) < 2.0 &&
+            std::fabs(state_.cell.beta_deg - 90.0) < 2.0 &&
+            std::fabs(state_.cell.gamma_deg - 90.0) < 2.0;
+        out.correction = diffraction::analyze_systematic_absences(rows, tetragonal);
+        out.ran_correct = true;
+        state_.correct_done = true;
+        state_.done_run = true;
+        const auto& a = out.correction->axes;
+        std::cout << "\n SYSTEMATIC ABSENCE ANALYSIS (axial zones)\n"
+                  << " Zone  Period  PeakHeight   SD  Probability  Nobs\n";
+        for (const auto& z : a) {
+            std::cout << "   " << z.axis << "      " << z.period << "       "
+                      << z.peak_height << "   " << z.sd << "   "
+                      << z.probability << "       " << z.observations << "\n";
+        }
+        std::cout << " Laue twofold checks: a CC=" << out.correction->twofold_a_cc
+                  << " (" << out.correction->twofold_a_pairs << " pairs), b CC="
+                  << out.correction->twofold_b_cc << " ("
+                  << out.correction->twofold_b_pairs << " pairs)\n";
+        if (out.correction->suggested_space_group != 0) {
+            out.correction->applied_space_group = out.correction->suggested_space_group;
+            state_.symmetry_number = out.correction->applied_space_group;
+            state_.has_symmetry = true;
+            state_.correct_applied = true;
+            out.message = "axial absences suggest P 41 21 2 / P 43 21 2; "
+                          "applying conventional enantiomorph P 41 21 2";
+            std::cout << " Suggested space group: P 41 21 2 / P 43 21 2"
+                      << " (applying P 41 21 2; enantiomorph unresolved)\n";
+        } else {
+            out.message = "axial absences analyzed; no supported tetragonal screw-axis suggestion";
+        }
+        crystal::CrystalMetadata corrected_crystal;
+        corrected_crystal.cell = gemmi::UnitCell(
+            state_.cell.a, state_.cell.b, state_.cell.c,
+            state_.cell.alpha_deg, state_.cell.beta_deg, state_.cell.gamma_deg);
+        corrected_crystal.spacegroup = crystal::SpaceGroupInfo::find_by_number(
+            state_.symmetry_number);
+        out.correction_mtz = output_path(state_, state_.correct_mtz);
+        crystal::MtzAdapter::write_mosflm(
+            out.correction_mtz, corrected_crystal,
+            state_.last_integrated_reflections, state_.wavelength_A,
+            state_.last_integrated_scans, state_.correct_applied);
+        out.message += "; wrote " + out.correction_mtz.string();
+        std::cout << " Wrote corrected MTZ: " << out.correction_mtz << '\n';
+
+        // correct.log: the PROCESS resolution table, merged and screened for
+        // absences in the corrected space group.
+        if (corrected_crystal.spacegroup != nullptr) {
+            out.correction_log = output_path(state_, state_.correct_log);
+            std::ofstream log(out.correction_log);
+            if (!log)
+                throw std::runtime_error(
+                    "CONTROL CORRECT: cannot write " + out.correction_log.string());
+            log << " CORRECT: data quality in space group "
+                << corrected_crystal.spacegroup->hm << " ("
+                << corrected_crystal.spacegroup->number << ")"
+                << (state_.correct_applied ? ", applied from axial absences"
+                                           : ", unchanged from PROCESS")
+                << "\n Input: " << state_.last_integrated_reflections.size()
+                << " integrated observations; output MTZ: "
+                << out.correction_mtz.string() << '\n';
+            const auto quality = diffraction::compute_data_quality(
+                corrected_crystal, state_.last_integrated_reflections,
+                state_.dmax_A, state_.dmin_A);
+            diffraction::write_data_quality_table(log, quality);
+            out.message += "; wrote " + out.correction_log.string();
+            std::cout << " Wrote corrected statistics: " << out.correction_log << '\n';
+        }
+        return out;
+    }
+
+    if (state_.strategy_pending && !state_.process_pending &&
+        !state_.correct_pending) {
         // MOSFLM STRATEGY: the rotation recording the target completeness.
         state_.strategy_pending = false;
         run_strategy(image_override, out);
@@ -2680,7 +2766,7 @@ ControlGoResult ControlSession::go(
     }
 
     if (!state_.process_pending) {
-        out.message = "GO with no pending PROCESS/FINDSPOTS/AUTOINDEX/STRATEGY";
+        out.message = "GO with no pending PROCESS/FINDSPOTS/AUTOINDEX/CORRECT/STRATEGY";
         return out;
     }
 
@@ -3210,6 +3296,8 @@ ControlGoResult ControlSession::go(
     }
     out.crystal = crystal;
     out.process = std::move(acc);
+    state_.last_integrated_reflections = out.process.mosflm_reflections;
+    state_.last_integrated_scans = out.process.batch_scans;
 
     std::string msg = "PROCESS complete frames " + std::to_string(first) +
                       "-" + std::to_string(last) + " (" +

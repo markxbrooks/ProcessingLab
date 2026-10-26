@@ -56,7 +56,8 @@ void MtzAdapter::write_mosflm(
     const CrystalMetadata& crystal,
     const std::vector<MosflmReflection>& reflections,
     double wavelength_A,
-    const std::vector<BatchScan>& scans
+    const std::vector<BatchScan>& scans,
+    bool reindex_to_asu
 ) {
     gemmi::Mtz mtz;
     mtz.title = "processing-lab PROCESS";
@@ -122,10 +123,15 @@ void MtzAdapter::write_mosflm(
     std::vector<float> data;
     data.reserve(reflections.size() * 18);
     for (const auto& r : reflections) {
-        data.push_back(static_cast<float>(r.h));
-        data.push_back(static_cast<float>(r.k));
-        data.push_back(static_cast<float>(r.l));
-        data.push_back(static_cast<float>(r.misym));
+        int h = r.h, k = r.k, l = r.l, misym = r.misym;
+        // CORRECT may promote the post-integration symmetry. Preserve the
+        // observations, but write indices and M/ISYM in the final MTZ ASU.
+        if (reindex_to_asu)
+            MtzAdapter::reduce_to_asu(crystal.spacegroup, h, k, l, misym);
+        data.push_back(static_cast<float>(h));
+        data.push_back(static_cast<float>(k));
+        data.push_back(static_cast<float>(l));
+        data.push_back(static_cast<float>(misym));
         data.push_back(static_cast<float>(r.batch));
         data.push_back(r.intensity);
         data.push_back(r.sigma);

@@ -268,7 +268,9 @@ int main() {
         check_outputs(work / "from_xds", "spots.spt", "run --from", /*autoindexed=*/false);
         const std::string log = slurp(work / "from_xds" / "process.log");
         CHECK(contains(log, "Image source:  " + image.string()));  // from input.json
-        CHECK(contains(log, "Cell:          78.42 78.42 78.42 90.00 90.00 90.00  [previous run]"));
+        // 78.42 Å before IDXREF's search could converge (its fixed steps
+        // capped each cell edge at ±1 Å); the .xinfo cell is 78.19.
+        CHECK(contains(log, "Cell:          78.32 78.32 78.32 90.00 90.00 90.00  [previous run]"));
         CHECK(contains(log, "Distance:      160.00 mm  [previous run]"));
         CHECK(contains(log, "Orientation:   refined matrix, no autoindexing  [previous run]"));
         const std::string pj = slurp(work / "from_xds" / "process.json");

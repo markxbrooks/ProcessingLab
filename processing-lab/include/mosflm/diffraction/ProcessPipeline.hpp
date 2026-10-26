@@ -121,7 +121,8 @@ public:
         const std::filesystem::path& path,
         const crystal::CrystalMetadata& crystal,
         const ProcessResult& result,
-        double wavelength_A = 0.0
+        double wavelength_A = 0.0,
+        bool reindex_to_asu = false
     );
 
     /// Geometry / orientation from

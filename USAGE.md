@@ -30,8 +30,8 @@ ProcessingLab run --image /data/sweep_0001.cbf --range 1:180 \
     --xds-inp /data/XDS.INP --output-dir results/lysozyme
 ```
 
-`run` finds spots, autoindexes and integrates each sweep without a CONTROL
-script. The image headers supply the experiment metadata; XDS.INP and
+`run` finds spots, autoindexes, integrates and runs `CORRECT` on each sweep
+without a CONTROL script. The image headers supply the experiment metadata; XDS.INP and
 `.xinfo` override or add to it.
 
 | Option | Role |
@@ -255,14 +255,16 @@ OpenMP workers: CONTROL `NPROC n` (aliases `THREADS` / `NTHREADS`), or the
 
 | Format | How to point at it |
 | ------ | ------------------ |
-| HDF5 / NeXus Eiger master (`*_master.h5`, `.nxs`) | `--image master.h5`. Frame numbers are indices in the master. Keep `data_*.h5` beside it. |
+| HDF5 / NeXus Eiger master (`*_master.h5`, `.nxs`) | `--image master.h5`. Frame numbers are indices in the master. Keep `data_*.h5` beside it. Reads DECTRIS `data_NNNNNN` blocks or a single NXmx `data` dataset (virtual datasets too), applies `pixel_mask`, and scales pixel size and distance by their `units`. Reader adapted in part from Diamond's durin ([durin/](durin/README.md)). |
 | miniCBF / CBF | `DIRECTORY` + `TEMPLATE` with `#` placeholders, e.g. `sweep_####.cbf`. |
 | SMV (ADSC) | Same `DIRECTORY` / `TEMPLATE` / `--image` pattern. Read as MOSFLM does: `XDET` runs along the file's slow axis (DIALS `XDET` is the fast axis). |
 
 For multi-frame CBF/SMV (`FINDSPOTS … MULTIFRAME`), each frame is read from
 the `--image` file's sibling with that frame number (same zero padding), else
 from `TEMPLATE`; it is an error if neither exists. HDF5 masters are fine as a
-single `--image`.
+single `--image`. A reflection seen on several frames becomes one spot at its
+intensity-weighted position and φ (`MERGE_XY 0` keeps one spot per frame;
+see `docs/XDS_BRIDGE.md`).
 
 Geometry not set in CONTROL is filled from the image header on first read
 (distance, wavelength, beam, pixel size).
@@ -383,6 +385,27 @@ shell. `process.json` has them under `strategy` (see
 XPARM 02-index/XPARM.XDS
 SYMMETRY P41212
 STRATEGY COMPLETENESS 99 FRAMES 1 1800
+GO
+```
+
+### Symmetry correction (`RunStep.CORRECT`)
+
+After `PROCESS` has integrated a sweep, `CORRECT` screens axial intensities
+for screw-axis periodicity and, for tetragonal data, checks the additional
+twofold operators against measured intensities. It recognizes the
+P 41 21 2 / P 43 21 2 axial signature, applies P 41 21 2 by convention, and
+writes a reindexed `correct.mtz`, leaving `process.mtz` as the integration
+output. `correct.log` repeats PROCESS's resolution-bin table (completeness,
+R-factors, CC(1/2)) with observations merged and absences removed in the
+corrected space group. The opposite enantiomorph cannot be distinguished
+from these data alone. Other crystal systems currently get axis scores but no
+automatic space-group promotion. The correction is a hypothesis for later
+validation; it does not repeat integration.
+
+```text
+PROCESS 1 TO 900
+GO
+CORRECT
 GO
 ```
 

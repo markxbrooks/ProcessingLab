@@ -15,6 +15,7 @@ namespace mosflm::io {
 ///   excluded resolution, shaded / defective / hot pixels); runs at the
 ///   start of each ``PROCESS`` unless ``DEFPIX OFF``.
 /// - ``INTEGRATE``: ``PROCESS`` (refine, predict, integrate → MTZ).
+/// - ``CORRECT``: symmetry analysis of the integrated observations.
 /// - ``STRATEGY``: ``STRATEGY`` (completeness estimate).
 ///
 /// Records name a step by :func:`run_step_id` (``"defpix"``); logs and
@@ -25,12 +26,14 @@ enum class RunStep {
     INDEXING,
     DEFPIX,
     INTEGRATE,
+    CORRECT,
     STRATEGY,
 };
 
 /// Every step, in run order.
-inline constexpr std::array<RunStep, 5> kRunSteps{
-    RunStep::FIND_SPOTS, RunStep::INDEXING, RunStep::DEFPIX, RunStep::INTEGRATE, RunStep::STRATEGY};
+inline constexpr std::array<RunStep, 6> kRunSteps{
+    RunStep::FIND_SPOTS, RunStep::INDEXING, RunStep::DEFPIX, RunStep::INTEGRATE,
+    RunStep::CORRECT, RunStep::STRATEGY};
 
 /// ``"RunStep.FIND_SPOTS"``, … for logs and messages.
 [[nodiscard]] inline const char* run_step_name(RunStep step) {
@@ -39,6 +42,7 @@ inline constexpr std::array<RunStep, 5> kRunSteps{
         case RunStep::INDEXING: return "RunStep.INDEXING";
         case RunStep::DEFPIX: return "RunStep.DEFPIX";
         case RunStep::INTEGRATE: return "RunStep.INTEGRATE";
+        case RunStep::CORRECT: return "RunStep.CORRECT";
         case RunStep::STRATEGY: break;
     }
     return "RunStep.STRATEGY";
@@ -53,6 +57,7 @@ inline constexpr std::array<RunStep, 5> kRunSteps{
         case RunStep::INDEXING: return "indexing";
         case RunStep::DEFPIX: return "defpix";
         case RunStep::INTEGRATE: return "integrate";
+        case RunStep::CORRECT: return "correct";
         case RunStep::STRATEGY: break;
     }
     return "strategy";
@@ -66,6 +71,7 @@ inline constexpr std::array<RunStep, 5> kRunSteps{
         case RunStep::INDEXING: return "AUTOINDEX";
         case RunStep::DEFPIX:
         case RunStep::INTEGRATE: return "PROCESS";
+        case RunStep::CORRECT: return "CORRECT";
         case RunStep::STRATEGY: break;
     }
     return "STRATEGY";

@@ -3,6 +3,7 @@
 #include "mosflm/diffraction/Defpix.hpp"
 #include "mosflm/diffraction/ProcessPipeline.hpp"
 #include "mosflm/diffraction/Strategy.hpp"
+#include "mosflm/diffraction/SystematicAbsences.hpp"
 #include "mosflm/geometry/UnitCell.hpp"
 #include "mosflm/image/DiffractionImage.hpp"
 #include "mosflm/io/RunStep.hpp"
@@ -53,8 +54,10 @@ struct FindSpotsControlSettings {
     int range_first{0};
     int range_last{0};
     bool multiframe{false};
-    /// ``≤ 0`` (default): keep per-frame spots for DPS; set ``MERGE_XY`` to cluster.
-    double merge_xy_mm{0.0};
+    /// Merge a reflection's per-frame spots within this distance (mm) into
+    /// one 3D spot (``MERGE_XY``); ``< 0`` (default) is 2.5 pixels, ``0``
+    /// keeps every per-frame spot at its frame's centre φ.
+    double merge_xy_mm{-1.0};
     double merge_phi_tol_deg{0.5};
     int min_frames{1};
     double phi_start_deg{0.0};
@@ -177,6 +180,11 @@ struct ControlState {
     std::filesystem::path image_path;  ///< ``IMAGE`` keyword if set
     /// Output MTZ path (``HKLOUT`` keyword or CLI override).
     std::filesystem::path hklout{"process.mtz"};
+    /// CORRECT output and the complete integrated rows retained for that step.
+    std::filesystem::path correct_mtz{"correct.mtz"};
+    std::filesystem::path correct_log{"correct.log"};
+    std::vector<crystal::MosflmReflection> last_integrated_reflections;
+    std::vector<crystal::BatchScan> last_integrated_scans;
     /// Optional GXPARM.XDS write path (``XPARMOUT``).
     std::filesystem::path xparm_out;
     bool has_xparm_out{false};
@@ -250,6 +258,10 @@ struct ControlState {
 
     bool strategy_pending{false};
     bool strategy_done{false};
+    /// Pending post-integration symmetry correction/diagnostics (CONTROL CORRECT).
+    bool correct_pending{false};
+    bool correct_done{false};
+    bool correct_applied{false};
     /// STRATEGY: target completeness, anomalous, ROTATE, φ step.
     diffraction::StrategySettings strategy{};
     /// ``STRATEGY FRAMES first last``: choose within these collected frames
@@ -303,6 +315,7 @@ struct ControlGoResult {
     bool ran_autoindex{false};
     bool ran_findspots{false};
     bool ran_strategy{false};
+    bool ran_correct{false};
     diffraction::ProcessResult process{};
     crystal::CrystalMetadata crystal{};
     std::filesystem::path image_used{};
@@ -313,6 +326,9 @@ struct ControlGoResult {
     std::optional<DefpixSummary> defpix;
     /// What STRATEGY found (empty unless ``ran_strategy``).
     std::optional<diffraction::StrategyResult> strategy;
+    std::optional<diffraction::AbsenceAnalysis> correction;
+    std::filesystem::path correction_mtz;
+    std::filesystem::path correction_log;
     std::string message;
 };
 

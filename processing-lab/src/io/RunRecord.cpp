@@ -221,6 +221,9 @@ std::optional<RunStep> pending_stage(const control::ControlState& st) {
     if (st.process_pending) {
         return RunStep::INTEGRATE;
     }
+    if (st.correct_pending) {
+        return RunStep::CORRECT;
+    }
     if (st.strategy_pending) {
         return RunStep::STRATEGY;
     }
@@ -230,7 +233,7 @@ std::optional<RunStep> pending_stage(const control::ControlState& st) {
 std::vector<RunStep> planned_stages(const std::string& control_text) {
     // GO runs the first pending step in this order (ControlSession::go).
     static const std::vector<RunStep> order{RunStep::FIND_SPOTS, RunStep::INDEXING, RunStep::INTEGRATE,
-                                            RunStep::STRATEGY};
+                                            RunStep::CORRECT, RunStep::STRATEGY};
     std::vector<RunStep> pending;
     std::vector<RunStep> stages;
     bool defpix = true;
@@ -427,6 +430,7 @@ ProcessRecord::ProcessRecord(
     doc_["integration"] = Json();
     doc_["quality"] = Json();
     doc_["strategy"] = Json();
+    doc_["correction"] = Json();
     doc_["warnings"] = Json::array();
     for (const auto& w : input_["warnings"].items()) {
         doc_["warnings"].push_back(w);
@@ -568,6 +572,36 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
                                                      {"images", sr.target->images}})
                                  : Json(Json::Object{{"completeness_pct", Json()},
                                                      {"max_completeness_pct", pct(sr.max_completeness)}});
+    }
+    if (r.ran_correct && r.correction) {
+        const auto& c = *r.correction;
+        Json zones = Json::array();
+        for (const auto& z : c.axes)
+            zones.push_back(Json(Json::Object{{"axis", std::string(1, z.axis)},
+                {"period", z.period}, {"peak_height", z.peak_height},
+                {"sd", z.sd}, {"probability", z.probability},
+                {"observations", z.observations}}));
+        Json correction = Json::object();
+        correction["method"] = "axial_fourier_absence_screen";
+        correction["zones"] = std::move(zones);
+        correction["suggested_space_group"] = c.suggested_space_group > 0
+            ? Json(c.suggested_space_group) : Json();
+        correction["applied_space_group"] = c.applied_space_group > 0
+            ? Json(c.applied_space_group) : Json();
+        correction["suggestion_confidence"] = c.suggestion_confidence;
+        correction["laue_group_checked"] = c.laue_group_checked;
+        correction["twofold_a_cc"] = c.twofold_a_cc;
+        correction["twofold_a_pairs"] = c.twofold_a_pairs;
+        correction["twofold_b_cc"] = c.twofold_b_cc;
+        correction["twofold_b_pairs"] = c.twofold_b_pairs;
+        correction["mtz_path"] = r.correction_mtz.string();
+        correction["log_path"] = r.correction_log.empty()
+            ? Json() : Json(r.correction_log.string());
+        doc_["correction"] = correction;
+        s["results"] = std::move(correction);
+        add_output(r.correction_mtz, "corrected_mtz");
+        if (!r.correction_log.empty())
+            add_output(r.correction_log, "corrected_log");
     }
     if (r.ran_autoindex) {
         // Stage summary; the full solution is in ``indexing``.
@@ -937,6 +971,30 @@ std::string render_markdown(const Json& in, const Json& pr, const std::filesyste
         } else {
             md << "- Not reachable: at most " << md_num(sg->find("max_completeness_pct"), 1) << "%\n";
         }
+    }
+
+    if (const auto* c = pr.find("correction"); c != nullptr && !c->is_null()) {
+        md << "\n## Symmetry correction\n\n"
+           << "Native intensity-correlation and Fourier screen of symmetry-related "
+           << "observations and axial I/σ periodicity.\n\n"
+           << "| Zone | Period | Peak height | SD | Probability | Observations |\n"
+           << "| --- | ---: | ---: | ---: | ---: | ---: |\n";
+        for (const auto& z : c->find("zones")->items())
+            md << "| " << md_value(*z.find("axis")) << " | "
+               << md_value(*z.find("period")) << " | "
+               << md_num(z.find("peak_height"), 3) << " | "
+               << md_num(z.find("sd"), 3) << " | "
+               << md_num(z.find("probability"), 3) << " | "
+               << md_value(*z.find("observations")) << " |\n";
+        md << "\n- Tetragonal twofold intensity correlations: a="
+           << md_num(c->find("twofold_a_cc"), 3) << " ("
+           << md_value(*c->find("twofold_a_pairs")) << " pairs), b="
+           << md_num(c->find("twofold_b_cc"), 3) << " ("
+           << md_value(*c->find("twofold_b_pairs")) << " pairs).\n";
+        if (c->find("applied_space_group") && !c->find("applied_space_group")->is_null())
+            md << "\n- Suggested space group number: "
+               << md_value(*c->find("applied_space_group"))
+               << " applied to the output MTZ; enantiomorph unresolved.\n";
     }
 
     if (const auto* q = pr.find("quality"); q != nullptr && !q->is_null()) {
