@@ -2729,27 +2729,30 @@ ControlGoResult ControlSession::go(
         std::cout << " Wrote corrected MTZ: " << out.correction_mtz << '\n';
 
         // correct.log: the PROCESS resolution table, merged and screened for
-        // absences in the corrected space group.
+        // absences in the corrected space group. Echoed to the main log too.
         if (corrected_crystal.spacegroup != nullptr) {
             out.correction_log = output_path(state_, state_.correct_log);
             std::ofstream log(out.correction_log);
             if (!log)
                 throw std::runtime_error(
                     "CONTROL CORRECT: cannot write " + out.correction_log.string());
-            log << " CORRECT: data quality in space group "
-                << corrected_crystal.spacegroup->hm << " ("
-                << corrected_crystal.spacegroup->number << ")"
-                << (state_.correct_applied ? ", applied from axial absences"
-                                           : ", unchanged from PROCESS")
-                << "\n Input: " << state_.last_integrated_reflections.size()
-                << " integrated observations; output MTZ: "
-                << out.correction_mtz.string() << '\n';
+            std::ostringstream text;
+            text << " CORRECT: data quality in space group "
+                 << corrected_crystal.spacegroup->hm << " ("
+                 << corrected_crystal.spacegroup->number << ")"
+                 << (state_.correct_applied ? ", applied from axial absences"
+                                            : ", unchanged from PROCESS")
+                 << "\n Input: " << state_.last_integrated_reflections.size()
+                 << " integrated observations; output MTZ: "
+                 << out.correction_mtz.string() << '\n';
             const auto quality = diffraction::compute_data_quality(
                 corrected_crystal, state_.last_integrated_reflections,
                 state_.dmax_A, state_.dmin_A);
-            diffraction::write_data_quality_table(log, quality);
+            diffraction::write_data_quality_table(text, quality);
+            log << text.str();
             out.message += "; wrote " + out.correction_log.string();
-            std::cout << " Wrote corrected statistics: " << out.correction_log << '\n';
+            std::cout << "\n" << text.str()
+                      << " Wrote corrected statistics: " << out.correction_log << '\n';
         }
         return out;
     }
