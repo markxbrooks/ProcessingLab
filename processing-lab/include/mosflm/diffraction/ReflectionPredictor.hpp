@@ -47,9 +47,10 @@ struct PredictionSettings {
     double ewald_tolerance_Ainv{0.0025};
     /// Predictor angular search increment (not physical oscillation width).
     double phi_step_deg{0.05};
-    /// Crystal mosaic spread (degrees). Widens the Ewald gate by approximately
-    /// ``mosaic_rad / λ`` (Å⁻¹), standing in for REEK η until a full rocking
-    /// model exists. Zero ⇒ use ``ewald_tolerance_Ainv`` alone.
+    /// Crystal mosaic spread σ_M (degrees): the standard deviation of
+    /// ε = ζ Δφ, XDS ``REFLECTING_RANGE_E.S.D.``. In the rocking model
+    /// ``σφ = σ_M / ζ``. Widens the stills Ewald gate by approximately
+    /// ``σ_M / λ`` (Å⁻¹). Zero ⇒ use ``ewald_tolerance_Ainv`` alone.
     double mosaic_spread_deg{0.0};
     /// Beam divergence full-angles (degrees), MOSFLM ``DIVH`` / ``DIVV``.
     /// Combined with mosaic as ``(η + max(DIVH,DIVV)) / λ`` in Å⁻¹ (REEK E0
@@ -91,10 +92,12 @@ struct PredictionSettings {
     double panel_beam_y_mm{0.0};
     /// Rocking-curve prediction (oscillation scans only): solve the Ewald
     /// crossing φc analytically and model each reflection's rocking curve as
-    /// a Gaussian in φ with σ = (mosaic + max(DIVH,DIVV)) / (2.355 ζ), where
+    /// a Gaussian in φ with σφ = σ_M / ζ, where σ_M is
+    /// ``mosaic_spread_deg`` (XDS ``REFLECTING_RANGE_E.S.D.``) and
     /// ζ = |m·(ŝ1 × ŝ0)| is the inverse rotation Lorentz factor. A reflection
-    /// is predicted on every frame within ``±(4σ + 2·osc)`` of φc; slices
-    /// beyond the ±3σ core carry ``fraction`` < 0.001.
+    /// is predicted on every frame within ``±(4σφ + 2·osc)`` of φc; slices
+    /// beyond the ±3σ core carry ``fraction`` < 0.001. The mosaicity sample
+    /// uses only |ζ Δφ| ≤ 1°, so that reach does not set the next σ_M.
     bool rocking_model{false};
 };
 

@@ -285,6 +285,11 @@ struct DefpixSummary {
     std::size_t shaded{0};
     std::size_t defective{0};
     std::size_t hot{0};
+    std::size_t halo{0};          ///< Pixels inside the beam halo.
+    double halo_radius_px{0.0};   ///< 0: no halo found.
+    /// Integration's low-resolution limit just outside the halo (Å); 0 if
+    /// none, or if DMAX / RESOLUTION set it.
+    double halo_dmax_A{0.0};
     int shadow_block_px{0};  ///< 0: shadows / defects not looked for.
     /// Defective / hot pixels were not looked for: the frames span too
     /// little rotation to tell a pixel from a spot.
@@ -416,6 +421,11 @@ private:
     /// DEFPIX trusted mask of the running PROCESS (row-major, 1 = use).
     std::shared_ptr<const std::vector<std::uint8_t>> defpix_mask_;
     int defpix_width_{0};
+    /// Low-resolution limit (Å) DEFPIX set just outside the beam halo; 0 if none.
+    double halo_dmax_A_{0.0};
+    /// Integration's low-resolution limit: DMAX / RESOLUTION if given,
+    /// otherwise the tighter of the default and the halo's.
+    [[nodiscard]] double integration_dmax_A() const;
 
     /// Run DEFPIX on frames ``first``…``last`` (``osc_deg`` each) and keep
     /// its mask.

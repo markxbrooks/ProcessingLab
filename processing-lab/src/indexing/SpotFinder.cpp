@@ -117,13 +117,22 @@ SpotList SpotFinder::find(
     const double gain = std::clamp(
         settings.gain > 0.0 ? settings.gain : 1.0, 0.25, 8.0
     );
+    const bool use_mask = settings.mask && settings.mask->size() == npix;
+    const bool use_local = settings.local_background && settings.local_background->size() == npix;
     for (std::size_t i = 0; i < npix; ++i) {
         const auto v = image.pixels[i];
+        if (use_mask && (*settings.mask)[i] == 0) {
+            continue;  // shaded, untrusted, …: not background, not a spot
+        }
         if (v > 0 && v < kMaxValidCounts) {
             valid[i] = 1;
             const double adj = static_cast<double>(v) - blank;
             work[i] = static_cast<float>(std::max(0.0, adj));
-            sample.push_back(std::max(0.0, adj));
+            // Halo pixels are judged against their own level, not the
+            // detector's, and must not lift the global statistics.
+            if (!use_local || (*settings.local_background)[i] < 0.0f) {
+                sample.push_back(std::max(0.0, adj));
+            }
         }
     }
     if (sample.size() < 100U) {
@@ -180,6 +189,14 @@ SpotList SpotFinder::find(
             }
             if (static_cast<double>(work[i]) < cutoff) {
                 continue;
+            }
+            if (use_local && (*settings.local_background)[i] >= 0.0f) {
+                const double lb = (*settings.local_background)[i];
+                const double local_cut = (lb - blank) + static_cast<double>(settings.threshold_sigma) *
+                                                            std::sqrt(std::max(lb, 1.0) * gain);
+                if (static_cast<double>(work[i]) < local_cut) {
+                    continue;
+                }
             }
             if (!is_local_maximum(work, width, height, x, y)) {
                 continue;

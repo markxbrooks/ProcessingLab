@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace mosflm::refinement {
@@ -116,6 +117,51 @@ Eigen::VectorXd residuals(
         }
     }
     return r;
+}
+
+/// Unweighted rms of the X/Y residuals (px) and of φ (degrees) over the
+/// used observations.
+void split_rms(
+    const Model& model,
+    const Eigen::VectorXd& p,
+    double wavelength_A,
+    const DetectorGeometry& det,
+    const std::vector<PositionalObservation>& obs,
+    const std::vector<char>& use,
+    double& rms_xy,
+    double& rms_phi,
+    double& mean_dx,
+    double& mean_dy
+) {
+    std::vector<PositionalObservation> plain(obs);
+    for (auto& o : plain) {
+        o.weight = 1.0;
+        o.phi_sigma_deg = 1.0;  // φ residual comes back in degrees
+    }
+    const Eigen::VectorXd r = residuals(model, p, wavelength_A, det, plain, use, 1.0);
+    double sxy = 0.0;
+    double sphi = 0.0;
+    double sx = 0.0;
+    double sy = 0.0;
+    std::size_t nxy = 0;
+    std::size_t nphi = 0;
+    for (std::size_t i = 0; i < obs.size(); ++i) {
+        if (!use[i]) {
+            continue;
+        }
+        sxy += r(3 * i) * r(3 * i) + r(3 * i + 1) * r(3 * i + 1);
+        sx += r(3 * i);
+        sy += r(3 * i + 1);
+        ++nxy;
+        if (std::isfinite(obs[i].phi_obs_deg)) {
+            sphi += r(3 * i + 2) * r(3 * i + 2);
+            ++nphi;
+        }
+    }
+    rms_xy = nxy > 0 ? std::sqrt(sxy / static_cast<double>(nxy)) : 0.0;
+    mean_dx = nxy > 0 ? sx / static_cast<double>(nxy) : 0.0;
+    mean_dy = nxy > 0 ? sy / static_cast<double>(nxy) : 0.0;
+    rms_phi = nphi > 0 ? std::sqrt(sphi / static_cast<double>(nphi)) : std::numeric_limits<double>::quiet_NaN();
 }
 
 double rms_of(const Eigen::VectorXd& r, const std::vector<char>& use) {
@@ -265,6 +311,8 @@ PositionalRefinementResult PositionalRefiner::refine(
             residuals(model, p_start, wavelength_A, detector, observations, use, phi_w), use
         );
         out.n_used = static_cast<std::size_t>(std::count(use.begin(), use.end(), char{1}));
+        split_rms(model, p, wavelength_A, detector, observations, use, out.rms_xy_px, out.rms_phi_deg,
+                  out.mean_dx_px, out.mean_dy_px);
 
         // Safety caps on the total change.
         const Eigen::VectorXd dpt = p - p_start;

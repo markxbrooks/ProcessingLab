@@ -181,9 +181,11 @@ struct DefpixResult {
     [[nodiscard]] std::vector<std::uint8_t> trusted_mask() const;
     /// Pixels DEFPIX rejected (every status except Trusted / DetectorMasked).
     [[nodiscard]] std::size_t n_rejected() const;
-    /// ``1`` where spot finding may look: everything but shaded, halo,
-    /// untrusted, defective and hot pixels (excluded resolution ranges stay,
-    /// as their spots still index).
+    /// ``1`` where spot finding may look: everything but shaded, untrusted,
+    /// defective and hot pixels. Excluded resolution ranges stay, as their
+    /// spots still index; so does the beam halo, whose low-resolution spots
+    /// carry the longest cell axes. There a spot must clear the local
+    /// background instead (:attr:`SpotFindSettings::local_background`).
     [[nodiscard]] std::vector<std::uint8_t> spot_search_mask() const;
 };
 

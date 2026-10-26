@@ -38,6 +38,8 @@ autom4te.cache/
 compile
 config.guess
 config.sub
+config.status
+config.log
 configure
 depcomp
 install-sh

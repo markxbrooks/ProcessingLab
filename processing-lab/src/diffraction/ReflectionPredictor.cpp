@@ -126,8 +126,8 @@ PredictionResult predict_rocking(
     const double f0 = request.scan.phi_start_deg;
     const double f1 = request.scan.phi_end_deg;
     const double fmid = 0.5 * (f0 + f1);
-    const double width_deg =
-        std::max(st.mosaic_spread_deg, 0.0) + std::max(st.divh_deg, st.divv_deg);
+    // σ_M: standard deviation of ε = ζ Δφ (XDS REFLECTING_RANGE_E.S.D.).
+    const double sigma_m = std::max(st.mosaic_spread_deg, 1e-4);
     const double lambda = 1.0 / inv_lambda;
     const Eigen::Matrix3d& UB = request.orientation.ub();
     const Eigen::Vector3d axis(1.0, 0.0, 0.0);
@@ -178,9 +178,7 @@ PredictionResult predict_rocking(
                     const Eigen::Vector3d s1 = s0 + rotation_x_deg(phic) * q0;
                     // XDS ζ = |m2·e1| with unit e1 = s1×s0/|s1×s0|. Without
                     // the normalisation ζ carries an extra sin2θ and low-
-                    // resolution widths come out ~10× too wide (76c1b: the
-                    // 5° width cap then dropped nearly every reflection
-                    // once MOSAIC reached XDS's ~1° FWHM).
+                    // resolution widths come out ~10× too wide.
                     const Eigen::Vector3d e1 = s1.cross(s0);
                     const double e1n = e1.norm();
                     if (e1n < 1e-12) {
@@ -190,7 +188,7 @@ PredictionResult predict_rocking(
                     if (zeta < std::max(st.min_zeta, 1e-6)) {
                         continue;
                     }
-                    const double sigma = std::max(width_deg, 1e-3) / (2.355 * zeta);
+                    const double sigma = sigma_m / zeta;
                     // Measure beyond the ±3σ core (4σ + two frames) so the
                     // observed φ spread used to estimate the rocking width is
                     // not truncated by the model it is estimating; the extra

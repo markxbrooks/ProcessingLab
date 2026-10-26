@@ -6,6 +6,7 @@
 #include "test_util.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -223,6 +224,63 @@ int main() {
         }
         CHECK_EQ(static_cast<int>(s.state().defpix.untrusted.size()), 2);
         CHECK_CLOSE(s.state().defpix.value_range_high, 30000.0, 1e-9);
+    }
+
+    // ----- the beam halo: a flare filling the inner rings, so every ring is
+    // its own median and the shaded test cannot see it
+    {
+        constexpr int kHw = 600;
+        constexpr int kHc = 300;
+        const auto halo_frame = [&](bool flare) {
+            return [=](int f) {
+                DiffractionImage img;
+                img.metadata.width = kHw;
+                img.metadata.height = kHw;
+                img.pixels.resize(static_cast<std::size_t>(kHw * kHw));
+                for (int r = 0; r < kHw; ++r) {
+                    for (int c = 0; c < kHw; ++c) {
+                        const double rad = std::hypot(c - kHc, r - kHc);
+                        double v = 20.0 + (c + r + f) % 3;
+                        if (rad <= 12.0) {
+                            v = 1.0;  // the stop
+                        } else if (flare) {
+                            v += 60.0 * std::exp(-(rad - 12.0) / 25.0);
+                        }
+                        img.pixels[static_cast<std::size_t>(r) * kHw + static_cast<std::size_t>(c)] =
+                            static_cast<std::int32_t>(std::lround(v));
+                    }
+                }
+                return img;
+            };
+        };
+        mosflm::DetectorGeometry g = geometry();
+        g.nfast = kHw;
+        g.nslow = kHw;
+        DefpixSettings hs;
+        hs.find_defects = false;
+        const std::vector<int> hf{0, 1, 2, 3, 4};
+        const auto with = run_defpix(halo_frame(true), hf, g, kHc * 0.172, kHc * 0.172, hs);
+        CHECK(with.halo.found);
+        // Excess 60 e^{-(r-12)/25} falls to 10 % of its peak near r ≈ 70 px.
+        CHECK_MSG(with.halo.radius_px > 55.0 && with.halo.radius_px < 95.0,
+                  "halo radius " + mosflm_test::fmt(with.halo.radius_px));
+        const auto hstatus = [&](int c, int r) {
+            return static_cast<PixelStatus>(with.status[static_cast<std::size_t>(r) * kHw + static_cast<std::size_t>(c)]);
+        };
+        CHECK(hstatus(kHc + 30, kHc) == PixelStatus::Halo);
+        CHECK(hstatus(kHc, kHc + 150) == PixelStatus::Trusted);
+        CHECK_EQ(static_cast<int>(with.trusted_mask()[static_cast<std::size_t>(kHc) * kHw + kHc + 30]), 0);
+        // Spot finding may still look in the halo (against its local background).
+        CHECK_EQ(static_cast<int>(with.spot_search_mask()[static_cast<std::size_t>(kHc) * kHw + kHc + 30]), 1);
+        CHECK_CLOSE(with.halo_dmax_A, d_at(with.halo.radius_px + hs.halo_margin_px), 1e-6);
+
+        const auto without = run_defpix(halo_frame(false), hf, g, kHc * 0.172, kHc * 0.172, hs);
+        CHECK(!without.halo.found);
+        CHECK_EQ(static_cast<int>(without.count(PixelStatus::Halo)), 0);
+        CHECK(without.halo_dmax_A == 0.0);
+
+        hs.find_halo = false;
+        CHECK(!run_defpix(halo_frame(true), hf, g, kHc * 0.172, kHc * 0.172, hs).halo.found);
     }
 
     return mosflm_test::finish("defpix");

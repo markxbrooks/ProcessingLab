@@ -334,7 +334,7 @@ logged as `AUTOINDEX: nearest-neighbour max cell … → DMAX …`.
 | `TEMPLATE` | Multi-frame basename with `#` digits (`76c1b_1_####.cbf`). |
 | `PROCESS first TO last [START φ] [ANGLE Δφ]` | Frames to integrate. `START`/`ANGLE` override header φ. |
 | `DMIN` / `DMAX` / `RESOLUTION` | Predictor resolution limits (Å). Unset `DMIN` uses the farthest inset detector corner. An explicit value overrides that. |
-| `REFINE ALL` or `REFINE ORIENTATION CELL DISTANCE BEAM TILT` (any subset) | Parameters positional refinement may change during PROCESS. Default `ALL`; `--xparm` sets `ORIENTATION` (as XDS INTEGRATE; the imported cell and detector are kept). |
+| `REFINE ALL` or `REFINE ORIENTATION CELL DISTANCE BEAM TILT` (any subset) | Parameters positional refinement may change during PROCESS. Default `ALL`; `--xparm` sets `ORIENTATION` (as XDS INTEGRATE; the imported cell and detector are kept). See [Geometry refinement during PROCESS](#geometry-refinement-during-process) for which are refined when. |
 | `INVERTX ON\|OFF` | Handedness of a supplied `MATRIX`: `ON` (default) for MOSFLM/ADSC matrices, `OFF` for ProcessingLab or XDS-frame matrices (`--xparm` sets it). |
 | `PHI_OFFSET` | Added to every frame’s φ. |
 
@@ -402,6 +402,29 @@ GO
 | `WIDEN_EWALD ON\|OFF` | Widen Ewald with mosaic (PROCESS default OFF). |
 | `NMASKS nx ny` | Standard-profile detector bins. |
 
+### Geometry refinement during PROCESS
+
+Positional refinement fits the predicted spot positions, and where observed
+the φ centroids, to strong reflections. Which parameters move depends on how
+much rotation the observations cover:
+
+- **Pre-refinement** (two cycles on the first block, before any frame is
+  kept): everything `REFINE` allows.
+- **Each block** (`POSTREFINE PERIOD`, 25 frames): the misset, the beam and
+  the distance only, as XDS INTEGRATE does by default. Over a few degrees the
+  spot radii fix only distance ÷ cell, and tilt/twist trades with the misset,
+  so a free cell and detector wandered together from block to block (on
+  76c1b distance 385 → 392 mm, c 71.8 → 74.5 Å) and pulled the predicted φ
+  off the spots. If a block's step exceeds the safety caps, it is retried
+  with the misset and beam alone, so the crystal is still followed.
+- **The sweep so far** (every 4 blocks, once 15° are covered): the cell, the
+  misset and tilt/twist against up to 400 observations from every block,
+  pooled — like XDS CORRECT, from a rotation range wide enough to fix the
+  cell's shape.
+
+Each `POSITIONAL REFINE` line gives the residual split into detector
+(`xy`, px, with its mean offset) and φ (degrees).
+
 ### Untrusted pixels (DEFPIX)
 
 PROCESS runs DEFPIX once, before integrating: it samples frames spread over
@@ -423,6 +446,7 @@ reflection with one under its peak is rejected.
 | `DEFPIX VALUE_RANGE lo hi` | A block's background relative to its resolution ring, ×10000 (default 7000 30000, as XDS). |
 | `DEFPIX SHADOWS ON\|OFF` | Look for shaded regions (default ON). |
 | `DEFPIX DEFECTS ON\|OFF` | Look for defective and hot pixels (default ON). |
+| `DEFPIX HALO ON\|OFF` | Look for the beam halo (default ON). |
 | `DEFPIX FILE name\|OFF` | Control image (default `defpix.cbf`). |
 
 Several `DEFPIX` options can share a line (`DEFPIX FRAMES 20 SHADOWS OFF`).
@@ -437,6 +461,22 @@ DEFPIX ignores:
   (stuck), or in two or more and near background in the rest (flickering).
 - **Hot** pixels: in every sampled frame at least 10 counts and 20× the
   mean background of their ring.
+- The **beam halo**: where the beam is not fully blocked it flares around
+  the stop, often filling whole rings, so the shaded test (which compares a
+  block with its own ring) cannot see it. DEFPIX walks out from the beam
+  along the radial background (each ring's mean without its brightest 5%,
+  rings widened until they hold enough counts) from its peak to where the
+  excess over the outer background has fallen to a tenth, and ignores every
+  pixel inside that radius. A halo must peak at least 1.5× the outer level.
+  Integration's low-resolution limit then sits 10 px outside it (e.g.
+  `Low-resolution limit for integration: 40.61 Å`), so no measurement box
+  reaches the remaining slope, unless `DMAX` or `RESOLUTION` sets the limit.
+  The indexing DMAX is unchanged.
+
+FINDSPOTS (over three or more frames) first runs the shaded and halo tests
+on five of its frames and leaves those pixels, and any untrusted region, out
+of the search: out of the background statistics as well as the peaks, so
+the flare neither becomes spots nor raises the threshold.
 
 Defective and hot pixels are only looked for when the frames span at least
 5°: over a shorter range a low-resolution spot can stay bright, or

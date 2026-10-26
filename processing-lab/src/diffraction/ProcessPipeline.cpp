@@ -23,11 +23,14 @@ constexpr int kIbadPkratio = 2;
 constexpr int kIbadNegProfile = 4;
 constexpr int kIbadBgGradient = 8;
 /// MOSFLM OVRLFIT: a saturated pixel under the peak. Aimless reports bit
-/// 16 as "Profile-fitted overloads". Spatial overlaps are omitted instead.
+/// 16 as "Profile-fitted overloads".
 constexpr int kIbadOverload = 16;
 constexpr int kIbadEdge = 32;
 constexpr int kIbadFewBg = 64;
 constexpr int kOmitOffDetector = 128;
+/// Kept on the per-frame row so the mosaicity sample sees the peak.
+/// sum_partial_slices strips these slices; Aimless never sees the bit.
+constexpr int kFlagSpatialOverlap = 512;
 /// MOSFLM default PKRAT (``control.f``): √(Σ residual² / counting variance).
 constexpr double kPkratioLimit = 5.0;
 constexpr double kNegProfileSigma = 5.0;
@@ -412,17 +415,13 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             po = &out.profile_observations[i];
         }
         // A neighbour inside the measurement box mixes the two intensities.
-        // MOSFLM bit 16 means a profile-fitted overload, which is what
-        // Aimless rejects under that name, so overlaps are left out entirely.
+        // The row is kept with an internal bit so the mosaicity sample can
+        // see the peak frame; the summed MTZ drops these slices.
         const bool overlapped =
             po != nullptr
                 ? po->overlapped
                 : (i < out.meas_observations.size() &&
                    out.meas_observations[i].overlapped);
-        if (overlapped) {
-            ++out.n_omitted;
-            continue;
-        }
 
         int ibad = 0;
         if (po != nullptr) {
@@ -504,8 +503,8 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
         const double mid =
             rocking ? pm.phi_calc : 0.5 * (pm.phi_begin + pm.phi_end);
         if (rocking) {
-            // One slice of a rocking curve: summed across frames later
-            // (sum_partial_slices), so no 1/FRACTIONCALC scaling here.
+            // mosaic_spread_deg is σ_M here: width = 6 σφ = 6 σ_M / ζ.
+            // The non-rocking branch below still treats it as a φ width.
             row.rot = static_cast<float>(pm.phi_calc);
             row.width = static_cast<float>(pm.phi_end - pm.phi_begin);
             row.fractioncalc = static_cast<float>(pm.fraction);
@@ -696,8 +695,12 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
 
         // FLAG: 0 good; else IBAD bits (Aimless rejects non-zero by default).
         // Bit 4 is I_prf < −5σ. Bit 2 is profile χ² above 5. Bit 16 is a
-        // saturated peak pixel. Overlapped boxes were omitted above.
+        // saturated peak pixel. Bit 512 marks a spatial overlap for the
+        // in-memory mosaicity sample and is stripped by the partial sum.
         row.flag = ibad;
+        if (overlapped) {
+            row.flag |= kFlagSpatialOverlap;
+        }
 
         // ASUPUT-style ASU packing for output indices.
         crystal::MtzAdapter::reduce_to_asu(

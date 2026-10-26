@@ -110,7 +110,9 @@ int main() {
     s3.box.peak_half_px = 3;
     s3.box.bg_rim_px = 2;
     s3.box.bg_reject_nsigma = 0.0;
-    s3.mosaic_spread_deg = 0.15;
+    // σ_M / osc is the φ profile width. This σ_M keeps that width at
+    // 1/2.355 frames, where the empty-box χ² below was calibrated.
+    s3.mosaic_spread_deg = 0.15 / 2.355;
     s3.osc_deg = 0.15;
 
     // Synthetic 3D Gaussian + planar+φ background recovers I.

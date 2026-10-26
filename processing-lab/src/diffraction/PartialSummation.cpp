@@ -9,6 +9,9 @@ namespace mosflm::diffraction {
 namespace {
 
 constexpr int kIbadNegProfile = 4;
+/// In-memory only. A neighbour shares the measurement box. Kept so the
+/// mosaicity sample can see the peak frame; stripped before the MTZ sum.
+constexpr int kFlagSpatialOverlap = 512;
 
 /// True if at least one slice lies in the ±3σ core (contributes intensity).
 bool has_core(
@@ -16,7 +19,8 @@ bool has_core(
     const PartialSummationSettings& settings
 ) {
     return std::any_of(g.begin(), g.end(), [&](const auto& s) {
-        return s.fractioncalc >= settings.core_min_fraction;
+        return s.fractioncalc >= settings.core_min_fraction &&
+               (s.flag & kFlagSpatialOverlap) == 0;
     });
 }
 
@@ -32,6 +36,9 @@ crystal::MosflmReflection sum_group(
     double pw = 0.0, pphi = 0.0, xw = 0.0, xx = 0.0, xy = 0.0;
     int flag = 0;
     for (const auto& s : g) {
+        if ((s.flag & kFlagSpatialOverlap) != 0) {
+            continue;
+        }
         if (s.fractioncalc >= settings.core_min_fraction) {
             i += s.intensity;
             v += static_cast<double>(s.sigma) * s.sigma;
@@ -83,6 +90,9 @@ crystal::MosflmReflection sum_group(
         double sw = 0.0;
         double sp = 0.0;
         for (const auto& s : g) {
+            if ((s.flag & kFlagSpatialOverlap) != 0) {
+                continue;
+            }
             if (std::isfinite(s.phi_obs) && std::fabs(s.phi_obs - out.phi_obs) <= half) {
                 sw += s.intensity;
                 sp += static_cast<double>(s.intensity) * s.phi_obs;
@@ -107,7 +117,7 @@ crystal::MosflmReflection sum_group(
         double sw = 0.0;
         int n_sig = 0;
         for (const auto& s : g) {
-            if (!std::isfinite(s.phi_obs)) {
+            if ((s.flag & kFlagSpatialOverlap) != 0 || !std::isfinite(s.phi_obs)) {
                 continue;
             }
             const double w = static_cast<double>(s.intensity);
@@ -176,207 +186,129 @@ std::vector<crystal::MosflmReflection> sum_partial_slices(
 
 std::optional<RockingWidthFit> fit_rocking_width(
     const std::vector<crystal::MosflmReflection>& slices,
-    double width_now_deg,
+    double sigma_m_now_deg,
     double osc_deg,
     const PartialSummationSettings& settings,
     std::size_t min_reflections
 ) {
-    if (!(width_now_deg > 0.0) || !(osc_deg > 0.0)) {
+    if (!(sigma_m_now_deg > 0.0) || !(osc_deg > 0.0)) {
         return std::nullopt;
     }
-    // Per slice: frame φ range relative to φcalc, intensity, 1/σ².
-    struct Slice {
-        double lo, hi, i, w;
-    };
-    struct Refl {
-        double sigma_now;  // σφ at width_now_deg
-        std::vector<Slice> s;
-    };
-    std::vector<Refl> refl;
+    // Fixed cap in the Ewald coordinate ε = ζ Δφ. It does not grow with the
+    // mosaicity being estimated, so a wide prediction cannot feed itself.
+    constexpr double kEpsCapDeg = 1.0;
+    std::vector<double> sigmas;
     for (const auto& g : group_slices(slices, settings)) {
-        if (!has_core(g, settings)) {
+        const auto latest = std::max_element(
+            g.begin(), g.end(),
+            [](const auto& a, const auto& b) { return a.batch < b.batch; }
+        );
+        // width = 6 σφ and σφ = σ_M / ζ at the prediction that wrote the slice.
+        const double sigma_phi = static_cast<double>(latest->width) / 6.0;
+        if (!(sigma_phi > 1e-8)) {
             continue;
         }
-        double isum = 0.0, vsum = 0.0, frac = 0.0;
-        // The window spans earlier periods predicted with another MOSAIC;
-        // the latest slice was predicted with width_now_deg.
-        const auto latest = std::max_element(g.begin(), g.end(), [](const auto& a, const auto& b) {
-            return a.batch < b.batch;
-        });
-        Refl r{static_cast<double>(latest->width) / 6.0, {}};
-        double mw = 0.0;
+        const double zeta = sigma_m_now_deg / sigma_phi;
+        if (!(zeta > 1e-6)) {
+            continue;
+        }
+        struct Sample {
+            double eps;
+            double intensity;
+            double variance;
+        };
+        std::vector<Sample> cap;
+        cap.reserve(g.size());
         for (const auto& s : g) {
-            if (!(s.sigma > 0.0f) || !std::isfinite(s.phi_obs) || s.flag != 0) {
+            if (!(s.sigma > 0.0f) || !std::isfinite(s.phi_obs)) {
                 continue;
             }
-            const double mid = static_cast<double>(s.phi_obs) - s.rot;
-            r.s.push_back({mid - 0.5 * osc_deg, mid + 0.5 * osc_deg, s.intensity,
-                           1.0 / (static_cast<double>(s.sigma) * s.sigma)});
-            isum += s.intensity;
-            vsum += static_cast<double>(s.sigma) * s.sigma;
-            frac += s.fractioncalc;
-            mw += s.intensity * mid;
+            const double eps = zeta * (static_cast<double>(s.phi_obs) - s.rot);
+            if (std::fabs(eps) > kEpsCapDeg) {
+                continue;
+            }
+            cap.push_back(
+                {eps, static_cast<double>(s.intensity),
+                 static_cast<double>(s.sigma) * s.sigma}
+            );
         }
-        // Centre the model on the observed φ centroid: an orientation error
-        // is for positional refinement, not extra rocking width.
-        if (isum > 0.0) {
-            const double shift = mw / isum;
-            for (auto& sl : r.s) {
-                sl.lo -= shift;
-                sl.hi -= shift;
+        if (cap.size() < 3) {
+            continue;
+        }
+        const auto moment = [&](double bg) {
+            double sum_i = 0.0;
+            double sum_ie2 = 0.0;
+            double sum_v = 0.0;
+            int n_pos = 0;
+            for (const auto& s : cap) {
+                const double ii = s.intensity - bg;
+                if (!(ii > 0.0)) {
+                    continue;
+                }
+                sum_i += ii;
+                sum_ie2 += ii * s.eps * s.eps;
+                sum_v += s.variance;
+                ++n_pos;
+            }
+            return std::tuple{sum_i, sum_ie2, sum_v, n_pos};
+        };
+        // First pass with no background, then a pedestal from slices beyond
+        // 2.5σ (and at least 0.75°). A fixed |ε|≥0.6° wing still holds the
+        // rocking curve when σ_M is a few tenths of a degree, and subtracting
+        // it narrows the next estimate.
+        const auto raw = moment(0.0);
+        const double raw_i = std::get<0>(raw);
+        const double raw_v = std::get<2>(raw);
+        const int raw_n = std::get<3>(raw);
+        if (raw_n < 3 || !(raw_i > 0.0) || !(raw_v > 0.0) ||
+            raw_i < 10.0 * std::sqrt(raw_v)) {
+            continue;
+        }
+        const double bin = zeta * osc_deg;
+        const double raw_var = std::get<1>(raw) / raw_i - (bin * bin) / 12.0;
+        double bg = 0.0;
+        if (raw_var > 0.0) {
+            const double wing_at =
+                std::clamp(2.5 * std::sqrt(raw_var), 0.75, 0.95);
+            std::vector<double> wings;
+            wings.reserve(cap.size());
+            for (const auto& s : cap) {
+                if (std::fabs(s.eps) >= wing_at) {
+                    wings.push_back(s.intensity);
+                }
+            }
+            if (wings.size() >= 2) {
+                const std::size_t mid = wings.size() / 2;
+                std::nth_element(
+                    wings.begin(),
+                    wings.begin() + static_cast<std::ptrdiff_t>(mid),
+                    wings.end()
+                );
+                bg = std::max(0.0, wings[mid]);
             }
         }
-        // Strong and (under the current model) fully measured.
-        if (r.sigma_now > 0.0 && r.s.size() >= 2 && frac >= 0.95 &&
-            isum >= 10.0 * std::sqrt(vsum)) {
-            refl.push_back(std::move(r));
+        const auto got = moment(bg);
+        const double sum_i = std::get<0>(got);
+        const double sum_v = std::get<2>(got);
+        const int n_pos = std::get<3>(got);
+        if (n_pos < 3 || !(sum_i > 0.0) || !(sum_v > 0.0) ||
+            sum_i < 10.0 * std::sqrt(sum_v)) {
+            continue;
+        }
+        const double var = std::get<1>(got) / sum_i - (bin * bin) / 12.0;
+        if (var > 0.0) {
+            sigmas.push_back(std::sqrt(var));
         }
     }
-    if (refl.size() < min_reflections) {
+    if (sigmas.size() < min_reflections) {
         return std::nullopt;
     }
-    auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
-    // Σ over reflections of the unexplained fraction of Σ w I² after fitting
-    // the model profile, with a free amplitude and a free per-slice baseline,
-    // to the slices within ``window`` of the centre (in ε = ζ·Δφ, degrees).
-    //
-    // - The baseline absorbs a background bias in the per-frame intensities,
-    //   which otherwise reads as heavier tails.
-    // - The window: real rocking curves have heavier tails than a Gaussian
-    //   (76c1b: 17% of the peak at |ε| 2–3°). Fitted to every slice the
-    //   prediction reaches, the Gaussian came out ~0.25° wider than the width
-    //   predicted with, at every re-estimate, so MOSAIC crept up without
-    //   end (0.5° → 1.5° in 100 frames). Fitting within ±1.5 FWHM of the
-    //   width being fitted has a fixed point, found by iterating below.
-    // - Robust (Tukey biweight, two reweightings): a slice holding a
-    //   neighbour's spot is down-weighted instead of read as tail.
-    auto cost = [&](double width, double window) {
-        double c = 0.0;
-        std::vector<double> p;
-        std::vector<double> u;
-        std::vector<double> e;
-        std::vector<const Slice*> in;
-        for (const auto& r : refl) {
-            // ζ from the width the slices were predicted with: σφ = W / (2.355 ζ).
-            const double zeta = width_now_deg / (2.355 * r.sigma_now);
-            in.clear();
-            for (const auto& s : r.s) {
-                if (std::fabs(0.5 * (s.lo + s.hi)) * zeta <= window) {
-                    in.push_back(&s);
-                }
-            }
-            const std::size_t n = in.size();
-            if (n < 3) {
-                continue;
-            }
-            const double sig = r.sigma_now * width / width_now_deg;
-            p.resize(n);
-            for (std::size_t j = 0; j < n; ++j) {
-                p[j] = cdf(in[j]->hi / sig) - cdf(in[j]->lo / sig);
-            }
-            u.assign(n, 1.0);
-            double t = 0.0;
-            double b = 0.0;
-            for (int pass = 0; pass < 3; ++pass) {
-                // Weighted least squares for I ≈ t·p + b with weights w·u.
-                double sw = 0.0, sp = 0.0, si = 0.0, spp = 0.0, sip = 0.0;
-                for (std::size_t j = 0; j < n; ++j) {
-                    const double w = in[j]->w * u[j];
-                    sw += w;
-                    sp += w * p[j];
-                    si += w * in[j]->i;
-                    spp += w * p[j] * p[j];
-                    sip += w * in[j]->i * p[j];
-                }
-                if (!(sw > 0.0)) {
-                    break;
-                }
-                const double cpp = spp - sp * sp / sw;
-                t = cpp > 0.0 ? (sip - si * sp / sw) / cpp : 0.0;
-                b = (si - t * sp) / sw;
-                if (pass == 2 || n < 5) {
-                    break;
-                }
-                // Tukey biweight on residuals standardised by σ and by their
-                // robust spread (MAD).
-                e.resize(n);
-                for (std::size_t j = 0; j < n; ++j) {
-                    e[j] = std::fabs(in[j]->i - t * p[j] - b) * std::sqrt(in[j]->w);
-                }
-                std::vector<double> sorted = e;
-                std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(n / 2), sorted.end());
-                const double scale = std::max(1.4826 * sorted[n / 2], 1.0);
-                for (std::size_t j = 0; j < n; ++j) {
-                    const double z = e[j] / (4.685 * scale);
-                    u[j] = z < 1.0 ? (1.0 - z * z) * (1.0 - z * z) : 0.0;
-                }
-            }
-            double num = 0.0;
-            double den = 0.0;
-            for (std::size_t j = 0; j < n; ++j) {
-                const double w = in[j]->w * u[j];
-                const double res = in[j]->i - t * p[j] - b;
-                num += w * res * res;
-                den += w * in[j]->i * in[j]->i;
-            }
-            if (den > 0.0) {
-                c += num / den;
-            }
-        }
-        return c;
-    };
-    // Best width for one window: coarse log grid, then golden section
-    // between the best's neighbours.
-    const auto minimise = [&](double window) {
-        constexpr int kGrid = 48;
-        const double x0 = std::log(0.02);
-        const double x1 = std::log(3.0);
-        const double dx = (x1 - x0) / (kGrid - 1);
-        int best = 0;
-        double best_c = std::numeric_limits<double>::infinity();
-        for (int k = 0; k < kGrid; ++k) {
-            const double c = cost(std::exp(x0 + dx * k), window);
-            if (c < best_c) {
-                best_c = c;
-                best = k;
-            }
-        }
-        double a = x0 + dx * std::max(best - 1, 0);
-        double b = x0 + dx * std::min(best + 1, kGrid - 1);
-        const double gr = 0.5 * (std::sqrt(5.0) - 1.0);
-        double c1 = b - gr * (b - a);
-        double c2 = a + gr * (b - a);
-        double f1 = cost(std::exp(c1), window);
-        double f2 = cost(std::exp(c2), window);
-        for (int it = 0; it < 40 && b - a > 1e-4; ++it) {
-            if (f1 < f2) {
-                b = c2;
-                c2 = c1;
-                f2 = f1;
-                c1 = b - gr * (b - a);
-                f1 = cost(std::exp(c1), window);
-            } else {
-                a = c1;
-                c1 = c2;
-                f1 = f2;
-                c2 = a + gr * (b - a);
-                f2 = cost(std::exp(c2), window);
-            }
-        }
-        return std::exp(0.5 * (a + b));
-    };
-    // Fixed point of "fit within ±1.5 FWHM of the width", from width_now.
-    constexpr double kWindowFwhm = 1.5;
-    double width = width_now_deg;
-    for (int it = 0; it < 12; ++it) {
-        const double next = minimise(kWindowFwhm * width);
-        const bool done = std::fabs(next - width) < 0.005 * width;
-        width = next;
-        if (done) {
-            break;
-        }
-    }
-    return RockingWidthFit{width, refl.size()};
+    const std::size_t mid = sigmas.size() / 2;
+    std::nth_element(
+        sigmas.begin(), sigmas.begin() + static_cast<std::ptrdiff_t>(mid),
+        sigmas.end()
+    );
+    return RockingWidthFit{sigmas[mid], sigmas.size()};
 }
 
 }  // namespace mosflm::diffraction

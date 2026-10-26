@@ -74,6 +74,14 @@ struct PositionalRefinementResult {
     double twist_mrad{};
     double rms_initial_px{};
     double rms_px{};
+    /// Final rms of the detector residuals alone (px), and of the φ
+    /// residuals (degrees) of observations that carry φ (NaN if none).
+    double rms_xy_px{};
+    double rms_phi_deg{std::numeric_limits<double>::quiet_NaN()};
+    /// Mean detector residual, predicted − observed (px): a systematic
+    /// offset between the prediction and the measured centroids.
+    double mean_dx_px{};
+    double mean_dy_px{};
     std::size_t n_input{};
     std::size_t n_used{};
     /// Why ``ok`` is false (empty when ok).

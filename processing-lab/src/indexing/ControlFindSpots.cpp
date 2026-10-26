@@ -1,6 +1,7 @@
 #include "mosflm/indexing/ControlAutoIndex.hpp"
 
 #include "mosflm/control/ControlSession.hpp"
+#include "mosflm/diffraction/Defpix.hpp"
 #include "mosflm/diffraction/DetectorInit.hpp"
 #include "mosflm/image/ImageIO.hpp"
 #include "mosflm/indexing/MultiFrameSpotFinder.hpp"
@@ -10,7 +11,9 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -143,6 +146,72 @@ std::filesystem::path resolve_findspots_frame_path(
 
 namespace {
 
+/// Frames DEFPIX samples before spot finding (shadow and halo only).
+constexpr int kFindspotsDefpixFrames = 5;
+
+/// DEFPIX's pixel classes over ``first``…``last`` for the spot search:
+/// shaded, untrusted, defective and hot pixels are left out, and the beam
+/// halo is judged against its own background, so the search neither takes
+/// the beam's flare for spots nor lets it lift the background statistics.
+/// Leaves ``settings`` unchanged with fewer than three frames or with DEFPIX
+/// off.
+void apply_defpix_to_search(
+    const control::ControlState& state,
+    const std::optional<std::filesystem::path>& image_override,
+    const image::DiffractionImage& probe,
+    int first,
+    int last,
+    SpotFindSettings& search
+) {
+    if (!state.defpix.enabled || last - first + 1 < 3) {
+        return;
+    }
+    auto settings = state.defpix;
+    settings.find_defects = false;  // a spot can stay bright over a few frames
+    DetectorGeometry det = probe.metadata.to_detector_geometry();
+    det.distance_mm = state.distance_mm;
+    det.wavelength_A = state.wavelength_A;
+    if (state.has_pixel) {
+        det.pixel_size_x_mm = state.pixel_x_mm;
+        det.pixel_size_y_mm = state.pixel_y_mm;
+    }
+    double beam_x = state.beam_x_mm;
+    double beam_y = state.beam_y_mm;
+    if (!state.has_beam) {
+        beam_x = 0.5 * probe.metadata.width * det.pixel_size_x_mm;
+        beam_y = 0.5 * probe.metadata.height * det.pixel_size_y_mm;
+    }
+    const auto frames = diffraction::defpix_frames(first, last, std::min(settings.frames, kFindspotsDefpixFrames));
+    const auto res = diffraction::run_defpix(
+        [&](int f) {
+            return f == first ? probe
+                              : image::read_diffraction_image(resolve_findspots_frame_path(state, image_override, f), f);
+        },
+        frames, det, beam_x, beam_y, settings
+    );
+    auto mask = std::make_shared<const std::vector<std::uint8_t>>(res.spot_search_mask());
+    const auto ignored = static_cast<std::size_t>(std::count(mask->begin(), mask->end(), std::uint8_t{0}));
+    const std::size_t n_halo = res.count(diffraction::PixelStatus::Halo);
+    if (ignored > 0) {
+        search.mask = mask;
+    }
+    if (n_halo > 0) {
+        auto local = std::make_shared<std::vector<float>>(res.status.size(), -1.0f);
+        for (std::size_t i = 0; i < res.status.size(); ++i) {
+            if (res.status[i] == static_cast<std::uint8_t>(diffraction::PixelStatus::Halo)) {
+                (*local)[i] = std::max(0.0f, res.background[i]);
+            }
+        }
+        search.local_background = std::move(local);
+    }
+    std::cout << "  FINDSPOTS: " << ignored << " pixels left out of the search (shaded "
+              << res.count(diffraction::PixelStatus::Shaded) << "); " << n_halo << " in the beam halo";
+    if (res.halo.found) {
+        std::cout << " (within " << std::fixed << std::setprecision(1) << res.halo.radius_px << " px)";
+    }
+    std::cout << " judged against their own background; DEFPIX on " << frames.size() << " frames\n";
+}
+
 void run_findspots(
     control::ControlState& state,
     const std::optional<std::filesystem::path>& image_override
@@ -184,6 +253,7 @@ void run_findspots(
             settings.gain = init.gain;
         }
     }
+    apply_defpix_to_search(state, image_override, probe, first, last, settings);
 
     SpotList spots;
     if (state.findspots.multiframe && last > first) {

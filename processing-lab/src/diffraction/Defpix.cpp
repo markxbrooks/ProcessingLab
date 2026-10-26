@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <numbers>
 #include <sstream>
 #include <stdexcept>
 
@@ -183,6 +184,154 @@ std::size_t DefpixResult::n_rejected() const {
     return status.size() - count(PixelStatus::Trusted) - count(PixelStatus::DetectorMasked);
 }
 
+std::vector<std::uint8_t> DefpixResult::spot_search_mask() const {
+    std::vector<std::uint8_t> mask(status.size());
+    std::transform(status.begin(), status.end(), mask.begin(), [](std::uint8_t s) {
+        const auto st = static_cast<PixelStatus>(s);
+        return static_cast<std::uint8_t>(st == PixelStatus::Trusted || st == PixelStatus::DetectorMasked ||
+                                         st == PixelStatus::ExcludedResolution || st == PixelStatus::Halo);
+    });
+    return mask;
+}
+
+BeamHalo find_beam_halo(
+    const std::vector<float>& background,
+    const std::vector<std::uint8_t>& usable,
+    int width,
+    int height,
+    double beam_col,
+    double beam_row,
+    double row_scale,
+    int n_frames,
+    const DefpixSettings& settings
+) {
+    BeamHalo halo;
+    const std::size_t npix = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    if (background.size() != npix || usable.size() != npix || n_frames < 1) {
+        return halo;
+    }
+    double level = 0.0;
+    std::size_t n_level = 0;
+    for (std::size_t i = 0; i < npix; ++i) {
+        if (usable[i] && background[i] >= 0.0f) {
+            level += background[i];
+            ++n_level;
+        }
+    }
+    if (n_level == 0) {
+        return halo;
+    }
+    level /= static_cast<double>(n_level);
+    // Rings wide enough that one 50 px from the beam holds ~500 counts.
+    constexpr double kRingCounts = 500.0;
+    constexpr double kRingRadiusPx = 50.0;
+    const double frames = std::max(1, n_frames - 1);
+    const int ring_px = std::clamp(
+        static_cast<int>(std::ceil(kRingCounts / (2.0 * std::numbers::pi * kRingRadiusPx * std::max(level, 1e-9) * frames))), 2, 16
+    );
+    halo.ring_px = ring_px;
+
+    // The walk may run a window past the search radius, and a few windows on.
+    const double reach_px = settings.halo_search_px + 4.0 * settings.halo_window_px;
+    const int n_rings = static_cast<int>(reach_px / ring_px) + 1;
+    std::vector<std::vector<float>> rings(static_cast<std::size_t>(n_rings));
+    const int r0 = std::max(0, static_cast<int>(beam_row - reach_px / std::max(row_scale, 1e-9)) - 1);
+    const int r1 = std::min(height - 1, static_cast<int>(beam_row + reach_px / std::max(row_scale, 1e-9)) + 1);
+    const int c0 = std::max(0, static_cast<int>(beam_col - reach_px) - 1);
+    const int c1 = std::min(width - 1, static_cast<int>(beam_col + reach_px) + 1);
+    for (int r = r0; r <= r1; ++r) {
+        for (int c = c0; c <= c1; ++c) {
+            const std::size_t i = static_cast<std::size_t>(r) * static_cast<std::size_t>(width) +
+                                  static_cast<std::size_t>(c);
+            if (!usable[i] || background[i] < 0.0f) {
+                continue;
+            }
+            const int k = static_cast<int>(std::hypot(c - beam_col, (r - beam_row) * row_scale) / ring_px);
+            if (k < n_rings) {
+                rings[static_cast<std::size_t>(k)].push_back(background[i]);
+            }
+        }
+    }
+    // Each ring's mean without its brightest 5% (spots left after taking
+    // out each pixel's largest frame); too-small rings are left unknown.
+    constexpr std::size_t kMinRingPixels = 100;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<double> profile(static_cast<std::size_t>(n_rings), nan);
+    for (std::size_t k = 0; k < rings.size(); ++k) {
+        auto& v = rings[k];
+        if (v.size() < kMinRingPixels) {
+            continue;
+        }
+        const auto keep = static_cast<std::size_t>(0.95 * static_cast<double>(v.size()));
+        std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(keep), v.end());
+        double sum = 0.0;
+        for (std::size_t j = 0; j < keep; ++j) {
+            sum += v[j];
+        }
+        profile[k] = sum / static_cast<double>(keep);
+    }
+    // Smooth over three rings.
+    std::vector<double> smooth(profile.size(), nan);
+    for (std::size_t k = 0; k < profile.size(); ++k) {
+        if (std::isnan(profile[k])) {
+            continue;
+        }
+        double sum = 0.0;
+        int n = 0;
+        for (std::size_t j = k == 0 ? 0 : k - 1; j <= std::min(k + 1, profile.size() - 1); ++j) {
+            if (!std::isnan(profile[j])) {
+                sum += profile[j];
+                ++n;
+            }
+        }
+        smooth[k] = sum / n;
+    }
+    // Floor: the lowest level within the window further out.
+    const int window = std::max(2, static_cast<int>(settings.halo_window_px / ring_px));
+    std::vector<double> floor(smooth.size(), nan);
+    for (std::size_t k = 0; k < smooth.size(); ++k) {
+        double lo = std::numeric_limits<double>::infinity();
+        for (std::size_t j = k; j <= std::min(k + static_cast<std::size_t>(window), smooth.size() - 1); ++j) {
+            if (!std::isnan(smooth[j])) {
+                lo = std::min(lo, smooth[j]);
+            }
+        }
+        floor[k] = std::isfinite(lo) ? lo : nan;
+    }
+    // Peak within the search radius, then walk out to where the excess over
+    // the floor has fallen to the end fraction of the peak's.
+    const int search = std::min(n_rings - 1, static_cast<int>(settings.halo_search_px / ring_px));
+    int peak = -1;
+    for (int k = 0; k <= search; ++k) {
+        if (!std::isnan(smooth[static_cast<std::size_t>(k)]) &&
+            (peak < 0 || smooth[static_cast<std::size_t>(k)] > smooth[static_cast<std::size_t>(peak)])) {
+            peak = k;
+        }
+    }
+    if (peak < 0 || std::isnan(floor[static_cast<std::size_t>(peak)])) {
+        return halo;
+    }
+    const double top = smooth[static_cast<std::size_t>(peak)];
+    const double base = floor[static_cast<std::size_t>(peak)];
+    halo.peak_radius_px = (peak + 0.5) * ring_px;
+    halo.peak_level = top;
+    halo.floor_level = base;
+    if (!(top >= settings.halo_min_excess * base) || !(top > base)) {
+        return halo;
+    }
+    const double amplitude = top - base;
+    for (int k = peak; k < n_rings - window; ++k) {
+        const double v = smooth[static_cast<std::size_t>(k)];
+        const double f = floor[static_cast<std::size_t>(k)];
+        if (!std::isnan(v) && !std::isnan(f) && v - f <= settings.halo_end_fraction * amplitude) {
+            halo.found = true;
+            halo.radius_px = static_cast<double>(k + 1) * ring_px;
+            return halo;
+        }
+    }
+    return halo;  // never flattened within reach: not a halo
+}
+
 std::vector<int> defpix_frames(int first, int last, int n) {
     std::vector<int> out;
     const int total = last - first + 1;
@@ -292,7 +441,7 @@ DefpixResult run_defpix(
             }
         }
     }
-    if (!detect || (!settings.find_shadows && !settings.find_defects)) {
+    if (!detect || (!settings.find_shadows && !settings.find_defects && !settings.find_halo)) {
         return res;
     }
 
@@ -427,6 +576,30 @@ DefpixResult run_defpix(
             }
         }
     }
+
+    if (settings.find_halo) {
+        // A ring wholly lit by the beam's flare is its own median above, so
+        // the shaded test cannot see it: walk out along the radial
+        // background instead, from the pixels still trusted.
+        std::vector<std::uint8_t> usable(npix);
+        for (std::size_t i = 0; i < npix; ++i) {
+            usable[i] = static_cast<std::uint8_t>(is(i, PixelStatus::Trusted) && sums.n_valid[i] >= 2);
+        }
+        res.halo = find_beam_halo(res.background, usable, w, h, bc, br, py / px, nf, settings);
+        if (res.halo.found) {
+            for (int r = 0; r < h; ++r) {
+                for (int c = 0; c < w; ++c) {
+                    const std::size_t i = static_cast<std::size_t>(r) * static_cast<std::size_t>(w) +
+                                          static_cast<std::size_t>(c);
+                    if (is(i, PixelStatus::Trusted) && radius_px(c, r) <= res.halo.radius_px) {
+                        set(i, PixelStatus::Halo);
+                    }
+                }
+            }
+            const double edge_mm = (res.halo.radius_px + settings.halo_margin_px) * px;
+            res.halo_dmax_A = wave / (2.0 * std::sin(0.5 * std::atan2(edge_mm, dist)));
+        }
+    }
     return res;
 }
 
@@ -450,7 +623,7 @@ void write_defpix_cbf(const std::filesystem::path& path, const DefpixResult& res
     std::ostringstream hdr;
     hdr << "# DEFPIX control image written by ProcessingLab\n"
         << "# Trusted: spot-free background summed over " << result.frames_used.size() << " frames\n"
-        << "# -3: ignored (untrusted, excluded resolution, shaded, defective, hot)\n"
+        << "# -3: ignored (untrusted, excluded resolution, shaded, defective, hot, halo)\n"
         << "# -1: masked by the detector\n";
     std::string line = "# Frames";
     for (const int f : result.frames_used) {
@@ -466,7 +639,11 @@ void write_defpix_cbf(const std::filesystem::path& path, const DefpixResult& res
         << "# Excluded_resolution " << result.count(PixelStatus::ExcludedResolution) << '\n'
         << "# Shaded " << result.count(PixelStatus::Shaded) << '\n'
         << "# Defective " << result.count(PixelStatus::Defective) << '\n'
-        << "# Hot " << result.count(PixelStatus::Hot) << '\n';
+        << "# Hot " << result.count(PixelStatus::Hot) << '\n'
+        << "# Halo " << result.count(PixelStatus::Halo) << '\n';
+    if (result.halo.found) {
+        hdr << "# Halo_radius_px " << std::fixed << std::setprecision(1) << result.halo.radius_px << '\n';
+    }
     image::write_minicbf(path, img, hdr.str());
 }
 

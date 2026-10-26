@@ -477,7 +477,7 @@ void ProcessRecord::step_done(RunStep step, const control::ControlGoResult& r, c
     }
     const auto& d = *r.defpix;
     const std::size_t ignored =
-        d.untrusted_region + d.excluded_resolution + d.shaded + d.defective + d.hot;
+        d.untrusted_region + d.excluded_resolution + d.shaded + d.defective + d.hot + d.halo;
     Json& s = stage(RunStep::DEFPIX);
     s["status"] = "completed";
     s["finished_at"] = now_rfc3339();
@@ -656,12 +656,19 @@ void ProcessRecord::end_stage(const control::ControlGoResult& r, const control::
             px["untrusted_region"] = d.untrusted_region;
             px["excluded_resolution"] = d.excluded_resolution;
             px["shaded"] = d.shaded;
+            px["halo"] = d.halo;
             px["defective"] = d.defective;
             px["hot"] = d.hot;
             in["defpix"] = Json(Json::Object{{"frames_sampled", std::move(frames)},
                                              {"block_px", d.shadow_block_px > 0 ? Json(d.shadow_block_px) : Json()},
                                              {"defects_checked", !d.defects_skipped},
-                                             {"pixels", std::move(px)}});
+                                             {"pixels", std::move(px)},
+                                             {"halo", d.halo_radius_px > 0.0
+                                                          ? Json(Json::Object{
+                                                                {"radius_px", d.halo_radius_px},
+                                                                {"integration_dmax_angstrom",
+                                                                 d.halo_dmax_A > 0.0 ? Json(d.halo_dmax_A) : Json()}})
+                                                          : Json()}});
             if (!d.image.empty()) {
                 add_output(d.image, "defpix_image");
             }

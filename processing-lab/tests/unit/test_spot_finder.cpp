@@ -7,7 +7,9 @@
 #include "test_util.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <vector>
 
 using mosflm::image::DiffractionImage;
@@ -59,6 +61,55 @@ int main() {
     CHECK_EQ(round.spots.size(), found.spots.size());
     CHECK(std::fabs(round.spots[0].x_mm - found.spots[0].x_mm) < 0.05);
     std::filesystem::remove(tmp);
+
+    // A mask (e.g. DEFPIX's beam halo) hides the peak at (16, 16).
+    {
+        auto mask = std::make_shared<std::vector<std::uint8_t>>(64U * 64U, 1);
+        for (int r = 10; r < 23; ++r) {
+            for (int c = 10; c < 23; ++c) {
+                (*mask)[static_cast<std::size_t>(r) * 64U + static_cast<std::size_t>(c)] = 0;
+            }
+        }
+        SpotFindSettings masked = settings;
+        masked.mask = mask;
+        const SpotList kept = SpotFinder{}.find(img, masked);
+        CHECK_EQ(kept.spots.size(), found.spots.size() - 1);
+        for (const auto& spot : kept.spots) {
+            CHECK(std::hypot(spot.x_mm - 1.6, spot.y_mm - 1.6) > 0.5);
+        }
+        masked.mask = std::make_shared<std::vector<std::uint8_t>>(10U, 0);  // wrong size: ignored
+        CHECK_EQ(SpotFinder{}.find(img, masked).spots.size(), found.spots.size());
+    }
+
+    // A halo (local background 200) hides a faint bump but keeps a strong spot.
+    {
+        auto halo = make_synthetic_frame();
+        auto local = std::make_shared<std::vector<float>>(64U * 64U, -1.0f);
+        for (int r = 40; r < 60; ++r) {
+            for (int c = 4; c < 24; ++c) {
+                const auto i = static_cast<std::size_t>(r) * 64U + static_cast<std::size_t>(c);
+                halo.pixels[i] = 200;
+                (*local)[i] = 200.0f;
+            }
+        }
+        halo.pixels[50U * 64U + 8U] = 260;   // 60 over the halo: ~4σ, noise
+        halo.pixels[50U * 64U + 18U] = 5000; // a real spot
+        SpotFindSettings judged = settings;
+        const auto near = [](const SpotList& list, double x_mm, double y_mm) {
+            for (const auto& spot : list.spots) {
+                if (std::hypot(spot.x_mm - x_mm, spot.y_mm - y_mm) < 0.15) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        const SpotList plain = SpotFinder{}.find(halo, judged);
+        CHECK(near(plain, 0.8, 5.0));  // the global threshold takes the bump
+        judged.local_background = local;
+        const SpotList local_found = SpotFinder{}.find(halo, judged);
+        CHECK(!near(local_found, 0.8, 5.0));
+        CHECK(near(local_found, 1.8, 5.0));
+    }
 
     // Oracle .spt round-trip write preserves spot count.
     const std::filesystem::path insulin =

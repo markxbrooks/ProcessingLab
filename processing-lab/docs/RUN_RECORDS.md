@@ -225,7 +225,10 @@ through `refinement.tilt_twist_mrad`, as before.
 
 `defpix.pixels` counts every pixel once: `trusted`, `detector_masked` (gaps
 and the detector's bad-pixel mask), `untrusted_region`, `excluded_resolution`,
-`shaded`, `defective` and `hot`. Integration ignores all but `trusted`.
+`shaded`, `defective`, `hot` and `halo` (inside the beam halo). Integration
+ignores all but `trusted`. `defpix.halo` is `{radius_px,
+integration_dmax_angstrom}` when a halo was found (the limit `null` when
+`DMAX` / `RESOLUTION` set it), otherwise `null`.
 Its control image is listed in `outputs` with kind `defpix_image`; the
 settings are in `input.json` `settings.integration.defpix`.
 

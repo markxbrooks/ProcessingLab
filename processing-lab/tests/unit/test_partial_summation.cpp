@@ -61,6 +61,16 @@ int main() {
         CHECK(hard.size() == 1u);
         CHECK((hard[0].flag & 4) != 0);
     }
+    // Bit 512 is a spatial overlap kept for the mosaicity sample. The sum
+    // drops that slice, so its intensity and flag do not reach the MTZ.
+    {
+        auto keep = slice(1, 0.6f, 40.0f, 10.0f, 0);
+        auto drop = slice(2, 0.4f, 80.0f, 10.2f, 512);
+        const auto summed = sum_partial_slices({keep, drop});
+        CHECK(summed.size() == 1u);
+        CHECK(close(summed[0].intensity, 40.0, 1e-4));
+        CHECK(summed[0].flag == 0);
+    }
     // Re-centred with signed weights in the window: the −1 tail slice counts.
     const double phi = (25 * 9.925 + 50 * 10.075 + 23 * 10.225) / 98.0;
     CHECK(close(r.phi_obs, phi, 1e-4));
@@ -81,109 +91,130 @@ int main() {
     // weights would give √((1.125 + 12·1.65²) / 112) = 0.550°.
     CHECK(close(rs[0].phi_obs_sd, 0.2608, 1e-3));
 
-    // Rocking-width fit: slices predicted at W = 0.5° (reach 4σ + 2 frames)
-    // of curves that are really W = 1.0° (ζ = 0.5) — the reach truncates
-    // them at ~2.5σ, which the fit models instead of reading as narrow.
+    // σ_M from the core of each rocking curve, inside a fixed |ε| ≤ 1° cap.
+    // ζ = 0.5, true σ_M = 0.40° so σφ = 0.80°. The same curves predicted at
+    // two different σ_M (different slice widths) must return the same value.
     {
         using mosflm::diffraction::fit_rocking_width;
-        const double osc = 0.2, zeta = 0.5, w_now = 0.5, w_true = 1.0;
-        const double s_now = w_now / (2.355 * zeta);
-        const double s_true = w_true / (2.355 * zeta);
+        const double osc = 0.2;
+        const double zeta = 0.5;
+        const double sigma_true = 0.40;
+        const double s_true = sigma_true / zeta;
         auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
-        std::vector<MosflmReflection> rows2;
-        for (int n = 0; n < 60; ++n) {
-            const double phic = 10.0 + 2.0 * n + 0.037 * n;  // off-grid φcalc
-            const double reach = 4.0 * s_now + 2.0 * osc;
-            for (int f = static_cast<int>(std::floor((phic - reach) / osc));
-                 f * osc <= phic + reach; ++f) {
-                const double f0 = f * osc - phic, f1 = f0 + osc;
-                auto r = slice(f, 0.0f, 0.0f, 0.0f, 0);
-                r.h = r.h0 = n;
-                r.rot = static_cast<float>(phic);
-                r.width = static_cast<float>(6.0 * s_now);
-                r.fractioncalc = static_cast<float>(cdf(f1 / s_now) - cdf(f0 / s_now));
-                r.intensity = static_cast<float>(
-                    2000.0 * (cdf(f1 / s_true) - cdf(f0 / s_true)) + ((f & 1) ? 1.5 : -1.5)
-                );
-                r.phi_obs = static_cast<float>(f * osc + 0.5 * osc);
-                rows2.push_back(r);
-            }
-        }
-        const auto fit = fit_rocking_width(rows2, w_now, osc);
-        CHECK(fit.has_value() && fit->n_reflections == 60u);
-        CHECK(fit.has_value() && close(fit->width_deg, w_true, 0.03));
-        // Too few strong reflections → no fit.
-        CHECK(!fit_rocking_width({rows2.begin(), rows2.begin() + 30}, w_now, osc).has_value());
-    }
-
-    // Predicted too wide (W = 2.0°, so many tail frames) with a small
-    // positive background bias on every slice: the bias must not read as
-    // heavier tails. Without a baseline in the fit this fed back through
-    // MOSAIC → reach and ran away (76c1b: 0.96° → 2.0°; XDS 1.04°).
-    {
-        using mosflm::diffraction::fit_rocking_width;
-        const double osc = 0.2, zeta = 0.5, w_now = 2.0, w_true = 1.0;
-        const double s_now = w_now / (2.355 * zeta);
-        const double s_true = w_true / (2.355 * zeta);
-        auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
-        std::vector<MosflmReflection> rows3;
-        for (int n = 0; n < 60; ++n) {
-            const double phic = 10.0 + 4.0 * n + 0.037 * n;
-            const double reach = 4.0 * s_now + 2.0 * osc;
-            for (int f = static_cast<int>(std::floor((phic - reach) / osc)); f * osc <= phic + reach; ++f) {
-                const double f0 = f * osc - phic, f1 = f0 + osc;
-                auto r = slice(f, 0.0f, 0.0f, 0.0f, 0);
-                r.h = r.h0 = n;
-                r.rot = static_cast<float>(phic);
-                r.width = static_cast<float>(6.0 * s_now);
-                r.fractioncalc = static_cast<float>(cdf(f1 / s_now) - cdf(f0 / s_now));
-                r.intensity = static_cast<float>(2000.0 * (cdf(f1 / s_true) - cdf(f0 / s_true)) + 8.0);
-                r.phi_obs = static_cast<float>(f * osc + 0.5 * osc);
-                rows3.push_back(r);
-            }
-        }
-        const auto fit = fit_rocking_width(rows3, w_now, osc);
-        CHECK(fit.has_value() && close(fit->width_deg, w_true, 0.05));
-    }
-
-    // Heavy-tailed rocking curves (a Gaussian core with 20% of the flux in a
-    // broad Lorentzian, as on 76c1b): the width must not depend on how far
-    // the prediction reached. A Gaussian fitted to every slice grew with the
-    // width predicted with, so MOSAIC crept up at every re-estimate.
-    {
-        using mosflm::diffraction::fit_rocking_width;
-        const double osc = 0.2, zeta = 0.6, w_core = 0.8, hwhm_tail = 1.5;
-        auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
-        const auto lorentz_cdf = [&](double x) { return 0.5 + std::atan(x * zeta / hwhm_tail) / 3.14159265358979; };
-        const auto fitted_with = [&](double w_now) {
-            const double s_now = w_now / (2.355 * zeta);
-            const double s_core = w_core / (2.355 * zeta);
-            std::vector<MosflmReflection> rows4;
-            for (int n = 0; n < 80; ++n) {
-                const double phic = 10.0 + 7.0 * n + 0.037 * n;
-                const double reach = 4.0 * s_now + 2.0 * osc;
-                for (int f = static_cast<int>(std::floor((phic - reach) / osc)); f * osc <= phic + reach; ++f) {
-                    const double f0 = f * osc - phic, f1 = f0 + osc;
+        const auto make_rows = [&](double sigma_now) {
+            const double s_now = sigma_now / zeta;
+            std::vector<MosflmReflection> rows;
+            for (int n = 0; n < 50; ++n) {
+                const double phic = 10.0 + 6.0 * n + 0.037 * n;
+                const double reach = 1.3 / zeta;
+                for (int f = static_cast<int>(std::floor((phic - reach) / osc));
+                     f * osc <= phic + reach; ++f) {
+                    const double mid = f * osc + 0.5 * osc;
+                    const double f0 = f * osc - phic;
+                    const double f1 = f0 + osc;
                     auto r = slice(f, 0.0f, 0.0f, 0.0f, 0);
                     r.h = r.h0 = n;
                     r.rot = static_cast<float>(phic);
                     r.width = static_cast<float>(6.0 * s_now);
-                    r.fractioncalc = static_cast<float>(cdf(f1 / s_now) - cdf(f0 / s_now));
                     r.intensity = static_cast<float>(
-                        4000.0 * (0.8 * (cdf(f1 / s_core) - cdf(f0 / s_core)) +
-                                  0.2 * (lorentz_cdf(f1) - lorentz_cdf(f0))));
+                        5000.0 * (cdf(f1 / s_true) - cdf(f0 / s_true))
+                    );
+                    r.phi_obs = static_cast<float>(mid);
+                    rows.push_back(r);
+                }
+            }
+            return rows;
+        };
+        const auto narrow = fit_rocking_width(make_rows(0.25), 0.25, osc);
+        const auto wide = fit_rocking_width(make_rows(0.90), 0.90, osc);
+        CHECK(narrow.has_value() && wide.has_value());
+        CHECK(narrow.has_value() && close(narrow->sigma_m_deg, sigma_true, 0.05));
+        CHECK(wide.has_value() && close(wide->sigma_m_deg, sigma_true, 0.05));
+        CHECK(narrow.has_value() && wide.has_value() &&
+              std::fabs(narrow->sigma_m_deg - wide->sigma_m_deg) < 0.05);
+        const auto few = make_rows(0.25);
+        CHECK(!fit_rocking_width({few.begin(), few.begin() + 30}, 0.25, osc).has_value());
+    }
+
+    // A constant background on every slice is taken from the wings of the
+    // cap and must not widen the second moment.
+    {
+        using mosflm::diffraction::fit_rocking_width;
+        const double osc = 0.2;
+        const double zeta = 0.5;
+        const double sigma_true = 0.40;
+        const double sigma_now = 0.50;
+        const double s_true = sigma_true / zeta;
+        const double s_now = sigma_now / zeta;
+        auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
+        std::vector<MosflmReflection> rows3;
+        for (int n = 0; n < 50; ++n) {
+            const double phic = 10.0 + 6.0 * n + 0.037 * n;
+            const double reach = 1.3 / zeta;
+            for (int f = static_cast<int>(std::floor((phic - reach) / osc));
+                 f * osc <= phic + reach; ++f) {
+                const double f0 = f * osc - phic;
+                const double f1 = f0 + osc;
+                auto r = slice(f, 0.0f, 0.0f, 0.0f, 0);
+                r.h = r.h0 = n;
+                r.rot = static_cast<float>(phic);
+                r.width = static_cast<float>(6.0 * s_now);
+                r.intensity = static_cast<float>(
+                    5000.0 * (cdf(f1 / s_true) - cdf(f0 / s_true)) + 20.0
+                );
+                r.phi_obs = static_cast<float>(f * osc + 0.5 * osc);
+                rows3.push_back(r);
+            }
+        }
+        const auto fit = fit_rocking_width(rows3, sigma_now, osc);
+        CHECK(fit.has_value() && close(fit->sigma_m_deg, sigma_true, 0.05));
+    }
+
+    // Flux beyond |ε| = 1° is outside the sample, so a heavy tail does not
+    // move σ_M relative to the same core with those slices removed.
+    {
+        using mosflm::diffraction::fit_rocking_width;
+        const double osc = 0.2;
+        const double zeta = 0.5;
+        const double sigma_true = 0.40;
+        const double sigma_now = 0.50;
+        const double s_true = sigma_true / zeta;
+        const double s_now = sigma_now / zeta;
+        auto cdf = [](double z) { return 0.5 * std::erfc(-z / std::sqrt(2.0)); };
+        const auto lorentz_cdf = [&](double x) {
+            return 0.5 + std::atan(x / 1.5) / 3.14159265358979;
+        };
+        const auto fitted = [&](bool tails) {
+            std::vector<MosflmReflection> rows4;
+            const double reach = tails ? 3.0 / zeta : 1.0 / zeta;
+            for (int n = 0; n < 50; ++n) {
+                const double phic = 10.0 + 8.0 * n + 0.037 * n;
+                for (int f = static_cast<int>(std::floor((phic - reach) / osc));
+                     f * osc <= phic + reach; ++f) {
+                    const double f0 = f * osc - phic;
+                    const double f1 = f0 + osc;
+                    const double eps = zeta * (f0 + f1) * 0.5;
+                    auto r = slice(f, 0.0f, 0.0f, 0.0f, 0);
+                    r.h = r.h0 = n;
+                    r.rot = static_cast<float>(phic);
+                    r.width = static_cast<float>(6.0 * s_now);
+                    double bin = cdf(f1 / s_true) - cdf(f0 / s_true);
+                    if (tails && std::fabs(eps) > 1.0) {
+                        bin += 0.15 * (lorentz_cdf(f1) - lorentz_cdf(f0));
+                    }
+                    r.intensity = static_cast<float>(5000.0 * bin);
                     r.phi_obs = static_cast<float>(f * osc + 0.5 * osc);
                     rows4.push_back(r);
                 }
             }
-            const auto fit = fit_rocking_width(rows4, w_now, osc);
-            return fit ? fit->width_deg : -1.0;
+            const auto fit = fit_rocking_width(rows4, sigma_now, osc);
+            return fit ? fit->sigma_m_deg : -1.0;
         };
-        const double narrow = fitted_with(0.6);
-        const double wide = fitted_with(1.6);
-        CHECK_MSG(narrow > 0.0 && wide > 0.0 && std::fabs(narrow - wide) < 0.1,
-                  "heavy tails: " + std::to_string(narrow) + " vs " + std::to_string(wide));
-        CHECK_MSG(std::fabs(wide - w_core) < 0.2, "core width " + std::to_string(wide));
+        const double core = fitted(false);
+        const double tailed = fitted(true);
+        CHECK_MSG(core > 0.0 && tailed > 0.0 && std::fabs(core - tailed) < 0.05,
+                  "tails beyond the cap: " + std::to_string(core) + " vs " +
+                      std::to_string(tailed));
     }
 
     // Incomplete edge reflection stays partial.

@@ -18,6 +18,11 @@ Usage (from ProcessingLab root)::
       --xds-inp processing-lab/tools/data/76c1b_xds_seed.INP \\
       --workdir ~/projects/76c1b_0002212/xds_vs_pl_rerun --aimless
 
+  # Scale an existing comparison again (one space group for both)
+  python3 processing-lab/tools/compare_xds_vs_processinglab.py \\
+      --workdir ~/projects/76c1b_0002212/xds_vs_pl_20261025 \\
+      --skip-pl --skip-xds --aimless
+
   # Re-parse an existing workdir without re-running
   python3 processing-lab/tools/compare_xds_vs_processinglab.py \\
       --workdir ~/projects/76c1b_0002212/xds_vs_pl_20261025 --parse-only
@@ -487,12 +492,15 @@ def run_aimless(
     space_group: Optional[str] = None,
     resolution: Optional[float] = None,
 ) -> float:
-    """Run Pointless then Aimless on an unmerged MTZ or XDS_ASCII.HKL.
+    """Run Pointless then Aimless on a ProcessingLab MTZ or an XDS_ASCII file.
 
-    :param hkl: Unmerged MTZ (``HKLIN``) or XDS ``XDS_ASCII.HKL`` (``XDSIN``).
+    Both data sets go through here with the same keywords, so their
+    statistics compare: Pointless reads ``HKLIN`` (or ``XDSIN``), and Aimless
+    is started with ``GO``, as :file:`doc/reindex_scale.com` does.
+
+    :param hkl: ProcessingLab ``process.mtz`` or XDS ``XDS_ASCII.HKL``.
     :param xds_ascii: *hkl* is an XDS_ASCII file.
-    :param space_group: Force this space group in Pointless (e.g. ``"P 1 2 1"``),
-        so both programs' data are scaled in the same group.
+    :param space_group: Force this space group in Pointless (e.g. ``"P 1 2 1"``).
     :param resolution: Aimless high-resolution cutoff (Å), or ``None``.
     :return: wall-clock seconds
     """
@@ -508,13 +516,145 @@ def run_aimless(
         log=out_dir / "pointless.log",
         stdin_text=f"SPACEGROUP {space_group}\n" if space_group else "",
     )
+    aimless_kw = "GO\n"
+    if resolution:
+        aimless_kw = f"RESOLUTION HIGH {resolution}\nGO\n"
     _run(
         [str(aimless), "HKLIN", str(pointless_mtz), "HKLOUT", str(aimless_mtz)],
         cwd=out_dir,
         log=out_dir / "aimless.log",
-        stdin_text=f"RESOLUTION HIGH {resolution}\n" if resolution else "",
+        stdin_text=aimless_kw,
     )
     return time.perf_counter() - t0
+
+
+def pointless_decision(log: Path) -> dict[str, Any]:
+    """Pointless's space-group decision and its confidences, from its log.
+
+    :param log: ``pointless.log``
+    :return: ``space_group`` (symbol), ``laue_confidence``,
+        ``space_group_confidence`` and ``laue_probability``, where found
+    """
+    text = log.read_text(errors="replace")
+    out: dict[str, Any] = {}
+    patterns = {
+        "space_group": r"Best Solution:\s*space group\s+(.+?)\s*$",
+        "laue_probability": r"^\s*Laue group probability:\s+([\d.]+)",
+        "space_group_confidence": r"^\s*Space group confidence:\s+([\d.]+)",
+        "laue_confidence": r"^\s*Laue group confidence\s+([\d.]+)",
+    }
+    for key, pattern in patterns.items():
+        m = re.search(pattern, text, flags=re.MULTILINE)
+        if m:
+            out[key] = m.group(1) if key == "space_group" else float(m.group(1))
+    return out
+
+
+def run_pointless(*, hkl: Path, out_dir: Path, pointless: Path, xds_ascii: bool = False) -> dict[str, Any]:
+    """Run Pointless with no space group forced and return its decision.
+
+    :param hkl: ProcessingLab MTZ or XDS ``XDS_ASCII.HKL``
+    :param out_dir: working directory (gets ``pointless.log``)
+    :param pointless: the ``pointless`` executable
+    :param xds_ascii: *hkl* is an XDS_ASCII file
+    :return: :func:`pointless_decision` of the run
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _run(
+        [str(pointless), "XDSIN" if xds_ascii else "HKLIN", str(hkl), "HKLOUT", str(out_dir / "pointless.mtz")],
+        cwd=out_dir,
+        log=out_dir / "pointless.log",
+    )
+    return pointless_decision(out_dir / "pointless.log")
+
+
+def choose_space_group(decisions: Mapping[str, Mapping[str, Any]]) -> tuple[Optional[str], str]:
+    """One space group for every program, from Pointless's decisions.
+
+    The Laue group sets the merging statistics, so when the decisions differ
+    the one Pointless was surer of (higher Laue-group confidence, then
+    space-group confidence) is used for both.
+
+    :param decisions: Pointless decision per data set (``ProcessingLab``, ``XDS``)
+    :return: ``(symbol, reason)``; symbol ``None`` if Pointless chose nothing
+    """
+    chosen = {name: d for name, d in decisions.items() if d.get("space_group")}
+    if not chosen:
+        return None, "Pointless chose no space group"
+    groups = {d["space_group"] for d in chosen.values()}
+    if len(groups) == 1:
+        return groups.pop(), f"{' and '.join(chosen)} agree"
+    name, best = max(
+        chosen.items(),
+        key=lambda item: (item[1].get("laue_confidence", 0.0), item[1].get("space_group_confidence", 0.0)),
+    )
+    others = ", ".join(f"{n} {d['space_group']}" for n, d in chosen.items() if n != name)
+    return best["space_group"], (
+        f"{name}'s choice (Laue-group confidence {best.get('laue_confidence', 0.0):.2f}; {others})"
+    )
+
+
+def space_group_number(symbol: str) -> int:
+    """Space group number of a Hermann–Mauguin *symbol* or number string."""
+    if symbol.strip().isdigit():
+        return int(symbol)
+    import gemmi
+
+    group = gemmi.find_spacegroup_by_name(symbol)
+    if group is None:
+        raise ValueError(f"unknown space group {symbol!r}")
+    return group.number
+
+
+def correct_space_group(xds_dir: Path) -> Optional[int]:
+    """The ``SPACE_GROUP_NUMBER`` the last XDS CORRECT ran in, or ``None``."""
+    lp = xds_dir / "CORRECT.LP"
+    if not lp.is_file():
+        return None
+    found = re.findall(r"SPACE_GROUP_NUMBER=\s*(\d+)", lp.read_text(errors="replace"))
+    return int(found[0]) if found else None
+
+
+def rerun_correct(
+    *,
+    exe: Path,
+    xds_dir: Path,
+    image: Path,
+    data_range: tuple[int, int],
+    spot_range: tuple[int, int],
+    seed: Optional[Path],
+    nproc: int,
+    include_resolution: tuple[float, float],
+    exclude_ice: bool,
+    space_group: int,
+) -> float:
+    """Re-run XDS CORRECT alone in *space_group* (with IDXREF's cell for its
+    lattice), keeping the previous ``CORRECT.LP`` and ``XDS_ASCII.HKL``.
+
+    :return: wall-clock seconds
+    :raises subprocess.CalledProcessError: if IDXREF.LP has no such lattice or XDS fails
+    """
+    cell = idxref_cell(xds_dir / "IDXREF.LP", space_group)
+    if cell is None:
+        raise subprocess.CalledProcessError(1, f"no {bravais_for_space_group(space_group)} cell in IDXREF.LP")
+    for name in ("CORRECT.LP", "XDS_ASCII.HKL"):
+        src = xds_dir / name
+        if src.is_file():
+            shutil.copy2(src, xds_dir / f"{src.stem}_previous{src.suffix}")
+    write_xds_inp(
+        xds_dir / "XDS.INP",
+        image=image,
+        data_range=data_range,
+        spot_range=spot_range,
+        job="CORRECT",
+        nproc=nproc,
+        space_group=space_group,
+        seed=seed,
+        include_resolution=include_resolution,
+        exclude_ice=exclude_ice,
+        cell=cell,
+    )
+    return _run([str(exe)], cwd=xds_dir, log=xds_dir / "xds_correct.log")
 
 
 def _search(text: str, pattern: str, flags: int = 0) -> Optional[re.Match[str]]:
@@ -808,7 +948,9 @@ def print_summary(summary: Mapping[str, Any]) -> None:
     aim = summary.get("aimless") or {}
     aim_x = summary.get("aimless_xds") or {}
 
+    xds_sg = xds.get("correct_space_group") or xds.get("space_group")
     rows = [
+        ("Space group", pl.get("space_group", "—"), xds_sg or "—"),
         ("Index cell", _fmt_cell(pl.get("cell_index")), _fmt_cell(xds.get("cell_index"))),
         ("Refined cell", _fmt_cell(pl.get("cell_refined") or pl.get("cell")),
          _fmt_cell(xds.get("cell_refined"))),
@@ -835,6 +977,9 @@ def print_summary(summary: Mapping[str, Any]) -> None:
     for name, a, b in rows:
         print(f"{name:<18} {str(a):<36} {str(b):<36}")
 
+    choice = summary.get("space_group_choice") or {}
+    if choice:
+        print(f"\nSpace group for scaling: {choice.get('chosen')} ({choice.get('reason')})")
     if aim or aim_x:
         print("\nPointless + Aimless (the same programs and settings for both):")
         print(f"{'metric':<18} {'ProcessingLab':<36} {'XDS (XDS_ASCII.HKL)':<36}")
@@ -936,9 +1081,13 @@ def build_argparser() -> argparse.ArgumentParser:
         help="run Pointless+Aimless on ProcessingLab's process.mtz and XDS's XDS_ASCII.HKL",
     )
     ap.add_argument(
+        "--space-group",
         "--aimless-spacegroup",
-        default=None,
-        help="force this space group in Pointless for both (e.g. 'P 1 2 1')",
+        dest="space_group",
+        default="auto",
+        help="space group for XDS CORRECT and for Pointless + Aimless on both: "
+        "'auto' (Pointless decides on each; the surer Laue group wins), a symbol "
+        "or number (e.g. 'P 1 21 1', 4), or 'none' (each Pointless alone)",
     )
     ap.add_argument(
         "--aimless-resolution",
@@ -955,6 +1104,94 @@ def build_argparser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--json", type=Path, default=None, help="summary JSON path")
     return ap
+
+
+def scale_both(
+    args: argparse.Namespace,
+    summary: MutableMapping[str, Any],
+    *,
+    workdir: Path,
+    pl_dir: Path,
+    xds_dir: Path,
+    seed: Path,
+    data_range: tuple[int, int],
+    spot_range: tuple[int, int],
+    include_resolution: tuple[float, float],
+) -> None:
+    """Scale ProcessingLab's MTZ and XDS's XDS_ASCII.HKL in one space group.
+
+    With ``--space-group auto`` Pointless decides on each data set and
+    :func:`choose_space_group` picks one; XDS CORRECT is re-run in it (it
+    otherwise stays in the indexing run's group, P1 by default), and
+    Pointless + Aimless are forced to it for both. ``--space-group none``
+    lets each Pointless decide alone (the old behaviour).
+    """
+    mtz = pl_dir / "process.mtz"
+    ascii_hkl = xds_dir / "XDS_ASCII.HKL"
+    if not args.pointless.is_file() or not args.aimless_exe.is_file():
+        print("warning: pointless/aimless not found; skipping", file=sys.stderr)
+        return
+    mode = args.space_group.strip()
+    symbol: Optional[str] = None
+    if mode.lower() == "auto":
+        print("== Pointless: one space group for both ==")
+        decisions: dict[str, dict[str, Any]] = {}
+        for name, hkl, is_ascii in (("ProcessingLab", mtz, False), ("XDS", ascii_hkl, True)):
+            if not hkl.is_file():
+                continue
+            try:
+                decisions[name] = run_pointless(
+                    hkl=hkl, out_dir=workdir / "pointless" / name.lower(), pointless=args.pointless, xds_ascii=is_ascii
+                )
+            except subprocess.CalledProcessError as exc:
+                print(f"warning: Pointless ({name}) failed: {exc}", file=sys.stderr)
+        symbol, reason = choose_space_group(decisions)
+        summary["space_group_choice"] = {"decisions": decisions, "chosen": symbol, "reason": reason}
+        print(f"  space group {symbol}: {reason}")
+    elif mode.lower() != "none":
+        symbol = mode
+        summary["space_group_choice"] = {"chosen": symbol, "reason": "--space-group"}
+
+    if symbol and (xds_dir / "INTEGRATE.HKL").is_file() and args.xds_exe.is_file():
+        number = space_group_number(symbol)
+        if correct_space_group(xds_dir) != number:
+            print(f"== XDS CORRECT in {symbol} (space group {number}) ==")
+            try:
+                summary["xds_correct_wall_s"] = rerun_correct(
+                    exe=args.xds_exe,
+                    xds_dir=xds_dir,
+                    image=args.image,
+                    data_range=data_range,
+                    spot_range=spot_range,
+                    seed=seed,
+                    nproc=args.nproc,
+                    include_resolution=include_resolution,
+                    exclude_ice=args.exclude_ice,
+                    space_group=number,
+                )
+            except subprocess.CalledProcessError as exc:
+                print(f"warning: XDS CORRECT in {symbol} failed: {exc}", file=sys.stderr)
+
+    for name, hkl, is_ascii, out_dir, key in (
+        ("ProcessingLab", mtz, False, workdir / "ccp4", "aimless_wall_s"),
+        ("XDS", ascii_hkl, True, workdir / "ccp4_xds", "aimless_xds_wall_s"),
+    ):
+        if not hkl.is_file():
+            print(f"warning: no {hkl.name} for {name}; skipping Aimless", file=sys.stderr)
+            continue
+        print(f"== Pointless + Aimless ({name}) ==")
+        try:
+            summary[key] = run_aimless(
+                hkl=hkl,
+                out_dir=out_dir,
+                pointless=args.pointless,
+                aimless=args.aimless_exe,
+                xds_ascii=is_ascii,
+                space_group=symbol,
+                resolution=args.aimless_resolution,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(f"warning: Aimless ({name}) failed: {exc}", file=sys.stderr)
 
 
 def resolve_dirs(workdir: Path, parse_only: bool) -> tuple[Path, Path, Path]:
@@ -1062,41 +1299,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 return 1
 
         if args.aimless:
-            mtz = pl_dir / "process.mtz"
-            if not mtz.is_file():
-                print(f"warning: no MTZ at {mtz}; skipping Aimless", file=sys.stderr)
-            elif not args.pointless.is_file() or not args.aimless_exe.is_file():
-                print("warning: pointless/aimless not found; skipping", file=sys.stderr)
-            else:
-                print("== Pointless + Aimless ==")
-                ccp4_dir = workdir / "ccp4"
-                try:
-                    summary["aimless_wall_s"] = run_aimless(
-                        hkl=mtz,
-                        out_dir=ccp4_dir,
-                        pointless=args.pointless,
-                        aimless=args.aimless_exe,
-                        space_group=args.aimless_spacegroup,
-                        resolution=args.aimless_resolution,
-                    )
-                except subprocess.CalledProcessError as exc:
-                    print(f"warning: Aimless failed: {exc}", file=sys.stderr)
-
-        ascii_hkl = xds_dir / "XDS_ASCII.HKL"
-        if args.aimless and ascii_hkl.is_file() and args.aimless_exe.is_file():
-            print("== Pointless + Aimless (XDS) ==")
-            try:
-                summary["aimless_xds_wall_s"] = run_aimless(
-                    hkl=ascii_hkl,
-                    out_dir=workdir / "ccp4_xds",
-                    pointless=args.pointless,
-                    aimless=args.aimless_exe,
-                    xds_ascii=True,
-                    space_group=args.aimless_spacegroup,
-                    resolution=args.aimless_resolution,
-                )
-            except subprocess.CalledProcessError as exc:
-                print(f"warning: Aimless (XDS) failed: {exc}", file=sys.stderr)
+            scale_both(args, summary, workdir=workdir, pl_dir=pl_dir, xds_dir=xds_dir, seed=args.xds_inp or seed_inp,
+                       data_range=data_range, spot_range=spot_range, include_resolution=include_resolution)
 
     # Parse whatever exists
     if pl_dir.is_dir():

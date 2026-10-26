@@ -278,10 +278,8 @@ double fallback_sigma_phi(const Profile3dSettings& settings) {
         const double osc = std::max(1e-6, settings.osc_deg);
         const double mosaic = std::max(0.0, settings.mosaic_spread_deg);
         if (mosaic > 0.0) {
-            // FWHM ≈ mosaic; σ_frames = (mosaic / 2.355) / osc.
-            return std::max(
-                0.4, (mosaic / 2.355) / osc
-            );
+            // σ_M in degrees; at ζ ≈ 1 the frame width is σ_M / osc.
+            return std::max(0.4, mosaic / osc);
         }
         return settings.fallback_sigma_phi_frames;
     }

@@ -3,6 +3,10 @@
 #include "mosflm/image/DiffractionImage.hpp"
 #include "mosflm/indexing/SpotList.hpp"
 
+#include <cstdint>
+#include <memory>
+#include <vector>
+
 namespace mosflm::indexing {
 
 /// Settings for the lightweight DiffractionLab-style peak finder.
@@ -24,6 +28,18 @@ struct SpotFindSettings {
     double blank_adu{0.0};
     /// INIT-lite: scale background σ by ``sqrt(gain)`` (XDS GAIN.cbf stand-in).
     double gain{1.0};
+    /// Pixels the search may use (non-zero), row-major, e.g. DEFPIX's
+    /// :meth:`DefpixResult::spot_search_mask`. Masked pixels count neither
+    /// towards the background statistics nor as peaks. Ignored unless it
+    /// matches the image size.
+    std::shared_ptr<const std::vector<std::uint8_t>> mask;
+    /// Local background (counts per frame), row-major; ``< 0`` where the
+    /// global threshold applies. Where set, e.g. DEFPIX's beam halo, a peak
+    /// must also clear ``background + threshold_sigma·√(gain·background)``,
+    /// and the pixel stays out of the global background statistics: the
+    /// flare's noise is not taken for spots, yet real low-resolution spots
+    /// on it are kept. Ignored unless it matches the image size.
+    std::shared_ptr<const std::vector<float>> local_background;
 };
 
 /// DiffractionLab-equivalent spot finder (MAD background + 3×3 local maxima).

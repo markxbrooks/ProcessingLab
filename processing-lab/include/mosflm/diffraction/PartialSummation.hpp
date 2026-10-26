@@ -41,35 +41,36 @@ struct PartialSummationSettings {
 
 /// Result of :func:`fit_rocking_width`.
 struct RockingWidthFit {
-    /// Fitted rocking width (FWHM before the Lorentz factor, degrees): the
-    /// predictor's ``MOSAIC + DIV``.
-    double width_deg{};
-    /// Strong, complete reflections used.
+    /// Median reflecting-range standard deviation σ_M (degrees), XDS
+    /// ``REFLECTING_RANGE_E.S.D.``. The predictor uses ``σφ = σ_M / ζ``.
+    double sigma_m_deg{};
+    /// Reflections whose core contributed to the median.
     std::size_t n_reflections{};
 };
 
-/// Fit one rocking width to the per-frame intensity of strong reflections.
+/// Estimate σ_M from the core of each strong reflection's rocking curve.
 ///
-/// Each reflection's slices are compared with the Gaussian model the
-/// predictor uses, ``σφ = W / (2.355 ζ)``; ζ comes from the slice ``width``
-/// (``6σφ`` at ``width_now_deg``). The amplitude is free per reflection, so
-/// a rocking curve truncated by the measurement reach is modelled rather
-/// than mistaken for a narrow one, and background noise in the outer slices
-/// enters symmetrically instead of inflating a second moment. A free
-/// per-slice baseline absorbs a background bias, which would otherwise read
-/// as heavier tails and widen the fit at every re-estimate. Minimises the
-/// summed, per-reflection normalised misfit over ``W`` in [0.02°, 3°].
+/// For each reflection, ζ is recovered from the latest slice (``width`` is
+/// ``6 σφ`` predicted at ``sigma_m_now_deg``). Slices with
+/// ``|ε| = |ζ (φ_obs − φ_calc)|`` above 1° are ignored, so the sample does
+/// not grow when the prediction reach does. A constant background is the
+/// median intensity beyond 2.5σ of a first pass (and at least 0.75° from
+/// φ calc). The reflecting-range variance is
+/// the intensity-weighted second moment of ε minus the frame-bin term
+/// ``(ζ Δφ)² / 12``. σ_M is the median of those standard deviations over
+/// reflections with at least three frames in the cap and summed I/σ ≥ 10.
+/// Spatially overlapped slices are kept: their φ extent is still a width.
 ///
 /// :param slices: Per-frame rocking-mode rows (``rot`` = φ calc, ``phi_obs``
 ///     = frame mid-point).
-/// :param width_now_deg: Width the slices were predicted with.
+/// :param sigma_m_now_deg: σ_M the latest slices were predicted with.
 /// :param osc_deg: Oscillation width of one frame.
 /// :param settings: Grouping options (as for :func:`sum_partial_slices`).
-/// :param min_reflections: Fewer usable reflections → no fit.
-/// :return: The fit, or ``std::nullopt`` if too few reflections qualify.
+/// :param min_reflections: Fewer usable reflections → no estimate.
+/// :return: The median σ_M, or ``std::nullopt`` if too few reflections qualify.
 [[nodiscard]] std::optional<RockingWidthFit> fit_rocking_width(
     const std::vector<crystal::MosflmReflection>& slices,
-    double width_now_deg,
+    double sigma_m_now_deg,
     double osc_deg,
     const PartialSummationSettings& settings = {},
     std::size_t min_reflections = 40

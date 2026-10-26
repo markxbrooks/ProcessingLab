@@ -1027,7 +1027,7 @@ void ControlSession::apply_keyword(
     }
     if (key == "DEFPIX") {
         // DEFPIX [ON|OFF] [FRAMES n] [VALUE_RANGE lo hi] [SHADOWS ON|OFF]
-        //        [DEFECTS ON|OFF] [FILE name|OFF]
+        //        [DEFECTS ON|OFF] [HALO ON|OFF] [FILE name|OFF]
         auto& d = state_.defpix;
         const auto on = [&](std::size_t i) {
             if (i >= args.size()) {
@@ -1052,13 +1052,15 @@ void ControlSession::apply_keyword(
                 d.find_shadows = on(++i);
             } else if (a == "DEFECTS") {
                 d.find_defects = on(++i);
+            } else if (a == "HALO") {
+                d.find_halo = on(++i);
             } else if (a == "FILE" && i + 1 < args.size()) {
                 const std::string f = args[++i];
                 state_.defpix_file = upper(f) == "OFF" ? std::filesystem::path() : std::filesystem::path(f);
             } else {
                 throw std::invalid_argument(
                     "CONTROL DEFPIX: unexpected '" + args[i] +
-                    "' (ON, OFF, FRAMES n, VALUE_RANGE lo hi, SHADOWS ON|OFF, DEFECTS ON|OFF, FILE name|OFF)"
+                    "' (ON, OFF, FRAMES n, VALUE_RANGE lo hi, SHADOWS ON|OFF, DEFECTS ON|OFF, HALO ON|OFF, FILE name|OFF)"
                 );
             }
         }
@@ -1228,6 +1230,27 @@ void collect_positional_observations(
     }
 }
 
+/// Which parameters a positional refinement may move.
+enum class RefineScope {
+    /// Everything REFINE allows: the pre-refinement, which sets the cell
+    /// and detector tilt/twist for the sweep.
+    Global,
+    /// One block of frames: misset, beam and distance only (XDS INTEGRATE's
+    /// default). Over a few degrees the spot radii fix only distance ÷ cell,
+    /// and twist trades with the misset, so a free cell and tilt/twist
+    /// wander together from block to block (76c1b: distance 385 → 392 mm,
+    /// c 71.8 → 74.5 Å, twist −4 → −12 mrad) and pull the predicted φ off
+    /// the spots. Distance alone takes up the radial scale without moving φ.
+    Block,
+    /// Fallback when a block's step exceeds the caps: misset and beam only,
+    /// so the crystal is still followed.
+    Orientation,
+    /// The sweep so far (XDS CORRECT-like): misset, cell and tilt/twist from
+    /// observations pooled over a wide φ range, which fixes the cell's shape
+    /// where a few degrees cannot. Distance and beam stay with the blocks.
+    Sweep,
+};
+
 /// MOSFLM-style positional refinement of misset, symmetry-constrained cell,
 /// distance and beam against observed centroids; applies the result to
 /// CONTROL state when the residual improves.
@@ -1239,7 +1262,8 @@ bool refine_geometry_positional(
     const DetectorGeometry& det,
     double image_beam_x_mm,
     double image_beam_y_mm,
-    std::string_view label
+    std::string_view label,
+    RefineScope scope = RefineScope::Global
 ) {
     const gemmi::SpaceGroup* sg =
         state.has_symmetry
@@ -1251,21 +1275,32 @@ bool refine_geometry_positional(
         OrientationMatrix::from_mosflm_orientation_matrix(state.amat, lam);
     refinement::PositionalRefinementSettings settings;
     settings.refine_orientation = state.refine_orientation;
-    settings.refine_cell = state.refine_cell;
-    settings.refine_distance = state.refine_distance;
-    settings.refine_beam = state.refine_beam;
-    settings.refine_tilt_twist = state.refine_tilt_twist;
+    const bool wide = scope == RefineScope::Global || scope == RefineScope::Sweep;
+    settings.refine_cell = state.refine_cell && wide;
+    settings.refine_distance =
+        state.refine_distance && (scope == RefineScope::Global || scope == RefineScope::Block);
+    settings.refine_beam = state.refine_beam && scope != RefineScope::Sweep;
+    settings.refine_tilt_twist = state.refine_tilt_twist && wide;
     const auto res = refinement::PositionalRefiner{}.refine(
         orient, sg, lam, det, image_beam_x_mm, image_beam_y_mm, obs, settings
     );
     std::cout << std::fixed << std::setprecision(3) << "  POSITIONAL REFINE ("
-              << label << "): n=" << res.n_used << "/" << res.n_input;
+              << label << (scope == RefineScope::Orientation ? ", misset and beam only" : "")
+              << "): n=" << res.n_used << "/" << res.n_input;
     if (!res.ok) {
         std::cout << " rms0=" << res.rms_initial_px << " px (not applied: "
                   << res.reason << ")\n";
+        // A block that moves too far may still be followed in orientation.
+        if (scope == RefineScope::Block && res.reason.starts_with("change exceeds caps")) {
+            return refine_geometry_positional(
+                state, obs, det, image_beam_x_mm, image_beam_y_mm, label, RefineScope::Orientation
+            );
+        }
         return false;
     }
-    std::cout << " rms=" << res.rms_initial_px << "→" << res.rms_px << " px"
+    std::cout << " rms=" << res.rms_initial_px << "→" << res.rms_px << " (xy " << std::setprecision(2)
+              << res.rms_xy_px << " px, mean " << res.mean_dx_px << "," << res.mean_dy_px << " px, φ "
+              << res.rms_phi_deg << "°)" << std::setprecision(3)
               << " DISTANCE " << det.distance_mm << "→" << res.distance_mm
               << " BEAM " << res.beam_x_mm << " " << res.beam_y_mm
               << " TILT/TWIST " << std::setprecision(2) << res.tilt_mrad << "/"
@@ -1319,11 +1354,10 @@ void collect_summed_observations(
     }
 }
 
-/// XDS-style rocking-width estimate: one width fitted to the per-frame
-/// intensities of strong, complete reflections
-/// (:func:`diffraction::fit_rocking_width`). A per-reflection φ second
-/// moment fed back through MOSAIC → measurement reach and ran away on
-/// 76c1b. Updates MOSAIC (keeping DIV) unless MOSAIC came from CONTROL.
+/// XDS reflecting-range estimate. :func:`diffraction::fit_rocking_width`
+/// returns σ_M, the median standard deviation of ε = ζ Δφ inside a fixed
+/// 1° cap. Move 30% of the way toward it and by at most 0.05° per call, so
+/// a single block cannot run the width up into its own measurement reach.
 /// \return True if MOSAIC changed.
 bool estimate_rocking_width(
     ControlState& state,
@@ -1333,15 +1367,15 @@ bool estimate_rocking_width(
     if (!state.auto_sigma_msd || state.mosaic_from_user || !(osc_w_deg > 0.0)) {
         return false;
     }
-    const double div = state.has_divergence ? std::max(state.divh_deg, state.divv_deg) : 0.0;
-    const double width_now = std::max(state.mosaic_deg + div, 1e-3);
-    const auto fit = diffraction::fit_rocking_width(slices, width_now, osc_w_deg);
+    const double sigma_now = std::max(state.mosaic_deg, 1e-3);
+    const auto fit = diffraction::fit_rocking_width(slices, sigma_now, osc_w_deg);
     if (!fit) {
         return false;
     }
-    const double mosaic = std::clamp(fit->width_deg - div, 0.02, 2.0);
-    std::cout << std::fixed << std::setprecision(3) << "  ROCKING WIDTH: "
-              << fit->width_deg << " deg from " << fit->n_reflections
+    const double step = std::clamp(0.3 * (fit->sigma_m_deg - state.mosaic_deg), -0.05, 0.05);
+    const double mosaic = std::clamp(state.mosaic_deg + step, 0.02, 2.0);
+    std::cout << std::fixed << std::setprecision(3) << "  SIGMAR: "
+              << fit->sigma_m_deg << " deg from " << fit->n_reflections
               << " reflections → MOSAIC " << state.mosaic_deg << "→" << mosaic
               << '\n';
     if (std::fabs(mosaic - state.mosaic_deg) < 0.005) {
@@ -2016,6 +2050,13 @@ std::filesystem::path ControlSession::resolve_image_path(
     );
 }
 
+double ControlSession::integration_dmax_A() const {
+    if (state_.dmax_explicit || !(halo_dmax_A_ > 0.0)) {
+        return state_.dmax_A;
+    }
+    return state_.dmax_A > 0.0 ? std::min(state_.dmax_A, halo_dmax_A_) : halo_dmax_A_;
+}
+
 std::optional<DefpixSummary> ControlSession::run_defpix_stage(
     const std::optional<std::filesystem::path>& image_override,
     const image::DiffractionImage& image0,
@@ -2025,6 +2066,7 @@ std::optional<DefpixSummary> ControlSession::run_defpix_stage(
 ) {
     defpix_mask_.reset();
     defpix_width_ = 0;
+    halo_dmax_A_ = 0.0;
     if (!state_.defpix.enabled) {
         return std::nullopt;
     }
@@ -2058,6 +2100,12 @@ std::optional<DefpixSummary> ControlSession::run_defpix_stage(
     s.shaded = res.count(PixelStatus::Shaded);
     s.defective = res.count(PixelStatus::Defective);
     s.hot = res.count(PixelStatus::Hot);
+    s.halo = res.count(PixelStatus::Halo);
+    s.halo_radius_px = res.halo.found ? res.halo.radius_px : 0.0;
+    if (res.halo.found && !state_.dmax_explicit) {
+        halo_dmax_A_ = res.halo_dmax_A;
+        s.halo_dmax_A = res.halo_dmax_A;
+    }
     s.shadow_block_px = res.shadow_block_px;
     s.defects_skipped = defects_skipped;
     if (res.n_rejected() > 0) {
@@ -2093,6 +2141,22 @@ std::optional<DefpixSummary> ControlSession::run_defpix_stage(
     } else if (s.frames.size() < 3) {
         std::cout << "  Shaded / defective / hot pixels not looked for (needs 3 or more frames)\n";
     }
+    if (res.halo.found) {
+        // Levels to three significant figures: Eiger frames hold ~0.03 counts.
+        std::cout << std::defaultfloat << std::setprecision(3) << "  Beam halo: radial background "
+                  << res.halo.peak_level << " counts/frame at " << res.halo.peak_radius_px << " px, flat ("
+                  << res.halo.floor_level << ") by " << res.halo.radius_px << " px; pixels inside ignored\n";
+        if (s.halo_dmax_A > 0.0) {
+            std::cout << "  Low-resolution limit for integration: " << std::fixed << std::setprecision(2) << s.halo_dmax_A
+                      << " Å (halo + " << g(settings.halo_margin_px) << " px; indexing DMAX unchanged)\n";
+        } else {
+            std::cout << "  Low-resolution limit for integration stays " << g(state_.dmax_A)
+                      << " Å (set by DMAX / RESOLUTION)\n";
+        }
+    } else if (settings.find_halo && s.shadow_block_px > 0) {
+        std::cout << "  Beam halo: none (the radial background has no peak "
+                  << g(settings.halo_min_excess) << "× its outer level)\n";
+    }
     if (defects_skipped) {
         std::cout << "  Defective / hot pixels not looked for: the frames span " << g(span_deg) << "°, under "
                   << g(kDefectMinSpanDeg) << "° (a spot could stay bright throughout)\n";
@@ -2107,6 +2171,7 @@ std::optional<DefpixSummary> ControlSession::run_defpix_stage(
     row("shaded", s.shaded);
     row("defective (overloaded)", s.defective);
     row("hot", s.hot);
+    row("in the beam halo", s.halo);
     row("trusted", s.trusted);
     int listed = 0;
     for (std::size_t i = 0; i < res.status.size() && listed < 10; ++i) {
@@ -2232,7 +2297,7 @@ diffraction::ProcessRequest ControlSession::make_process_request(
     prediction.divh_deg = state_.has_divergence ? state_.divh_deg : 0.0;
     prediction.divv_deg = state_.has_divergence ? state_.divv_deg : 0.0;
     prediction.dmin_A = resolved_dmin_A(state_, image.metadata);
-    prediction.dmax_A = state_.dmax_A;
+    prediction.dmax_A = integration_dmax_A();
     prediction.phi_step_deg = state_.phi_step_deg;
     prediction.apply_systematic_absences = true;
     // REEK PROCESS: do not widen Ewald with mosaic (avoids multi-frame
@@ -2343,7 +2408,7 @@ diffraction::ProcessRequest ControlSession::make_process_request(
         diffraction::TrustedRegionSettings tr;
         tr.cover_panel = true;
         tr.dmin_A = prediction.dmin_A;
-        tr.dmax_A = state_.dmax_A > 0.0 ? state_.dmax_A : 0.0;
+        tr.dmax_A = std::max(integration_dmax_A(), 0.0);
         tr.beam_x_mm = prediction.panel_beam_x_mm;
         tr.beam_y_mm = prediction.panel_beam_y_mm;
         measurement.trusted_mask =
@@ -2847,6 +2912,14 @@ ControlGoResult ControlSession::go(
     // the margin keeps reflections that straddle a period boundary.
     std::vector<crystal::MosflmReflection> window_rows;
     constexpr int k_window_margin = 40;
+    // Observations pooled over the sweep for the cell (RefineScope::Sweep):
+    // at most this many per block, refined every few blocks once they span
+    // enough rotation to fix the cell's shape.
+    std::vector<refinement::PositionalObservation> sweep_obs;
+    constexpr std::size_t k_sweep_per_block = 400;
+    constexpr int k_sweep_every_blocks = 4;
+    constexpr double k_sweep_min_span_deg = 15.0;
+    int blocks_refined = 0;
 
     // Measurement box from the spots (MOSFLM raster / XDS spot size) unless
     // PEAKHALF is set: integrate the first frames with the provisional box
@@ -3062,9 +3135,26 @@ ControlGoResult ControlSession::go(
                         outc.result.image_beam_x_mm,
                         outc.result.image_beam_y_mm,
                         "frames " + std::to_string(frame - period + 1) + "-" +
-                            std::to_string(frame)
+                            std::to_string(frame),
+                        RefineScope::Block
                     );
+                    // Pool an even sample of the block for the sweep's cell.
+                    const std::size_t stride = posref_obs.size() / k_sweep_per_block + 1;
+                    for (std::size_t j = 0; j < posref_obs.size(); j += stride) {
+                        sweep_obs.push_back(posref_obs[j]);
+                    }
                     posref_obs.clear();
+                    const double span_deg = (frame - first + 1) * osc_log;
+                    if (state_.refine_cell && ++blocks_refined % k_sweep_every_blocks == 0 &&
+                        span_deg >= k_sweep_min_span_deg) {
+                        refine_geometry_positional(
+                            state_, sweep_obs, outc.result.detector,
+                            outc.result.image_beam_x_mm,
+                            outc.result.image_beam_y_mm,
+                            "sweep, frames " + std::to_string(first) + "-" + std::to_string(frame),
+                            RefineScope::Sweep
+                        );
+                    }
                 }
             }
             print_process_image_row(frame, outc.stats);

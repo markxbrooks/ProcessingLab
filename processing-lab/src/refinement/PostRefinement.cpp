@@ -319,8 +319,9 @@ PostRefinementResult PostRefiner::refine(
         std::sort(dev.begin(), dev.end());
         const double mad = dev[dev.size() / 2];
         const double sigma_phi = 1.4826 * mad;
-        best_p.mosaic_spread_deg =
-            std::clamp(2.355 * sigma_phi, 0.05, 2.0);
+        // φ-residual SD. The rocking-model path estimates σ_M separately;
+        // this fallback must not inflate the residual into a full width.
+        best_p.mosaic_spread_deg = std::clamp(sigma_phi, 0.02, 2.0);
     }
 
     result.parameters = best_p;
