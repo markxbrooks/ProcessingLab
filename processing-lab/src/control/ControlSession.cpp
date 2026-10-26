@@ -2227,7 +2227,8 @@ std::optional<DefpixSummary> ControlSession::run_defpix_stage(
     }
     if (defects_skipped) {
         std::cout << "  Defective / hot pixels not looked for: the frames span " << g(span_deg) << "°, under "
-                  << g(kDefectMinSpanDeg) << "° (a spot could stay bright throughout)\n";
+                  << g(kDefectMinSpanDeg) << "° (a spot could stay bright throughout); only pixels overloaded in "
+                  << "every sampled frame (gaps, dead pixels) are counted as defective\n";
     }
     const auto row = [](const char* what, std::size_t n) {
         std::cout << "    " << std::left << std::setw(28) << what << std::right << std::setw(10) << n << '\n';

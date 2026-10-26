@@ -609,11 +609,18 @@ DefpixResult run_defpix(
                     continue;
                 }
             }
-            // Overloaded in half the frames, or in two and near background
-            // in the rest (flickering): a spot has bright frames around its
-            // saturated ones.
-            if (settings.find_defects && detect && n_over >= 2 &&
-                (2 * n_over >= nf || sums.max[i] < settings.hot_min_counts)) {
+            // Overloaded in every sampled frame: no spot stays saturated across
+            // the sweep, so this is a gap or a dead pixel the detector reports
+            // at its saturation value (16-bit Eiger gaps read 65535). Masked
+            // even without the defect search, or a peak touching it is
+            // reported as a profile-fitted overload.
+            // Otherwise overloaded in half the frames, or in two and near
+            // background in the rest (flickering): a spot has bright frames
+            // around its saturated ones.
+            if (detect && n_over == nf) {
+                set(i, PixelStatus::Defective);
+            } else if (settings.find_defects && detect && n_over >= 2 &&
+                       (2 * n_over >= nf || sums.max[i] < settings.hot_min_counts)) {
                 set(i, PixelStatus::Defective);
             } else if (sums.n_valid[i] == 0) {
                 set(i, PixelStatus::DetectorMasked);  // overloaded throughout, not judged
