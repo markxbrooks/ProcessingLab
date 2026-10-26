@@ -1258,7 +1258,8 @@ std::vector<refinement::PositionalObservation> spot_list_observations(
     std::vector<float> x;
     std::vector<float> y;
     std::vector<float> z;
-    indexing::spots_to_rlp_xyz(
+    // One reciprocal vector per spot, in order (every spot maps).
+    (void)indexing::spots_to_rlp_xyz(
         spots, {}, {distance_mm, wavelength_A, image_beam_x_mm, image_beam_y_mm}, x, y, z
     );
     const Eigen::Matrix3d to_hkl =
@@ -2202,10 +2203,17 @@ std::optional<DefpixSummary> ControlSession::run_defpix_stage(
         std::cout << "  Shaded / defective / hot pixels not looked for (needs 3 or more frames)\n";
     }
     if (res.halo.found) {
-        // Levels to three significant figures: Eiger frames hold ~0.03 counts.
-        std::cout << std::defaultfloat << std::setprecision(3) << "  Beam halo: radial background "
-                  << res.halo.peak_level << " counts/frame at " << res.halo.peak_radius_px << " px, flat ("
-                  << res.halo.floor_level << ") by " << res.halo.radius_px << " px; pixels inside ignored\n";
+        std::cout << std::fixed << std::setprecision(0) << "  Beam halo: " << res.halo.n_pixels
+                  << " pixels above " << g(settings.halo_factor) << "x their ring's background (>= "
+                  << g(settings.halo_significance) << " sigma, " << res.halo.bin_px
+                  << " px bins); ignored";
+        if (res.halo.radius_px > 0.0) {
+            std::cout << "; at the beam median " << res.halo.median_radius_px << " px, out to "
+                      << res.halo.radius_px << " px";
+        } else {
+            std::cout << "; all beside the shaded region, none at the beam";
+        }
+        std::cout << '\n';
         if (s.halo_dmax_A > 0.0) {
             std::cout << "  Low-resolution limit for integration: " << std::fixed << std::setprecision(2) << s.halo_dmax_A
                       << " Å (halo + " << g(settings.halo_margin_px) << " px; indexing DMAX unchanged)\n";
@@ -2214,8 +2222,8 @@ std::optional<DefpixSummary> ControlSession::run_defpix_stage(
                       << " Å (set by DMAX / RESOLUTION)\n";
         }
     } else if (settings.find_halo && s.shadow_block_px > 0) {
-        std::cout << "  Beam halo: none (the radial background has no peak "
-                  << g(settings.halo_min_excess) << "× its outer level)\n";
+        std::cout << "  Beam halo: none (no region at the beam above " << g(settings.halo_factor)
+                  << "x its ring's background and >= " << g(settings.halo_significance) << " sigma)\n";
     }
     if (defects_skipped) {
         std::cout << "  Defective / hot pixels not looked for: the frames span " << g(span_deg) << "°, under "

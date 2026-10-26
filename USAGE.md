@@ -486,15 +486,17 @@ DEFPIX ignores:
   mean background of their ring.
 - The **beam halo**: where the beam is not fully blocked it flares around
   the stop, often filling whole rings, so the shaded test (which compares a
-  block with its own ring) cannot see it. DEFPIX walks out from the beam
-  along the radial background (each ring's mean without its brightest 5%,
-  rings widened until they hold enough counts) from its peak to where the
-  excess over the outer background has fallen to a tenth, and ignores every
-  pixel inside that radius. A halo must peak at least 1.5× the outer level.
-  Integration's low-resolution limit then sits 10 px outside it (e.g.
-  `Low-resolution limit for integration: 40.61 Å`), so no measurement box
-  reaches the remaining slope, unless `DMAX` or `RESOLUTION` sets the limit.
-  The indexing DMAX is unchanged.
+  block with its own ring) cannot see it. DEFPIX bins the background until
+  a smoothing kernel (Gaussian, σ 3 px) holds 100 counts, and takes each
+  ring's normal level as the median of its unshaded pixels, or the lowest
+  such median within 100 px further out. A halo pixel is above 2× that level
+  and its excess in the kernel is at least 5σ of the normal counts; only
+  regions within 15 px of the beam or 18 px of a shaded pixel count.
+  DiffractionLab's beamstop overlay draws the same halo (violet) with the
+  same test. Integration's low-resolution limit then sits 10 px outside the
+  farthest halo pixel (thaumatin: `Low-resolution limit for integration:
+  23.17 Å`), unless `DMAX` or `RESOLUTION` sets the limit. The indexing DMAX
+  is unchanged.
 
 FINDSPOTS (over three or more frames) first runs the shaded and halo tests
 on five of its frames and leaves those pixels, and any untrusted region, out

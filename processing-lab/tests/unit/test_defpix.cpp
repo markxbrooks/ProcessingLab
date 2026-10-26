@@ -226,12 +226,14 @@ int main() {
         CHECK_CLOSE(s.state().defpix.value_range_high, 30000.0, 1e-9);
     }
 
-    // ----- the beam halo: a flare filling the inner rings, so every ring is
-    // its own median and the shaded test cannot see it
+    // ----- the beam halo: the beam flaring beside the stop, filling the inner
+    // rings, so every ring is its own median and the shaded test cannot see it
     {
         constexpr int kHw = 600;
         constexpr int kHc = 300;
-        const auto halo_frame = [&](bool flare) {
+        // ``bump`` instead: a broad rise to 1.6× the background, below the
+        // 2× a halo needs however far it reaches.
+        const auto halo_frame = [&](bool flare, bool bump = false) {
             return [=](int f) {
                 DiffractionImage img;
                 img.metadata.width = kHw;
@@ -245,6 +247,8 @@ int main() {
                             v = 1.0;  // the stop
                         } else if (flare) {
                             v += 60.0 * std::exp(-(rad - 12.0) / 25.0);
+                        } else if (bump) {
+                            v *= rad < 150.0 ? 1.6 : 1.0;
                         }
                         img.pixels[static_cast<std::size_t>(r) * kHw + static_cast<std::size_t>(c)] =
                             static_cast<std::int32_t>(std::lround(v));
@@ -261,14 +265,16 @@ int main() {
         const std::vector<int> hf{0, 1, 2, 3, 4};
         const auto with = run_defpix(halo_frame(true), hf, g, kHc * 0.172, kHc * 0.172, hs);
         CHECK(with.halo.found);
-        // Excess 60 e^{-(r-12)/25} falls to 10 % of its peak near r ≈ 70 px.
-        CHECK_MSG(with.halo.radius_px > 55.0 && with.halo.radius_px < 95.0,
+        // Above 2× the ring's ~21 counts while 60 e^{-(r-12)/25} > 21: r < 38 px.
+        CHECK_MSG(with.halo.radius_px > 32.0 && with.halo.radius_px < 45.0,
                   "halo radius " + mosflm_test::fmt(with.halo.radius_px));
+        CHECK(with.halo.median_radius_px > 15.0 && with.halo.median_radius_px < with.halo.radius_px);
+        CHECK_EQ(static_cast<int>(with.count(PixelStatus::Halo)), static_cast<int>(with.halo.n_pixels));
         const auto hstatus = [&](int c, int r) {
             return static_cast<PixelStatus>(with.status[static_cast<std::size_t>(r) * kHw + static_cast<std::size_t>(c)]);
         };
         CHECK(hstatus(kHc + 30, kHc) == PixelStatus::Halo);
-        CHECK(hstatus(kHc, kHc + 150) == PixelStatus::Trusted);
+        CHECK(hstatus(kHc, kHc + 60) == PixelStatus::Trusted);
         CHECK_EQ(static_cast<int>(with.trusted_mask()[static_cast<std::size_t>(kHc) * kHw + kHc + 30]), 0);
         // Spot finding may still look in the halo (against its local background).
         CHECK_EQ(static_cast<int>(with.spot_search_mask()[static_cast<std::size_t>(kHc) * kHw + kHc + 30]), 1);
@@ -279,8 +285,47 @@ int main() {
         CHECK_EQ(static_cast<int>(without.count(PixelStatus::Halo)), 0);
         CHECK(without.halo_dmax_A == 0.0);
 
+        const auto bumped = run_defpix(halo_frame(false, true), hf, g, kHc * 0.172, kHc * 0.172, hs);
+        CHECK(!bumped.halo.found);
+        CHECK(bumped.halo_dmax_A == 0.0);
+
         hs.find_halo = false;
         CHECK(!run_defpix(halo_frame(true), hf, g, kHc * 0.172, kHc * 0.172, hs).halo.found);
+    }
+
+    // ----- a bright patch beside a beamstop arm far from the beam is halo
+    // (masked), but only the halo at the beam sets the radius (the
+    // low-resolution limit)
+    {
+        constexpr int kW = 400;
+        constexpr int kC = 200;
+        std::vector<float> counts(static_cast<std::size_t>(kW * kW));
+        std::vector<std::uint8_t> usable(counts.size(), 1);
+        std::vector<std::uint8_t> shaded(counts.size(), 0);
+        for (int r = 0; r < kW; ++r) {
+            for (int c = 0; c < kW; ++c) {
+                const std::size_t i = static_cast<std::size_t>(r) * kW + static_cast<std::size_t>(c);
+                const double rad = std::hypot(c - kC, r - kC);
+                double v = 100.0 + (c + r) % 3;
+                if (rad <= 30.0) {
+                    v *= 4.0;  // halo at the beam
+                }
+                if (std::abs(r - kC) <= 4 && c >= kC) {
+                    shaded[i] = 1;  // the arm
+                    v = 2.0;
+                }
+                if (std::hypot(c - (kC + 150), r - (kC + 10)) <= 5.0) {
+                    v *= 4.0;  // flare beside the arm
+                }
+                counts[i] = static_cast<float>(v);
+            }
+        }
+        DefpixSettings hs;
+        const auto halo = find_beam_halo(counts, usable, shaded, kW, kW, kC, kC, 1.0, hs);
+        CHECK(halo.found);
+        CHECK(halo.mask[static_cast<std::size_t>(kC + 10) * kW + kC + 150] == 1);
+        CHECK(halo.mask[static_cast<std::size_t>(kC + 60) * kW + kC + 150] == 0);
+        CHECK_MSG(halo.radius_px > 25.0 && halo.radius_px < 40.0, "radius " + mosflm_test::fmt(halo.radius_px));
     }
 
     return mosflm_test::finish("defpix");

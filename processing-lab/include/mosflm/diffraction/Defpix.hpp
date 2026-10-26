@@ -64,9 +64,8 @@ enum class PixelStatus : std::uint8_t {
     /// High in every sampled frame, far above the background at its
     /// resolution.
     Hot,
-    /// Inside the beam halo: the disc around the beam where the radial
-    /// background falls from the flare of the unblocked beam to the outer
-    /// background (see :func:`find_beam_halo`).
+    /// In the beam halo: where the unblocked beam flares beside the stop,
+    /// far above its ring's background (see :func:`find_beam_halo`).
     Halo,
 };
 
@@ -93,16 +92,24 @@ struct DefpixSettings {
     double hot_factor{20.0};
     /// Look for the beam halo (needs ≥ 3 frames).
     bool find_halo{true};
-    /// The halo ends where the radial background's excess over the outer
-    /// floor falls to this fraction of its peak excess.
-    double halo_end_fraction{0.1};
-    /// A halo must peak at least this many times its outer floor.
-    double halo_min_excess{1.5};
-    /// The halo's peak is looked for within this radius (px) of the beam.
-    double halo_search_px{200.0};
-    /// The floor at a radius is the lowest background within this many px
-    /// further out.
+    /// The halo test (DiffractionLab's viewer uses the same one): pixels
+    /// above ``halo_factor`` × their resolution ring's normal level, whose
+    /// excess counts in the smoothing kernel exceed ``halo_significance`` σ,
+    /// in regions that touch the beam or a shaded region.
+    double halo_factor{2.0};
+    double halo_significance{5.0};
+    /// A ring's normal level is the median of its pixels, or the lowest such
+    /// median within this many px further out (rings near the beam are halo).
     double halo_window_px{100.0};
+    /// The background is smoothed with a Gaussian of this σ (px), after
+    /// binning until the kernel (its 2σ disc) holds ``halo_kernel_counts``.
+    double halo_smooth_px{3.0};
+    double halo_kernel_counts{100.0};
+    int halo_max_bin_px{16};
+    /// A halo region must reach within this distance (px) of the beam, or
+    /// within ``halo_reach_px`` of a shaded pixel.
+    double halo_beam_px{15.0};
+    double halo_reach_px{18.0};
     /// Integration's low-resolution limit sits this far (px) outside the
     /// halo, so no measurement box reaches its remaining slope.
     double halo_margin_px{10.0};
@@ -111,48 +118,54 @@ struct DefpixSettings {
 /// The beam halo found on a sweep's background.
 struct BeamHalo {
     bool found{false};
-    /// Radius (px) inside which pixels are the halo.
+    /// ``1`` on halo pixels, row-major; empty if none was found.
+    std::vector<std::uint8_t> mask;
+    std::size_t n_pixels{0};
+    /// Farthest and median pixel (px from the beam) of the halo regions
+    /// at the beam; 0 if only regions along the shadow were found. Sets
+    /// integration's low-resolution limit; patches along a beamstop arm are
+    /// masked but do not move it.
     double radius_px{0.0};
-    /// Radius (px) and level (counts per frame per pixel) of the halo's peak.
-    double peak_radius_px{0.0};
-    double peak_level{0.0};
-    /// Outer background level just beyond the peak.
-    double floor_level{0.0};
-    /// Width (px) of the rings of the radial profile.
-    int ring_px{0};
+    double median_radius_px{0.0};
+    /// Bin edge (px) the background was averaged over before smoothing.
+    int bin_px{1};
 };
 
 /**
- * Find the beam halo: walk out from the beam along the radial background.
+ * Find the beam halo: the beam flaring where it is not fully blocked.
  *
- * The radial profile is each ring's mean background (its brightest 5% left
- * out, for spots), smoothed over three rings; ring width grows as the counts
- * fall. From the profile's peak within ``halo_search_px``, the walk stops
- * where the excess over the floor (the lowest level within
- * ``halo_window_px`` further out) is ``halo_end_fraction`` of the peak's.
- * A ring wholly lit by flare is compared with itself by the shaded-block
- * test, so this is the only test that finds it.
+ * Same test as DiffractionLab's viewer (``beamstop.find_halo``). Bin the
+ * counts until a smoothing kernel holds ``halo_kernel_counts``, smooth with
+ * a Gaussian (NaN-aware), and take each ring's normal level as the median
+ * of its unshaded pixels, or the lowest such median within
+ * ``halo_window_px`` further out. A halo pixel is above ``halo_factor`` ×
+ * that level and its excess in the kernel exceeds ``halo_significance``
+ * σ of the normal counts. Only regions (4-connected) that come within
+ * ``halo_beam_px`` of the beam or ``halo_reach_px`` of a shaded pixel count.
+ * A halo can fill whole rings, so the shaded-block test (a block against its
+ * own ring) cannot see it.
  *
- * :param background: Counts per frame per pixel, row-major; < 0 if unknown.
- * :param usable: Non-zero where a pixel may enter the profile.
+ * :param counts: Spot-free background counts per pixel summed over the
+ *     sampled frames, row-major; < 0 if unknown.
+ * :param usable: Non-zero where a pixel holds a usable value.
+ * :param shaded: Non-zero on shaded pixels (the beamstop shadow).
  * :param width: Image width (px).
  * :param height: Image height (px).
  * :param beam_col: Beam position, fast (px).
  * :param beam_row: Beam position, slow (px).
  * :param row_scale: Slow pixel size over fast pixel size.
- * :param n_frames: Frames the background was taken from.
  * :param settings: The ``halo_*`` thresholds.
- * :returns: The halo; ``found`` is false if the profile has no such peak.
+ * :returns: The halo; ``found`` is false if no pixel passed.
  */
 [[nodiscard]] BeamHalo find_beam_halo(
-    const std::vector<float>& background,
+    const std::vector<float>& counts,
     const std::vector<std::uint8_t>& usable,
+    const std::vector<std::uint8_t>& shaded,
     int width,
     int height,
     double beam_col,
     double beam_row,
     double row_scale,
-    int n_frames,
     const DefpixSettings& settings
 );
 

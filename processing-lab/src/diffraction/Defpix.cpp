@@ -194,27 +194,153 @@ std::vector<std::uint8_t> DefpixResult::spot_search_mask() const {
     return mask;
 }
 
+namespace {
+
+/// Gaussian weights as ``scipy.ndimage.gaussian_filter`` (truncate 4σ).
+std::vector<double> gaussian_weights(double sigma) {
+    const int radius = static_cast<int>(4.0 * sigma + 0.5);
+    std::vector<double> w(static_cast<std::size_t>(2 * radius + 1));
+    double sum = 0.0;
+    for (int k = -radius; k <= radius; ++k) {
+        w[static_cast<std::size_t>(k + radius)] = std::exp(-0.5 * k * k / (sigma * sigma));
+        sum += w[static_cast<std::size_t>(k + radius)];
+    }
+    for (auto& v : w) {
+        v /= sum;
+    }
+    return w;
+}
+
+/// SciPy's ``reflect`` boundary (d c b a | a b c d | d c b a).
+int reflect_index(int i, int n) {
+    if (n == 1) {
+        return 0;
+    }
+    while (i < 0 || i >= n) {
+        i = i < 0 ? -i - 1 : 2 * n - i - 1;
+    }
+    return i;
+}
+
+/// Separable convolution of a ``w`` × ``h`` image with ``k`` along both axes.
+std::vector<double> convolve_2d(const std::vector<double>& in, int w, int h, const std::vector<double>& k) {
+    const int radius = static_cast<int>(k.size() / 2);
+    std::vector<double> tmp(in.size());
+    std::vector<double> out(in.size());
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            double sum = 0.0;
+            for (int j = -radius; j <= radius; ++j) {
+                sum += k[static_cast<std::size_t>(j + radius)] *
+                       in[static_cast<std::size_t>(reflect_index(y + j, h)) * w + x];
+            }
+            tmp[static_cast<std::size_t>(y) * w + x] = sum;
+        }
+    }
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            double sum = 0.0;
+            for (int j = -radius; j <= radius; ++j) {
+                sum += k[static_cast<std::size_t>(j + radius)] *
+                       tmp[static_cast<std::size_t>(y) * w + reflect_index(x + j, w)];
+            }
+            out[static_cast<std::size_t>(y) * w + x] = sum;
+        }
+    }
+    return out;
+}
+
+/// NaN-aware Gaussian smoothing (normalised convolution); NaN stays NaN.
+std::vector<double> smooth_ignoring_nan(const std::vector<double>& img, int w, int h, double sigma) {
+    std::vector<double> value(img.size());
+    std::vector<double> weight(img.size());
+    for (std::size_t i = 0; i < img.size(); ++i) {
+        const bool ok = std::isfinite(img[i]);
+        value[i] = ok ? img[i] : 0.0;
+        weight[i] = ok ? 1.0 : 0.0;
+    }
+    const auto k = gaussian_weights(sigma);
+    const auto num = convolve_2d(value, w, h, k);
+    const auto den = convolve_2d(weight, w, h, k);
+    std::vector<double> out(img.size());
+    for (std::size_t i = 0; i < img.size(); ++i) {
+        out[i] = std::isfinite(img[i]) ? num[i] / den[i] : std::numeric_limits<double>::quiet_NaN();
+    }
+    return out;
+}
+
+/// ``numpy.percentile`` with linear interpolation; reorders ``v``.
+double percentile(std::vector<double>& v, double p) {
+    std::sort(v.begin(), v.end());
+    const double pos = p / 100.0 * static_cast<double>(v.size() - 1);
+    const auto lo = static_cast<std::size_t>(std::floor(pos));
+    const std::size_t hi = std::min(lo + 1, v.size() - 1);
+    return v[lo] + (pos - static_cast<double>(lo)) * (v[hi] - v[lo]);
+}
+
+/// Pixels of a 4-connected region of ``on`` within ``steps`` grid steps of
+/// a seed (``scipy.ndimage.binary_dilation`` with its default cross,
+/// iterated ``steps`` times).
+std::vector<std::uint8_t> dilate(const std::vector<std::uint8_t>& seed, int w, int h, int steps) {
+    std::vector<int> dist(seed.size(), -1);
+    std::vector<std::size_t> queue;
+    for (std::size_t i = 0; i < seed.size(); ++i) {
+        if (seed[i]) {
+            dist[i] = 0;
+            queue.push_back(i);
+        }
+    }
+    for (std::size_t q = 0; q < queue.size(); ++q) {
+        const std::size_t i = queue[q];
+        if (dist[i] >= steps) {
+            continue;
+        }
+        const int x = static_cast<int>(i % static_cast<std::size_t>(w));
+        const int y = static_cast<int>(i / static_cast<std::size_t>(w));
+        const int nx[4] = {x - 1, x + 1, x, x};
+        const int ny[4] = {y, y, y - 1, y + 1};
+        for (int n = 0; n < 4; ++n) {
+            if (nx[n] < 0 || ny[n] < 0 || nx[n] >= w || ny[n] >= h) {
+                continue;
+            }
+            const std::size_t j = static_cast<std::size_t>(ny[n]) * w + nx[n];
+            if (dist[j] < 0) {
+                dist[j] = dist[i] + 1;
+                queue.push_back(j);
+            }
+        }
+    }
+    std::vector<std::uint8_t> out(seed.size());
+    for (std::size_t i = 0; i < seed.size(); ++i) {
+        out[i] = static_cast<std::uint8_t>(dist[i] >= 0);
+    }
+    return out;
+}
+
+}  // namespace
+
 BeamHalo find_beam_halo(
-    const std::vector<float>& background,
+    const std::vector<float>& counts,
     const std::vector<std::uint8_t>& usable,
+    const std::vector<std::uint8_t>& shaded,
     int width,
     int height,
     double beam_col,
     double beam_row,
     double row_scale,
-    int n_frames,
     const DefpixSettings& settings
 ) {
     BeamHalo halo;
     const std::size_t npix = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-    if (background.size() != npix || usable.size() != npix || n_frames < 1) {
+    if (counts.size() != npix || usable.size() != npix || shaded.size() != npix) {
         return halo;
     }
+    const auto ok = [&](std::size_t i) { return usable[i] && counts[i] >= 0.0f; };
     double level = 0.0;
     std::size_t n_level = 0;
     for (std::size_t i = 0; i < npix; ++i) {
-        if (usable[i] && background[i] >= 0.0f) {
-            level += background[i];
+        if (ok(i)) {
+            level += counts[i];
             ++n_level;
         }
     }
@@ -222,114 +348,167 @@ BeamHalo find_beam_halo(
         return halo;
     }
     level /= static_cast<double>(n_level);
-    // Rings wide enough that one 50 px from the beam holds ~500 counts.
-    constexpr double kRingCounts = 500.0;
-    constexpr double kRingRadiusPx = 50.0;
-    const double frames = std::max(1, n_frames - 1);
-    const int ring_px = std::clamp(
-        static_cast<int>(std::ceil(kRingCounts / (2.0 * std::numbers::pi * kRingRadiusPx * std::max(level, 1e-9) * frames))), 2, 16
-    );
-    halo.ring_px = ring_px;
 
-    // The walk may run a window past the search radius, and a few windows on.
-    const double reach_px = settings.halo_search_px + 4.0 * settings.halo_window_px;
-    const int n_rings = static_cast<int>(reach_px / ring_px) + 1;
-    std::vector<std::vector<float>> rings(static_cast<std::size_t>(n_rings));
-    const int r0 = std::max(0, static_cast<int>(beam_row - reach_px / std::max(row_scale, 1e-9)) - 1);
-    const int r1 = std::min(height - 1, static_cast<int>(beam_row + reach_px / std::max(row_scale, 1e-9)) + 1);
-    const int c0 = std::max(0, static_cast<int>(beam_col - reach_px) - 1);
-    const int c1 = std::min(width - 1, static_cast<int>(beam_col + reach_px) + 1);
-    for (int r = r0; r <= r1; ++r) {
-        for (int c = c0; c <= c1; ++c) {
+    // Bin until the smoothing kernel (its 2σ disc) holds enough counts.
+    const double sigma = settings.halo_smooth_px;
+    const double needed =
+        std::sqrt(settings.halo_kernel_counts / (4.0 * std::numbers::pi * std::max(level, 1e-9)));
+    const int size = needed <= sigma ? 1 : std::min(settings.halo_max_bin_px, static_cast<int>(std::ceil(needed)));
+    halo.bin_px = size;
+    const double kernel_px = 4.0 * std::numbers::pi * std::pow(std::max(sigma, static_cast<double>(size)), 2);
+    const int bw = (width + size - 1) / size;
+    const int bh = (height + size - 1) / size;
+    const std::size_t nb = static_cast<std::size_t>(bw) * static_cast<std::size_t>(bh);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<double> img(nb, nan);
+    std::vector<std::uint8_t> shadow(nb, 0);
+    for (int by = 0; by < bh; ++by) {
+        for (int bx = 0; bx < bw; ++bx) {
+            double sum = 0.0;
+            int n = 0;
+            int n_shaded = 0;
+            for (int r = by * size; r < std::min((by + 1) * size, height); ++r) {
+                for (int c = bx * size; c < std::min((bx + 1) * size, width); ++c) {
+                    const std::size_t i = static_cast<std::size_t>(r) * static_cast<std::size_t>(width) +
+                                          static_cast<std::size_t>(c);
+                    if (ok(i)) {
+                        sum += counts[i];
+                        ++n;
+                    }
+                    n_shaded += shaded[i] ? 1 : 0;
+                }
+            }
+            const std::size_t b = static_cast<std::size_t>(by) * bw + bx;
+            if (2 * n >= size * size) {
+                img[b] = sum / n;
+            }
+            shadow[b] = static_cast<std::uint8_t>(2 * n_shaded > size * size);
+        }
+    }
+    img = smooth_ignoring_nan(img, bw, bh, std::max(1.0, sigma / size));
+
+    // Bin centres' distance from the beam, in bins.
+    std::vector<double> radius(nb);
+    int n_rings = 0;
+    for (int by = 0; by < bh; ++by) {
+        for (int bx = 0; bx < bw; ++bx) {
+            const double dc = bx * size + 0.5 * (size - 1) - beam_col;
+            const double dr = (by * size + 0.5 * (size - 1) - beam_row) * row_scale;
+            const double rb = std::hypot(dc, dr) / size;
+            radius[static_cast<std::size_t>(by) * bw + bx] = rb;
+            n_rings = std::max(n_rings, static_cast<int>(rb) + 1);
+        }
+    }
+    // Each ring's normal level: the median of its unshaded bins, then the
+    // lowest over the window of rings further out (SciPy minimum_filter1d,
+    // size window + 1, origin −window/2, reflect).
+    std::vector<std::vector<double>> per_ring(static_cast<std::size_t>(n_rings));
+    for (std::size_t b = 0; b < nb; ++b) {
+        if (std::isfinite(img[b]) && !shadow[b]) {
+            per_ring[static_cast<std::size_t>(radius[b])].push_back(img[b]);
+        }
+    }
+    std::vector<double> ring_median(static_cast<std::size_t>(n_rings), std::numeric_limits<double>::infinity());
+    for (std::size_t k = 0; k < per_ring.size(); ++k) {
+        if (!per_ring[k].empty()) {
+            ring_median[k] = percentile(per_ring[k], 50.0);
+        }
+    }
+    const int window = std::max(2, static_cast<int>(settings.halo_window_px) / size);
+    const int lo = window / 2 - (window + 1) / 2;
+    std::vector<double> normal(static_cast<std::size_t>(n_rings), nan);
+    for (int k = 0; k < n_rings; ++k) {
+        double m = std::numeric_limits<double>::infinity();
+        for (int j = k + lo; j <= k + lo + window; ++j) {
+            m = std::min(m, ring_median[static_cast<std::size_t>(reflect_index(j, n_rings))]);
+        }
+        normal[static_cast<std::size_t>(k)] = std::isfinite(m) ? m : nan;
+    }
+
+    // Bright: above factor × normal, and significant in the kernel's counts.
+    std::vector<std::uint8_t> bright(nb, 0);
+    for (std::size_t b = 0; b < nb; ++b) {
+        const double v = img[b];
+        const double nl = normal[static_cast<std::size_t>(radius[b])];
+        if (!std::isfinite(v) || !std::isfinite(nl) || shadow[b]) {
+            continue;
+        }
+        const double excess = (v - nl) * kernel_px;
+        const double noise = std::sqrt(std::max(nl, 0.0) * kernel_px);
+        bright[b] = static_cast<std::uint8_t>(v > settings.halo_factor * nl &&
+                                              excess > settings.halo_significance * std::max(noise, 1.0));
+    }
+    // Keep the bright regions that touch the beam or come near the shadow.
+    const int reach = std::max(2, static_cast<int>(std::ceil(settings.halo_reach_px / size)));
+    const double beam_bins = std::max(1.5, settings.halo_beam_px / size);
+    const auto near_shadow = dilate(shadow, bw, bh, reach);
+    // 1: a region along the shadow; 2: a region at the beam.
+    std::vector<std::uint8_t> keep(nb, 0);
+    std::vector<std::size_t> region;
+    std::vector<std::uint8_t> seen(nb, 0);
+    for (std::size_t s0 = 0; s0 < nb; ++s0) {
+        if (!bright[s0] || seen[s0]) {
+            continue;
+        }
+        region.assign(1, s0);
+        seen[s0] = 1;
+        bool at_beam = false;
+        bool by_shadow = false;
+        for (std::size_t q = 0; q < region.size(); ++q) {
+            const std::size_t i = region[q];
+            at_beam = at_beam || radius[i] <= beam_bins;
+            by_shadow = by_shadow || near_shadow[i];
+            const int x = static_cast<int>(i % static_cast<std::size_t>(bw));
+            const int y = static_cast<int>(i / static_cast<std::size_t>(bw));
+            const int nx[4] = {x - 1, x + 1, x, x};
+            const int ny[4] = {y, y, y - 1, y + 1};
+            for (int n = 0; n < 4; ++n) {
+                if (nx[n] < 0 || ny[n] < 0 || nx[n] >= bw || ny[n] >= bh) {
+                    continue;
+                }
+                const std::size_t j = static_cast<std::size_t>(ny[n]) * bw + nx[n];
+                if (bright[j] && !seen[j]) {
+                    seen[j] = 1;
+                    region.push_back(j);
+                }
+            }
+        }
+        if (at_beam || by_shadow) {
+            for (const std::size_t i : region) {
+                keep[i] = at_beam ? 2 : 1;
+            }
+        }
+    }
+
+    // Back to pixels. The extent around the beam comes from the regions at
+    // the beam; patches along a beamstop arm can lie far out.
+    std::vector<double> radii;
+    halo.mask.assign(npix, 0);
+    for (int r = 0; r < height; ++r) {
+        for (int c = 0; c < width; ++c) {
             const std::size_t i = static_cast<std::size_t>(r) * static_cast<std::size_t>(width) +
                                   static_cast<std::size_t>(c);
-            if (!usable[i] || background[i] < 0.0f) {
+            const std::uint8_t k = keep[static_cast<std::size_t>(r / size) * bw + c / size];
+            if (!usable[i] || k == 0) {
                 continue;
             }
-            const int k = static_cast<int>(std::hypot(c - beam_col, (r - beam_row) * row_scale) / ring_px);
-            if (k < n_rings) {
-                rings[static_cast<std::size_t>(k)].push_back(background[i]);
+            halo.mask[i] = 1;
+            ++halo.n_pixels;
+            if (k == 2) {
+                radii.push_back(std::hypot(c - beam_col, (r - beam_row) * row_scale));
             }
         }
     }
-    // Each ring's mean without its brightest 5% (spots left after taking
-    // out each pixel's largest frame); too-small rings are left unknown.
-    constexpr std::size_t kMinRingPixels = 100;
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    std::vector<double> profile(static_cast<std::size_t>(n_rings), nan);
-    for (std::size_t k = 0; k < rings.size(); ++k) {
-        auto& v = rings[k];
-        if (v.size() < kMinRingPixels) {
-            continue;
-        }
-        const auto keep = static_cast<std::size_t>(0.95 * static_cast<double>(v.size()));
-        std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(keep), v.end());
-        double sum = 0.0;
-        for (std::size_t j = 0; j < keep; ++j) {
-            sum += v[j];
-        }
-        profile[k] = sum / static_cast<double>(keep);
-    }
-    // Smooth over three rings.
-    std::vector<double> smooth(profile.size(), nan);
-    for (std::size_t k = 0; k < profile.size(); ++k) {
-        if (std::isnan(profile[k])) {
-            continue;
-        }
-        double sum = 0.0;
-        int n = 0;
-        for (std::size_t j = k == 0 ? 0 : k - 1; j <= std::min(k + 1, profile.size() - 1); ++j) {
-            if (!std::isnan(profile[j])) {
-                sum += profile[j];
-                ++n;
-            }
-        }
-        smooth[k] = sum / n;
-    }
-    // Floor: the lowest level within the window further out.
-    const int window = std::max(2, static_cast<int>(settings.halo_window_px / ring_px));
-    std::vector<double> floor(smooth.size(), nan);
-    for (std::size_t k = 0; k < smooth.size(); ++k) {
-        double lo = std::numeric_limits<double>::infinity();
-        for (std::size_t j = k; j <= std::min(k + static_cast<std::size_t>(window), smooth.size() - 1); ++j) {
-            if (!std::isnan(smooth[j])) {
-                lo = std::min(lo, smooth[j]);
-            }
-        }
-        floor[k] = std::isfinite(lo) ? lo : nan;
-    }
-    // Peak within the search radius, then walk out to where the excess over
-    // the floor has fallen to the end fraction of the peak's.
-    const int search = std::min(n_rings - 1, static_cast<int>(settings.halo_search_px / ring_px));
-    int peak = -1;
-    for (int k = 0; k <= search; ++k) {
-        if (!std::isnan(smooth[static_cast<std::size_t>(k)]) &&
-            (peak < 0 || smooth[static_cast<std::size_t>(k)] > smooth[static_cast<std::size_t>(peak)])) {
-            peak = k;
-        }
-    }
-    if (peak < 0 || std::isnan(floor[static_cast<std::size_t>(peak)])) {
+    if (halo.n_pixels == 0) {
+        halo.mask.clear();
         return halo;
     }
-    const double top = smooth[static_cast<std::size_t>(peak)];
-    const double base = floor[static_cast<std::size_t>(peak)];
-    halo.peak_radius_px = (peak + 0.5) * ring_px;
-    halo.peak_level = top;
-    halo.floor_level = base;
-    if (!(top >= settings.halo_min_excess * base) || !(top > base)) {
-        return halo;
+    halo.found = true;
+    if (!radii.empty()) {
+        halo.radius_px = *std::max_element(radii.begin(), radii.end());
+        halo.median_radius_px = percentile(radii, 50.0);
     }
-    const double amplitude = top - base;
-    for (int k = peak; k < n_rings - window; ++k) {
-        const double v = smooth[static_cast<std::size_t>(k)];
-        const double f = floor[static_cast<std::size_t>(k)];
-        if (!std::isnan(v) && !std::isnan(f) && v - f <= settings.halo_end_fraction * amplitude) {
-            halo.found = true;
-            halo.radius_px = static_cast<double>(k + 1) * ring_px;
-            return halo;
-        }
-    }
-    return halo;  // never flattened within reach: not a halo
+    return halo;
 }
 
 std::vector<int> defpix_frames(int first, int last, int n) {
@@ -578,24 +757,28 @@ DefpixResult run_defpix(
     }
 
     if (settings.find_halo) {
-        // A ring wholly lit by the beam's flare is its own median above, so
-        // the shaded test cannot see it: walk out along the radial
-        // background instead, from the pixels still trusted.
+        // A halo filling whole rings is its own ring median above, so the
+        // shaded test cannot see it. Counts summed over the sampled frames
+        // (the background leaves out each pixel's largest value).
+        std::vector<float> counts(npix, -1.0f);
         std::vector<std::uint8_t> usable(npix);
+        std::vector<std::uint8_t> shaded(npix);
         for (std::size_t i = 0; i < npix; ++i) {
             usable[i] = static_cast<std::uint8_t>(is(i, PixelStatus::Trusted) && sums.n_valid[i] >= 2);
+            shaded[i] = static_cast<std::uint8_t>(is(i, PixelStatus::Shaded));
+            if (usable[i] && res.background[i] >= 0.0f) {
+                counts[i] = res.background[i] * static_cast<float>(sums.n_valid[i] - 1);
+            }
         }
-        res.halo = find_beam_halo(res.background, usable, w, h, bc, br, py / px, nf, settings);
+        res.halo = find_beam_halo(counts, usable, shaded, w, h, bc, br, py / px, settings);
         if (res.halo.found) {
-            for (int r = 0; r < h; ++r) {
-                for (int c = 0; c < w; ++c) {
-                    const std::size_t i = static_cast<std::size_t>(r) * static_cast<std::size_t>(w) +
-                                          static_cast<std::size_t>(c);
-                    if (is(i, PixelStatus::Trusted) && radius_px(c, r) <= res.halo.radius_px) {
-                        set(i, PixelStatus::Halo);
-                    }
+            for (std::size_t i = 0; i < npix; ++i) {
+                if (res.halo.mask[i] && is(i, PixelStatus::Trusted)) {
+                    set(i, PixelStatus::Halo);
                 }
             }
+        }
+        if (res.halo.radius_px > 0.0) {
             const double edge_mm = (res.halo.radius_px + settings.halo_margin_px) * px;
             res.halo_dmax_A = wave / (2.0 * std::sin(0.5 * std::atan2(edge_mm, dist)));
         }
