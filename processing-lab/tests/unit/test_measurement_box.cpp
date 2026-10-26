@@ -128,6 +128,7 @@ int main() {
     CHECK_CLOSE(plane.a, 2.0, 1e-6);
     CHECK_CLOSE(plane.b, 3.0, 1e-6);
     CHECK_CLOSE(plane.c, 50.0, 1e-6);
+    CHECK_CLOSE(plane.rms, 0.0, 1e-6);  // MOSFLM RMSBG: exact plane
 
     // Poisson upper limit: λ = 0.1 keeps 0–2 counts, rejects ≥ 3.
     CHECK_CLOSE(poisson_upper_limit(0.1, 3.0), 2.0, 1e-12);
@@ -151,6 +152,11 @@ int main() {
         "sparse plane c " + mosflm_test::fmt(sp_plane.c)
     );
     CHECK_EQ(sp_plane.n_rejected, 0);
+    // 0/1 counts with p ≈ c: RMSBG ≈ √(c(1 − c)), so BGRATIO = RMSBG/√c ≈ 1.
+    CHECK_MSG(
+        std::fabs(sp_plane.rms / std::sqrt(sp_plane.c * (1.0 - sp_plane.c)) - 1.0) < 0.2,
+        "sparse plane rms " + mosflm_test::fmt(sp_plane.rms)
+    );
 
     // Spot extent from the image: a lattice of σ = 2 px Gaussian spots
     // 12 px apart (neighbours inside the averaging window) on flat

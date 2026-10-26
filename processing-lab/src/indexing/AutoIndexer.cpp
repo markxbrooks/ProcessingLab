@@ -822,8 +822,9 @@ AutoIndexResult AutoIndexer::index(
         result.amat = xyz_reciprocal_to_mosflm_amat(
             result.amat, geometry.wavelength_A, spt_invertx
         );
-        result.orientation =
-            OrientationMatrix::from_mosflm_orientation_matrix(result.amat);
+        result.orientation = OrientationMatrix::from_mosflm_orientation_matrix(
+            result.amat, geometry.wavelength_A
+        );
     };
 
     if (!winner.ok) {

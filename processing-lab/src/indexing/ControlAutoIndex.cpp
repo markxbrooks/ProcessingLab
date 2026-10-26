@@ -164,6 +164,7 @@ void run_autoindex(
                   << " (applied to CONTROL)\n";
     }
     state.autoindex_indexed_frac = result.fit.indexed_frac;
+    state.autoindex_n_indexed = result.fit.n_indexed;
     state.autoindex_rmsd_hkl = result.fit.rmsd_hkl;
     // SUGGLATT → default SYMMETRY when the user did not set SYMMETRY.
     if (!state.has_symmetry && result.selected_symmetry_number > 0) {

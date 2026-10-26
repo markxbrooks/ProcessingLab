@@ -488,6 +488,7 @@ std::vector<ProfileObservation> StandardProfileFitter::fit(
         obs.bg_a = bg.a;
         obs.bg_b = bg.b;
         obs.bg_c = bg.c;
+        obs.bg_rms = bg.rms;
         if (!bg.ok || pr4 < 1e-18) {
             obs.profile_ok = false;
             out.push_back(obs);

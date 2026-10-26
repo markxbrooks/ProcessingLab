@@ -21,6 +21,9 @@ struct BackgroundPlane {
     bool ok{false};
     int n_used{0};
     int n_rejected{0};
+    /// RMS residual of the kept background pixels about the plane
+    /// (MOSFLM ``RMSBG``).
+    double rms{0.0};
 
     [[nodiscard]] double at(double dc, double dr) const {
         return a * dc + b * dr + c;
@@ -148,6 +151,8 @@ struct MeasObservation : IntegratedReflection {
     double bg_a{0.0};
     double bg_b{0.0};
     double bg_c{0.0};
+    /// :attr:`BackgroundPlane::rms` of the plane above.
+    double bg_rms{0.0};
 };
 
 /// Intensity-weighted COM refine of predicted pixel; capped shift.

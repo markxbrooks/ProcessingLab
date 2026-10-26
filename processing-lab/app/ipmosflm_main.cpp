@@ -212,80 +212,56 @@ void print_end() {
     std::cout << " ============= END OF PROCESSING ================\n";
 }
 
-/// Machine-readable AUTOINDEX dump for DiffractionLab (and CLI users).
-void emit_autoindex_dump(const mosflm::control::ControlState& state) {
-    if (!state.has_cell || !state.has_matrix) {
-        return;
-    }
-    const auto& c = state.cell;
-    const auto& A = state.amat;
-    std::cout << std::setprecision(10);
-    std::cout << "PROCESSINGLAB_CELL " << c.a << " " << c.b << " " << c.c
-              << " " << c.alpha_deg << " " << c.beta_deg << " " << c.gamma_deg
-              << '\n';
-    std::cout << "PROCESSINGLAB_MATRIX";
+/// Write ``rep`` as ``<prefix>CELL …`` lines (the AUTOINDEX text contract).
+/// ``INDEXED`` is a percentage; ``NINDEXED`` is the spot count behind it.
+void write_autoindex_lines(
+    std::ostream& out,
+    const mosflm::control::AutoindexReport& rep,
+    std::string_view prefix
+) {
+    const auto& c = rep.cell;
+    out << std::setprecision(10);
+    out << prefix << "CELL " << c.a << " " << c.b << " " << c.c << " "
+        << c.alpha_deg << " " << c.beta_deg << " " << c.gamma_deg << '\n';
+    out << prefix << "MATRIX";
     for (int r = 0; r < 3; ++r) {
         for (int col = 0; col < 3; ++col) {
-            std::cout << " " << A(r, col);
+            out << " " << rep.amat(r, col);
         }
     }
-    std::cout << '\n';
-    if (!state.autoindex_system.empty()) {
-        std::cout << "PROCESSINGLAB_SYSTEM " << state.autoindex_system << '\n';
+    out << '\n';
+    if (!rep.lattice_system.empty()) {
+        out << prefix << "SYSTEM " << rep.lattice_system << '\n';
     }
-    if (state.autoindex_character > 0) {
-        std::cout << "PROCESSINGLAB_CHARACTER " << state.autoindex_character
-                  << '\n';
+    if (rep.lattice_character > 0) {
+        out << prefix << "CHARACTER " << rep.lattice_character << '\n';
     }
-    if (state.autoindex_n_spots > 0) {
-        std::cout << "PROCESSINGLAB_NSPOTS " << state.autoindex_n_spots << '\n';
+    if (rep.n_spots_used > 0) {
+        out << prefix << "NSPOTS " << rep.n_spots_used << '\n';
+        out << prefix << "INDEXED "
+            << static_cast<int>(std::lround(100.0 * rep.indexed_frac)) << '\n';
+        out << prefix << "NINDEXED " << rep.n_indexed << '\n';
+        out << std::setprecision(4);
+        out << prefix << "RMSD_HKL " << rep.rmsd_hkl << '\n';
     }
-    if (state.autoindex_indexed_frac > 0.0 || state.autoindex_n_spots > 0) {
-        std::cout << "PROCESSINGLAB_INDEXED "
-                  << static_cast<int>(
-                         std::lround(100.0 * state.autoindex_indexed_frac)
-                     )
-                  << '\n';
-        std::cout << std::setprecision(4);
-        std::cout << "PROCESSINGLAB_RMSD_HKL " << state.autoindex_rmsd_hkl
-                  << '\n';
-    }
+}
 
+/// Machine-readable AUTOINDEX dump for DiffractionLab (and CLI users): the
+/// solution as AUTOINDEX found it, not the cell CELLFIX or post-refinement
+/// left in the session at the end of the run.
+void emit_autoindex_dump(
+    const mosflm::control::AutoindexReport& rep,
+    const std::filesystem::path& output_directory
+) {
+    write_autoindex_lines(std::cout, rep, "PROCESSINGLAB_");
     // Sidecar (output directory, else cwd) for tools that prefer files.
     try {
         std::ofstream out(
-            state.output_directory.empty()
-                ? std::filesystem::path("index.log")
-                : state.output_directory / "index.log"
+            output_directory.empty() ? std::filesystem::path("index.log")
+                                     : output_directory / "index.log"
         );
         if (out) {
-            out << std::setprecision(10);
-            out << "CELL " << c.a << " " << c.b << " " << c.c << " "
-                << c.alpha_deg << " " << c.beta_deg << " " << c.gamma_deg
-                << '\n';
-            out << "MATRIX";
-            for (int r = 0; r < 3; ++r) {
-                for (int col = 0; col < 3; ++col) {
-                    out << " " << A(r, col);
-                }
-            }
-            out << '\n';
-            if (!state.autoindex_system.empty()) {
-                out << "SYSTEM " << state.autoindex_system << '\n';
-            }
-            if (state.autoindex_character > 0) {
-                out << "CHARACTER " << state.autoindex_character << '\n';
-            }
-            if (state.autoindex_n_spots > 0) {
-                out << "NSPOTS " << state.autoindex_n_spots << '\n';
-            }
-            out << "INDEXED "
-                << static_cast<int>(
-                       std::lround(100.0 * state.autoindex_indexed_frac)
-                   )
-                << '\n';
-            out << std::setprecision(4);
-            out << "RMSD_HKL " << state.autoindex_rmsd_hkl << '\n';
+            write_autoindex_lines(out, rep, "");
         }
     } catch (...) {
         // Best-effort sidecar; stdout dump is enough for DiffractionLab.
@@ -305,7 +281,9 @@ void report_runs(
         }
         if (r.ran_autoindex) {
             std::cout << "  AUTOINDEX: " << r.message << '\n';
-            emit_autoindex_dump(session.state());
+            if (r.autoindex) {
+                emit_autoindex_dump(*r.autoindex, session.state().output_directory);
+            }
             continue;
         }
         if (r.ran_strategy) {

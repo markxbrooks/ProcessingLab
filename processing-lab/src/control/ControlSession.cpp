@@ -2721,6 +2721,19 @@ ControlGoResult ControlSession::go(
         state_.done_run = true;
         out.ran_autoindex = true;
         out.message = "AUTOINDEX complete";
+        if (state_.has_matrix && state_.has_cell) {
+            AutoindexReport rep;
+            rep.cell = state_.cell;
+            rep.amat = state_.amat;
+            rep.wavelength_A = state_.wavelength_A;
+            rep.lattice_system = state_.autoindex_system;
+            rep.lattice_character = state_.autoindex_character;
+            rep.n_spots_used = state_.autoindex_n_spots;
+            rep.n_indexed = state_.autoindex_n_indexed;
+            rep.indexed_frac = state_.autoindex_indexed_frac;
+            rep.rmsd_hkl = state_.autoindex_rmsd_hkl;
+            out.autoindex = std::move(rep);
+        }
         // IDXREF analogue: write XPARM.XDS after successful index.
         if (state_.has_matrix && state_.has_cell) {
             const std::filesystem::path out_xparm =

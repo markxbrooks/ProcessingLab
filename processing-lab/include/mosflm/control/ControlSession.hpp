@@ -240,6 +240,8 @@ struct ControlState {
     std::size_t autoindex_n_spots{0};
     /// Fraction of I/σ-filtered spots indexed by the chosen AMAT (0–1).
     double autoindex_indexed_frac{0.0};
+    /// Spots indexed by the chosen AMAT (the numerator of the fraction).
+    std::size_t autoindex_n_indexed{0};
     /// RMS fractional HKL residual for indexed spots.
     double autoindex_rmsd_hkl{0.0};
     /// Every lattice solution AUTOINDEX considered, best first.
@@ -310,6 +312,32 @@ struct DefpixSummary {
 };
 
 /// Outcome of one ``GO`` / ``RUN``.
+/// What one AUTOINDEX GO produced, captured as it finished. CELLFIX and
+/// post-refinement later change :class:`ControlState`'s cell and matrix;
+/// this keeps the indexing solution itself.
+struct AutoindexReport {
+    /// Cell of the chosen solution, before any CELLFIX symmetrisation.
+    UnitCell cell{};
+    /// MOSFLM A-matrix: rows are lab X, Y, Z; columns are λ·a*, λ·b*, λ·c*
+    /// (dimensionless), so ``A / λ`` maps hkl to reciprocal space in Å⁻¹.
+    Eigen::Matrix3d amat{Eigen::Matrix3d::Identity()};
+    /// Wavelength ``amat`` is scaled by (Å).
+    double wavelength_A{0.0};
+    /// DPS Bravais lattice id of the chosen solution, e.g. ``"tP"``.
+    std::string lattice_system;
+    /// DPS lattice character (1–44) of the chosen solution.
+    int lattice_character{0};
+    /// Spots given to the indexer (after the I/σ cut).
+    std::size_t n_spots_used{0};
+    /// Spots whose hkl all lie within HKLDEV of integers under ``amat``.
+    std::size_t n_indexed{0};
+    /// ``n_indexed / n_spots_used``.
+    double indexed_frac{0.0};
+    /// √(Σ (hkl − nearest integer)² / (3 n_indexed)) over the indexed spots:
+    /// RMS deviation per index, in fractional-index units.
+    double rmsd_hkl{0.0};
+};
+
 struct ControlGoResult {
     bool ran_process{false};
     bool ran_autoindex{false};
@@ -319,6 +347,8 @@ struct ControlGoResult {
     diffraction::ProcessResult process{};
     crystal::CrystalMetadata crystal{};
     std::filesystem::path image_used{};
+    /// The indexing solution (set when ``ran_autoindex``).
+    std::optional<AutoindexReport> autoindex;
     /// Inclusive PROCESS image range actually integrated this GO.
     int process_first{0};
     int process_last{0};

@@ -47,11 +47,31 @@ Eigen::Matrix3d rotation_about_x_deg(double phi_deg) {
     return R;
 }
 
-float encode_bgpkratios(double bgrat, double pkrat) {
-    const int ia =
-        std::min(99, static_cast<int>(std::lround(bgrat * 10.0))) +
-        static_cast<int>(std::lround(pkrat * 100.0)) * 100;
-    return static_cast<float>(ia);
+/// MOSFLM ``GOODFIT`` packing (PROCESS, ``unoptimizable.f``):
+/// ``INT(MIN(BGRATIO·10, 99)) + NINT(PKRATIO·100)·100 + gradient``, the
+/// gradient (< 1) in the fraction. Aimless/Pointless unpack it the same way.
+float encode_bgpkratios(double bgratio, double pkratio, double gradient) {
+    const int ia = static_cast<int>(std::min(std::max(bgratio, 0.0) * 10.0, 99.0)) +
+                   static_cast<int>(std::lround(std::max(pkratio, 0.0) * 100.0)) * 100;
+    return static_cast<float>(static_cast<double>(ia) + std::clamp(gradient, 0.0, 0.99));
+}
+
+/// MOSFLM BGRATIO: background RMS about its plane over the counting-statistics
+/// value, ``RMSBG / √(GAIN·BGND/TPEAK)`` (gain 1: photon counts). A zero or
+/// negative background is taken as 0.01 under the whole peak, as MOSFLM does.
+double background_ratio(const MeasObservation& m) {
+    const int n_peak = std::max(1, m.npix_peak);
+    const double per_pixel = m.bg_c > 0.0 ? m.bg_c : 0.01 / static_cast<double>(n_peak);
+    return m.bg_rms / std::sqrt(per_pixel);
+}
+
+/// MOSFLM background gradient: ``max(|A/C|, |B/C|)`` per pixel, capped at
+/// 0.99; 0 without a positive background level.
+double background_gradient(const MeasObservation& m) {
+    if (!(m.bg_c > 0.0)) {
+        return 0.0;
+    }
+    return std::min(0.99, std::max(std::fabs(m.bg_a / m.bg_c), std::fabs(m.bg_b / m.bg_c)));
 }
 
 /// Add one strong slice to ``log``: background-subtracted pixels around the
@@ -425,9 +445,6 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
 
         int ibad = 0;
         if (po != nullptr) {
-            if (po->profile_gof > kPkratioLimit) {
-                ibad |= kIbadPkratio;
-            }
             if (po->profile_ok && po->profile_sigma > 0.0 &&
                 po->profile_intensity <
                     -kNegProfileSigma * po->profile_sigma) {
@@ -486,12 +503,6 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             row.sigipr = static_cast<float>(
                 po->profile_ok ? po->profile_sigma : po->summation_sigma
             );
-            const double bgrat =
-                po->npix_bg > 0
-                    ? static_cast<double>(po->n_bg_rejected) /
-                          static_cast<double>(po->npix_bg)
-                    : 0.0;
-            row.bgpkratios = encode_bgpkratios(bgrat, po->profile_gof);
         } else {
             row.ipr = row.intensity;
             row.sigipr = row.sigma;
@@ -693,9 +704,25 @@ ProcessResult ProcessPipeline::run(const ProcessRequest& request) const {
             ));
         }
 
+        // BGPKRATIOS, as MOSFLM: PKRATIO only for a fully recorded spot with
+        // no overloaded pixel (0 for partials, so FLAG bit 2 never rejects a
+        // partial slice), BGRATIO and the gradient from the background plane.
+        const MeasObservation* mo =
+            po != nullptr ? static_cast<const MeasObservation*>(po)
+            : i < out.meas_observations.size() ? &out.meas_observations[i]
+                                               : nullptr;
+        if (mo != nullptr) {
+            const bool full_fit = po != nullptr && po->profile_ok && row.mpart == 0 && po->n_overload == 0;
+            const double pkratio = full_fit ? po->profile_gof : 0.0;
+            if (pkratio > kPkratioLimit) {
+                ibad |= kIbadPkratio;
+            }
+            row.bgpkratios = encode_bgpkratios(background_ratio(*mo), pkratio, background_gradient(*mo));
+        }
+
         // FLAG: 0 good; else IBAD bits (Aimless rejects non-zero by default).
-        // Bit 4 is I_prf < −5σ. Bit 2 is profile χ² above 5. Bit 16 is a
-        // saturated peak pixel. Bit 512 marks a spatial overlap for the
+        // Bit 4 is I_prf < −5σ. Bit 2 is PKRATIO above 5 on a full. Bit 16
+        // is a saturated peak pixel. Bit 512 marks a spatial overlap for the
         // in-memory mosaicity sample and is stripped by the partial sum.
         row.flag = ibad;
         if (overlapped) {

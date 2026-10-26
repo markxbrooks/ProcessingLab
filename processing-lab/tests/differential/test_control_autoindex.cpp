@@ -3,6 +3,7 @@
  */
 
 #include "mosflm/control/ControlSession.hpp"
+#include "mosflm/geometry/OrientationMatrix.hpp"
 #include "mosflm/indexing/ControlAutoIndex.hpp"
 #include "test_util.hpp"
 
@@ -43,6 +44,21 @@ int main() {
     CHECK(session.state().has_matrix);
     CHECK(session.done_run());
     CHECK(std::fabs(session.state().cell.a - 78.19) < 2.0);
+    // The GO result keeps the indexing solution itself.
+    CHECK(r.autoindex.has_value());
+    if (r.autoindex) {
+        const auto& rep = *r.autoindex;
+        CHECK(rep.cell.a == session.state().cell.a);
+        CHECK(rep.amat == session.state().amat);
+        CHECK(rep.n_spots_used > 0);
+        CHECK(rep.n_indexed <= rep.n_spots_used);
+        CHECK(std::fabs(rep.indexed_frac -
+                        static_cast<double>(rep.n_indexed) / static_cast<double>(rep.n_spots_used)) < 1e-12);
+        // ``amat`` is λ-scaled: A / λ gives the reported cell.
+        const auto implied =
+            mosflm::OrientationMatrix::from_mosflm_orientation_matrix(rep.amat, rep.wavelength_A).cell();
+        CHECK(std::fabs(implied.a - rep.cell.a) < 0.05 * rep.cell.a);
+    }
 
     // MULTIFRAME follows a single --image file to each frame's sibling
     // (it used to read image 1 for every frame), else TEMPLATE; HDF5

@@ -344,6 +344,14 @@ BackgroundPlane fit_background_plane(
 
     plane.n_rejected = n0 - static_cast<int>(samples.size());
     plane.n_used = static_cast<int>(samples.size());
+    if (!samples.empty()) {
+        double ss = 0.0;
+        for (const auto& s : samples) {
+            const double d = s.od - plane.at(s.p, s.q);
+            ss += d * d;
+        }
+        plane.rms = std::sqrt(ss / static_cast<double>(samples.size()));
+    }
     return plane;
 }
 
@@ -847,6 +855,7 @@ std::vector<MeasObservation> MeasIntegrator::integrate(
         r.bg_a = bg.a;
         r.bg_b = bg.b;
         r.bg_c = bg.c;
+        r.bg_rms = bg.rms;
 
         double peak_sum = 0.0;
         double bg_under_peak = 0.0;
