@@ -140,7 +140,10 @@ std::string xds_inp_text(const ExperimentModel& m) {
       << "INCIDENT_BEAM_DIRECTION=0 0 1\n"
       << "FRACTION_OF_POLARIZATION=0.99\n"
       << "POLARIZATION_PLANE_NORMAL=0 1 0\n"
-      << "FRIEDEL'S_LAW=TRUE\n";
+      << "FRIEDEL'S_LAW=TRUE\n"
+      // XDS's default (0.0 1.05) drops the detector corners, which
+      // ProcessingLab integrates; 1.41421 keeps them.
+      << "TRUSTED_REGION=0.0 1.41421\n";
     if (m.symmetry.set()) {
         o << "SPACE_GROUP_NUMBER=" << m.symmetry.value << '\n';
     } else {

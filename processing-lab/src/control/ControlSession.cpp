@@ -16,6 +16,8 @@
 #include "mosflm/geometry/OrientationMatrix.hpp"
 #include "mosflm/io/XparmIO.hpp"
 #include "mosflm/image/ImageIO.hpp"
+#include "mosflm/indexing/SpotList.hpp"
+#include "mosflm/indexing/SpotToRlp.hpp"
 #include "mosflm/refinement/PositionalRefinement.hpp"
 #include "mosflm/refinement/PostRefinement.hpp"
 #include "mosflm/util/OpenMP.hpp"
@@ -1234,6 +1236,58 @@ void collect_positional_observations(
         }
         out.push_back({o.h, o.k, o.l, mid, o.xobs_px, o.yobs_px, 1.0});
     }
+}
+
+/// FINDSPOTS spots as positional observations (XDS IDXREF's input): their
+/// centroids come from the spot finder, so unlike measurement-box centroids
+/// they are not pulled toward a poor prediction. Indexed with the current
+/// matrix; spots further than ``max_dev`` from integer h, k, l are left out.
+std::vector<refinement::PositionalObservation> spot_list_observations(
+    const indexing::SpotList& spots,
+    const ControlState& state,
+    double wavelength_A,
+    double distance_mm,
+    double image_beam_x_mm,
+    double image_beam_y_mm,
+    double pixel_x_mm,
+    double pixel_y_mm,
+    double yscale,
+    double phi_sigma_deg,
+    double max_dev = 0.3
+) {
+    std::vector<float> x;
+    std::vector<float> y;
+    std::vector<float> z;
+    indexing::spots_to_rlp_xyz(
+        spots, {}, {distance_mm, wavelength_A, image_beam_x_mm, image_beam_y_mm}, x, y, z
+    );
+    const Eigen::Matrix3d to_hkl =
+        mosflm_amat_to_xyz_reciprocal(state.amat, wavelength_A, state.spt_invertx).inverse();
+    std::vector<refinement::PositionalObservation> out;
+    for (std::size_t i = 0; i < x.size() && i < spots.spots.size(); ++i) {
+        const Eigen::Vector3d f = to_hkl * Eigen::Vector3d(x[i], y[i], z[i]);
+        const Eigen::Vector3d n = f.array().round().matrix();
+        if ((f - n).cwiseAbs().maxCoeff() > max_dev || n.isZero()) {
+            continue;
+        }
+        const auto& s = spots.spots[i];
+        // Same mapping as IDXREF (build_idxref_observations): .spt image mm
+        // → MOSFLM XDET/YDET pixels, the frame the predictor works in.
+        refinement::PositionalObservation o;
+        o.h = static_cast<int>(n.x());
+        o.k = static_cast<int>(n.y());
+        o.l = static_cast<int>(n.z());
+        cpp_mm_to_mosflm_xdet_yscale(
+            s.y_mm - image_beam_y_mm, s.x_mm - image_beam_x_mm, image_beam_x_mm, image_beam_y_mm,
+            pixel_x_mm, pixel_y_mm, yscale, o.xdet_obs_px, o.ydet_obs_px
+        );
+        // Merged spots carry their intensity-weighted φ centroid.
+        o.phi_deg = s.phi_end_deg;
+        o.phi_obs_deg = s.phi_end_deg;
+        o.phi_sigma_deg = phi_sigma_deg;
+        out.push_back(o);
+    }
+    return out;
 }
 
 /// Which parameters a positional refinement may move.
@@ -3009,6 +3063,55 @@ ControlGoResult ControlSession::go(
     constexpr int k_sweep_every_blocks = 4;
     constexpr double k_sweep_min_span_deg = 15.0;
     int blocks_refined = 0;
+
+    // XDS IDXREF-style start: refine orientation, cell, distance, beam and
+    // tilt/twist on the FINDSPOTS spots before any frame is integrated or
+    // the measurement box is sized. Box centroids are pulled toward a
+    // prediction that is a few pixels off, so refining on them alone
+    // converges slowly (thaumatin: distance +0.07 mm per 25-frame block,
+    // tilt/twist held at 0 for 100 frames) while early frames lose intensity
+    // outside the box.
+    if (multi && want_periodic_postref) {
+        const auto spt_name = !state_.autoindex.spot_file.empty() ? state_.autoindex.spot_file
+                                                                   : state_.findspots.spot_file;
+        const auto spt = spt_name.empty() ? spt_name : output_path(state_, spt_name);
+        std::error_code ec;
+        if (!spt.empty() && std::filesystem::exists(spt, ec)) {
+            try {
+                const auto spots = indexing::SpotList::read_spt(spt);
+                // A second cycle re-indexes with the refined geometry, which
+                // brings in the spots the starting geometry misplaced.
+                for (int cycle = 1; cycle <= 2; ++cycle) {
+                    const auto req = make_process_request(image0, first);
+                    const auto& d = req.detector;
+                    const double osc = req.scan.phi_end_deg - req.scan.phi_start_deg;
+                    const auto obs = spot_list_observations(
+                        spots, state_, d.wavelength_A, d.distance_mm, req.integration.image_beam_x_mm,
+                        req.integration.image_beam_y_mm, d.pixel_size_x_mm, d.pixel_size_y_mm, d.yscale,
+                        std::max(osc, 0.05)
+                    );
+                    double phi_lo = std::numeric_limits<double>::infinity();
+                    double phi_hi = -phi_lo;
+                    for (const auto& o : obs) {
+                        phi_lo = std::min(phi_lo, o.phi_deg);
+                        phi_hi = std::max(phi_hi, o.phi_deg);
+                    }
+                    std::ostringstream label;
+                    label << std::fixed << std::setprecision(1) << "spot range cycle " << cycle << ", "
+                          << obs.size() << " of " << spots.spots.size() << " spots in "
+                          << spt.filename().string() << " indexed, φ " << phi_lo << "–" << phi_hi << "°";
+                    if (!refine_geometry_positional(
+                            state_, obs, d, req.integration.image_beam_x_mm,
+                            req.integration.image_beam_y_mm, label.str(), RefineScope::Global
+                        )) {
+                        break;
+                    }
+                }
+            } catch (const std::exception& ex) {
+                std::cerr << " *** WARNING **   SPOT-RANGE REFINE: " << ex.what() << '\n';
+            }
+        }
+    }
 
     // Measurement box from the spots (MOSFLM raster / XDS spot size) unless
     // PEAKHALF is set: integrate the first frames with the provisional box

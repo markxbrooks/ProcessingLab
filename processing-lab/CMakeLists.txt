@@ -227,6 +227,10 @@ else()
 endif()
 
 set(MOSFLM_GEOMETRY_SOURCES
+    # Spot files and their reciprocal vectors: PROCESS refines on the
+    # FINDSPOTS spots, so these do not need the optional DPS indexer.
+    src/indexing/SpotList.cpp
+    src/indexing/SpotToRlp.cpp
     src/geometry/UnitCell.cpp
     src/geometry/CellFix.cpp
     src/geometry/MetricTensorProjector.cpp
@@ -352,7 +356,6 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
     set(MOSFLM_INDEXING_SOURCES
         src/indexing/BravaisClassifier.cpp
         src/indexing/BravaisSelect.cpp
-        src/indexing/SpotList.cpp
         src/indexing/SpotFinder.cpp
         src/indexing/MultiFrameSpotFinder.cpp
     )
@@ -364,7 +367,6 @@ if(MOSFLM_HAS_DPS_BRAVAIS)
             src/indexing/LocalIndexAssign.cpp
             src/indexing/MaxCell.cpp
             src/indexing/IdxrefRefine.cpp
-            src/indexing/SpotToRlp.cpp
             src/indexing/SupercellReduce.cpp
             src/indexing/ControlAutoIndex.cpp
             src/indexing/ControlFindSpots.cpp
