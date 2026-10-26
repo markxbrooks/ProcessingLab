@@ -30,8 +30,8 @@ Kernel configured for up to 10 processors.
 Processor type: arm64e (ARM64E)
 Processors active: 0 1 2 3 4 5 6 7 8 9
 Primary memory available: 16.00 gigabytes
-Default processor set: 597 tasks, 3747 threads, 10 processors
-Load average: 9.31, Mach factor: 1.70
+Default processor set: 630 tasks, 3512 threads, 10 processors
+Load average: 4.59, Mach factor: 5.40
 /bin/machine           = unknown
 /usr/bin/oslevel       = unknown
 /bin/universe          = unknown
@@ -62,7 +62,12 @@ PATH: /opt/pmk/env/global/bin/
 PATH: /opt/X11/bin/
 PATH: /Library/Apple/usr/bin/
 PATH: /Library/TeX/texbin/
-PATH: /Applications/iTerm.app/Contents/Resources/utilities/
+PATH: /Users/brooks/.local/bin/
+PATH: /opt/homebrew/opt/libxml2/bin/
+PATH: /usr/local/Caskroom/miniforge/base/bin/
+PATH: /Applications/ccp4-9/etc/
+PATH: /Applications/ccp4-9/bin/
+PATH: /Users/brooks/.lmstudio/bin/
 PATH: /Users/brooks/.lmstudio/bin/
 
 

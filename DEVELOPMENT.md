@@ -10,7 +10,7 @@ The top-level `make` drives CMake in `processing-lab/build`. To configure
 `processing-lab` yourself, build the vendored CBFlib first:
 
 ```bash
-make -C cbf
+make -C third_party/cbf
 cmake -S processing-lab -B processing-lab/build -DCMAKE_BUILD_TYPE=Release
 cmake --build processing-lab/build
 ctest --test-dir processing-lab/build --output-on-failure

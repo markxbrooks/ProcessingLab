@@ -49,9 +49,9 @@ all: cpp
 
 # Vendored CBFlib (required by processing-lab CMake).
 cbf-lib:
-	cd cbf && ${MAKE}
+	cd third_party/cbf && ${MAKE}
 	if [ -f "$(RANLIB)" ] || command -v ranlib >/dev/null 2>&1; then \
-		ranlib cbf/lib/libcbf.a 2>/dev/null || true; \
+		ranlib third_party/cbf/lib/libcbf.a 2>/dev/null || true; \
 	fi
 
 # DPS archives for BravaisClassifier / AutoIndexer.
@@ -136,7 +136,7 @@ clean-generic:
 
 clean: clean-generic
 	cd index ; ${MAKE} clean || true
-	cd cbf ; ${MAKE} clean || true
+	cd third_party/cbf ; ${MAKE} clean || true
 	cd mosflm ; ${MAKE} clean || true
 	rm -rf $(CPP_BUILD)
 	rm -f bin/$(PROCESSINGLAB) bin/mosflm_cpp_cli$(EXEEXT) bin/ipmosflm
@@ -144,7 +144,7 @@ clean: clean-generic
 distclean: distclean-generic clean
 	-rm -f config.status config.h
 	cd index ; ${MAKE} distclean || true
-	cd cbf ; ${MAKE} distclean || true
+	cd third_party/cbf ; ${MAKE} distclean || true
 	cd mosflm ; ${MAKE} distclean || true
 
 realclean: clean

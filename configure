@@ -759,7 +759,7 @@ F77
 FFLAGS
 CPP
 XMKMF'
-ac_subdirs_all='cbf'
+ac_subdirs_all='third_party/cbf'
 
 # Initialize some variables set by options.
 ac_init_help=
@@ -8184,7 +8184,7 @@ fi
 
 
 
-subdirs="$subdirs cbf"
+subdirs="$subdirs third_party/cbf"
 
 
 # Provide some information about the compiler.

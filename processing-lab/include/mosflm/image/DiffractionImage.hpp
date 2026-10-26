@@ -108,7 +108,7 @@ public:
 /// bitshuffle + LZ4 filters, and decodes one-frame bitshuffle-LZ4 chunks
 /// itself. Reads DECTRIS ``data_NNNNNN`` blocks or one NXmx ``data`` dataset,
 /// applies ``pixel_mask`` (−1) and honours ``units`` (adapted in part from
-/// durin; see durin/LICENSE). ``frame`` is 1-based (MOSFLM PROCESS convention).
+/// durin; see third_party/durin/LICENSE). ``frame`` is 1-based (MOSFLM PROCESS convention).
 class Hdf5ImageReader {
 public:
     [[nodiscard]] DiffractionImage read(

@@ -2,7 +2,7 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
 /* build date */
-#define BUILD_DATE "Sunday, October 25 2026 at 12:44"
+#define BUILD_DATE "Sunday, October 25 2026 at 22:44"
 
 /* build user */
 #define BUILD_USER "brooks"

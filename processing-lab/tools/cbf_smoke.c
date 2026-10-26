@@ -1,7 +1,7 @@
 /* Header + pixel smoke test against vendored CBFlib (Option A).
  *
- * Build (from repo root):
- *   cc -O0 -g -I../cbf/include -o cbf_smoke cbf_smoke.c ../cbf/lib/libcbf.a -lm
+ * Build (from processing-lab/tools):
+ *   cc -O0 -g -I../../third_party/cbf/include -o cbf_smoke cbf_smoke.c ../../third_party/cbf/lib/libcbf.a -lm
  * Run:
  *   ./cbf_smoke ../testdata/cbf/sample_minicbf.cbf
  */

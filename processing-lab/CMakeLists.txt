@@ -99,17 +99,19 @@ endif()
 get_filename_component(_mosflm_repo_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 if(NOT DEFINED CACHE{MOSFLM_IPMOSFLM_ROOT}
    OR "${MOSFLM_IPMOSFLM_ROOT}" MATCHES "mosflm-cpp"
-   OR NOT EXISTS "${MOSFLM_IPMOSFLM_ROOT}/cbf/lib/libcbf.a")
+   OR NOT EXISTS "${MOSFLM_IPMOSFLM_ROOT}/third_party/cbf/lib/libcbf.a")
     set(MOSFLM_IPMOSFLM_ROOT "${_mosflm_repo_root}" CACHE PATH
         "ProcessingLab repository root (CBF + DPS libs)" FORCE)
 endif()
 get_filename_component(MOSFLM_IPMOSFLM_ROOT "${MOSFLM_IPMOSFLM_ROOT}" ABSOLUTE)
-set(MOSFLM_CBF_INCLUDE_DIR "${MOSFLM_IPMOSFLM_ROOT}/cbf/include")
-set(MOSFLM_CBF_LIB "${MOSFLM_IPMOSFLM_ROOT}/cbf/lib/libcbf.a")
+# Code from other projects (CBFlib, bitshuffle, LZ4, …), each with its licence.
+set(MOSFLM_THIRD_PARTY_DIR "${MOSFLM_IPMOSFLM_ROOT}/third_party")
+set(MOSFLM_CBF_INCLUDE_DIR "${MOSFLM_THIRD_PARTY_DIR}/cbf/include")
+set(MOSFLM_CBF_LIB "${MOSFLM_THIRD_PARTY_DIR}/cbf/lib/libcbf.a")
 if(NOT EXISTS "${MOSFLM_CBF_LIB}")
     message(FATAL_ERROR
         "CBFlib not found at ${MOSFLM_CBF_LIB}\n"
-        "Build it first: make -C ${MOSFLM_IPMOSFLM_ROOT}/cbf  (or: make cbf-lib)")
+        "Build it first: make -C ${MOSFLM_THIRD_PARTY_DIR}/cbf  (or: make cbf-lib)")
 endif()
 
 # Prebuilt DPS (Cambridge Bravais + FFT indexer).
@@ -282,10 +284,10 @@ set(MOSFLM_GEOMETRY_SOURCES
 
 if(MOSFLM_HAS_HDF5)
     list(APPEND MOSFLM_GEOMETRY_SOURCES
-        ${MOSFLM_IPMOSFLM_ROOT}/lz4/lz4.c
-        ${MOSFLM_IPMOSFLM_ROOT}/lz4/h5zlz4.c
-        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle/bitshuffle.c
-        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle/bshuf_h5filter.c
+        ${MOSFLM_THIRD_PARTY_DIR}/lz4/lz4.c
+        ${MOSFLM_THIRD_PARTY_DIR}/lz4/h5zlz4.c
+        ${MOSFLM_THIRD_PARTY_DIR}/bitshuffle/bitshuffle.c
+        ${MOSFLM_THIRD_PARTY_DIR}/bitshuffle/bshuf_h5filter.c
     )
 endif()
 
@@ -323,8 +325,8 @@ endif()
 if(MOSFLM_HAS_HDF5)
     target_include_directories(processinglab_geometry PRIVATE
         ${HDF5_INCLUDE_DIRS}
-        ${MOSFLM_IPMOSFLM_ROOT}/lz4
-        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle
+        ${MOSFLM_THIRD_PARTY_DIR}/lz4
+        ${MOSFLM_THIRD_PARTY_DIR}/bitshuffle
     )
     # ${HDF5_LIBRARIES} is often only libhdf5; H5LT lives in libhdf5_hl.
     target_link_libraries(processinglab_geometry PRIVATE ${HDF5_LIBRARIES})
@@ -338,10 +340,10 @@ if(MOSFLM_HAS_HDF5)
     target_compile_definitions(processinglab_geometry PUBLIC MOSFLM_HAS_HDF5=1)
     # Vendored filter sources are C99.
     set_source_files_properties(
-        ${MOSFLM_IPMOSFLM_ROOT}/lz4/lz4.c
-        ${MOSFLM_IPMOSFLM_ROOT}/lz4/h5zlz4.c
-        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle/bitshuffle.c
-        ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle/bshuf_h5filter.c
+        ${MOSFLM_THIRD_PARTY_DIR}/lz4/lz4.c
+        ${MOSFLM_THIRD_PARTY_DIR}/lz4/h5zlz4.c
+        ${MOSFLM_THIRD_PARTY_DIR}/bitshuffle/bitshuffle.c
+        ${MOSFLM_THIRD_PARTY_DIR}/bitshuffle/bshuf_h5filter.c
         PROPERTIES LANGUAGE C
     )
 endif()
@@ -725,7 +727,7 @@ if(BUILD_TESTING)
         add_executable(test_hdf5_reader tests/unit/test_hdf5_reader.cpp)
         target_include_directories(test_hdf5_reader PRIVATE
             ${HDF5_INCLUDE_DIRS}
-            ${MOSFLM_IPMOSFLM_ROOT}/bitshuffle
+            ${MOSFLM_THIRD_PARTY_DIR}/bitshuffle
         )
         target_link_libraries(test_hdf5_reader PRIVATE processinglab_geometry
             ${HDF5_LIBRARIES})

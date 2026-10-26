@@ -12,7 +12,7 @@ Not “no usable CBF reader” — the tree already ships CBFlib and Fortran/C g
 
 | Piece | Location | Role |
 | ----- | -------- | ---- |
-| CBFlib | [`cbf/`](../../cbf/), `cbf/lib/libcbf.a` | Decode CBF / imgCIF |
+| CBFlib | [`third_party/cbf/`](../../third_party/cbf/), `third_party/cbf/lib/libcbf.a` | Decode CBF / imgCIF |
 | Full/header CBF wrap | [`mosflm/cbfwrap.c`](../../mosflm/cbfwrap.c) `cbfwrap_()` | CBFlib → `cbf_int` / `cbf_int4` / `cbf_double` / `cbf_char` + `short image[]` |
 | Pilatus miniCBF | [`mosflm/pilatus_c.c`](../../mosflm/pilatus_c.c), [`pilatus_pck.c`](../../mosflm/pilatus_pck.c) | Fast path; `pilatus_pck` can decode `CBF_BYTE_OFFSET` / `CBF_NONE` without full CBFlib |
 | Detector keyword | [`mosflm/control.f`](../../mosflm/control.f) ~8435–8497 | `DETECTOR CBF` / Pilatus / `ADSC-PAD` set `MACHINE`, `MINICBF`, `FULLCBF` |
@@ -58,7 +58,7 @@ Symlink / copy under [`testdata/cbf/`](../testdata/cbf/README.md). Preferred sam
 
 ### `mosflm::image::CbfImageReader` (Oct 2026)
 
-C++ reader in `processing-lab` links vendored `cbf/lib/libcbf.a`:
+C++ reader in `processing-lab` links vendored `third_party/cbf/lib/libcbf.a`:
 
 - Decodes pixels via `cbf_get_image` (CTest `cbf_image_reader`: 1475×1679, non-empty).
 - Fills `ImageMetadata` from CIF when present; for miniCBF gaps, parses `#` comment

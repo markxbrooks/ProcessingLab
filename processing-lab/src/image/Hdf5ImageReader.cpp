@@ -35,7 +35,7 @@ int Hdf5ImageReader::num_images(const std::filesystem::path& path) const {
 //   Author: Charles Mita
 //
 // durin is distributed under the BSD 3-Clause licence; its copyright notice,
-// conditions and disclaimer are reproduced in durin/LICENSE at the top of
+// conditions and disclaimer are reproduced in third_party/durin/LICENSE in
 // this repository.
 
 #include <hdf5.h>
@@ -55,7 +55,7 @@ int Hdf5ImageReader::num_images(const std::filesystem::path& path) const {
 #include <system_error>
 #include <vector>
 
-// Vendored filters (ProcessingLab bitshuffle/ + lz4/).
+// Vendored filters (third_party/bitshuffle/ + third_party/lz4/).
 extern "C" {
 #include "bitshuffle.h"
 #include "bshuf_h5filter.h"

@@ -198,7 +198,7 @@ AC_SUBST(XDL_LIB)
 AC_SUBST(EXTRA_LIBS)
 AC_SUBST(ipmosflm_LDFLAGS)
 
-AC_CONFIG_SUBDIRS([cbf])
+AC_CONFIG_SUBDIRS([third_party/cbf])
 
 # Provide some information about the compiler.
 echo "$as_me:$LINENO:" \

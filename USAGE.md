@@ -255,7 +255,7 @@ OpenMP workers: CONTROL `NPROC n` (aliases `THREADS` / `NTHREADS`), or the
 
 | Format | How to point at it |
 | ------ | ------------------ |
-| HDF5 / NeXus Eiger master (`*_master.h5`, `.nxs`) | `--image master.h5`. Frame numbers are indices in the master. Keep `data_*.h5` beside it. Reads DECTRIS `data_NNNNNN` blocks or a single NXmx `data` dataset (virtual datasets too), applies `pixel_mask`, and scales pixel size and distance by their `units`. Reader adapted in part from Diamond's durin ([durin/](durin/README.md)). |
+| HDF5 / NeXus Eiger master (`*_master.h5`, `.nxs`) | `--image master.h5`. Frame numbers are indices in the master. Keep `data_*.h5` beside it. Reads DECTRIS `data_NNNNNN` blocks or a single NXmx `data` dataset (virtual datasets too), applies `pixel_mask`, and scales pixel size and distance by their `units`. Reader adapted in part from Diamond's durin ([third_party/durin/](third_party/durin/README.md)). |
 | miniCBF / CBF | `DIRECTORY` + `TEMPLATE` with `#` placeholders, e.g. `sweep_####.cbf`. |
 | SMV (ADSC) | Same `DIRECTORY` / `TEMPLATE` / `--image` pattern. Read as MOSFLM does: `XDET` runs along the file's slow axis (DIALS `XDET` is the fast axis). |
 

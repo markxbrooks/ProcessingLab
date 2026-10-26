@@ -26,7 +26,7 @@ ctest --test-dir build --output-on-failure
 #   cmake --install build --prefix /path/to/prefix
 ```
 
-Requires CMake ≥ 3.24, a C++20 compiler, ZLIB, vendored `../cbf/lib/libcbf.a`
+Requires CMake ≥ 3.24, a C++20 compiler, ZLIB, vendored `../third_party/cbf/lib/libcbf.a`
 (`make -C ../cbf` or top-level `make cpp`). Eigen is taken from the system
 (`find_package(Eigen3)`, e.g. Homebrew `eigen`) when present; otherwise a
 3.4.0 tarball is downloaded (no git clone). Gemmi still uses FetchContent.

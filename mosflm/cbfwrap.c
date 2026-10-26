@@ -117,9 +117,9 @@
  * 5 Abbey Square, Chester CH1 2HU, England.                          *
  **********************************************************************/
 
-#include "../cbf/include/cbf.h"
-#include "../cbf/examples/img.h"
-#include "../cbf/include/cbf_simple.h"
+#include "../third_party/cbf/include/cbf.h"
+#include "../third_party/cbf/examples/img.h"
+#include "../third_party/cbf/include/cbf_simple.h"
 
 #include <stdlib.h>
 #include <stdio.h>

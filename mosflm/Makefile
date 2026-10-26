@@ -104,20 +104,20 @@ mosflm_jpeg.o: mosflm_jpeg.c
 fromhdf5.o: fromhdf5.c
 	${CC} -c  ${CFLAGS} fromhdf5.c
 
-lz4.o:  ../lz4/lz4.c
-	${CC} -c -Ilz4 ../lz4/lz4.c
+lz4.o:  ../third_party/lz4/lz4.c
+	${CC} -c -I../third_party/lz4 ../third_party/lz4/lz4.c
 
-h5zlz4.o:       ../lz4/h5zlz4.c
-	${CC} -c -std=c99 ${CFLAGS} -Ilz4 ../lz4/h5zlz4.c
+h5zlz4.o:       ../third_party/lz4/h5zlz4.c
+	${CC} -c -std=c99 ${CFLAGS} -I../third_party/lz4 ../third_party/lz4/h5zlz4.c
 
-bshuf_h5filter.o:        ../bitshuffle/bshuf_h5filter.c
-	${CC} -c ${CFLAGS} -I../lz4 ../bitshuffle/bshuf_h5filter.c
+bshuf_h5filter.o:        ../third_party/bitshuffle/bshuf_h5filter.c
+	${CC} -c ${CFLAGS} -I../third_party/lz4 ../third_party/bitshuffle/bshuf_h5filter.c
 
-bshuf_h5plugin.o:        ../bitshuffle/bshuf_h5plugin.c
-	${CC} -c ${CFLAGS} -I../lz4 ../bitshuffle/bshuf_h5plugin.c
+bshuf_h5plugin.o:        ../third_party/bitshuffle/bshuf_h5plugin.c
+	${CC} -c ${CFLAGS} -I../third_party/lz4 ../third_party/bitshuffle/bshuf_h5plugin.c
 
-bitshuffle.o:    ../bitshuffle/bitshuffle.c
-	${CC} -c -std=c99 ${CFLAGS} -I../lz4 ../bitshuffle/bitshuffle.c
+bitshuffle.o:    ../third_party/bitshuffle/bitshuffle.c
+	${CC} -c -std=c99 ${CFLAGS} -I../third_party/lz4 ../third_party/bitshuffle/bitshuffle.c
 
 clean-compile:
 	rm -f ${OBJS} core *core

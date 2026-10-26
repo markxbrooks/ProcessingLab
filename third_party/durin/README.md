@@ -2,7 +2,7 @@
 
 [durin](https://github.com/DiamondLightSource/durin) is Diamond Light
 Source's HDF5 plugin for XDS. ProcessingLab does not build or link durin;
-[processing-lab/src/image/Hdf5ImageReader.cpp](../processing-lab/src/image/Hdf5ImageReader.cpp)
+[processing-lab/src/image/Hdf5ImageReader.cpp](../../processing-lab/src/image/Hdf5ImageReader.cpp)
 adapts these parts of the August 2026 source (`src/file.c`, `src/plugin.c`,
 `src/filters.c`):
 

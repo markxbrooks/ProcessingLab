@@ -1,8 +1,8 @@
 /* Generate a small synthetic miniCBF fixture for processing-lab tests.
  *
  * Build (from repo root):
- *   cc -O2 -std=gnu17 -Icbf/include -o processing-lab/tools/make_minicbf_fixture \
- *      processing-lab/tools/make_minicbf_fixture.c cbf/lib/libcbf.a -lm
+ *   cc -O2 -std=gnu17 -Ithird_party/cbf/include -o processing-lab/tools/make_minicbf_fixture \
+ *      processing-lab/tools/make_minicbf_fixture.c third_party/cbf/lib/libcbf.a -lm
  * Run:
  *   ./processing-lab/tools/make_minicbf_fixture processing-lab/testdata/cbf/synthetic_minicbf.cbf
  */
