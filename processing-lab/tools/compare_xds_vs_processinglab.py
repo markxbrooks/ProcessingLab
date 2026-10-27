@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Head-to-head ProcessingLab vs Kabsch XDS on one diffraction sweep.
+"""Head-to-head ProcessingLab vs Kabsch XDS vs DIALS on one diffraction sweep.
 
-Runs both pipelines on the same images / geometry seed, then extracts
+Runs the three pipelines on the same images / frame range, then extracts
 indexing, integration and (optional) scaling metrics into a JSON summary
-and a printed table.
+and a printed table. With ``--aimless`` all three integrated data sets go
+through the same Pointless + Aimless run in one space group.
 
 Usage (from ProcessingLab root)::
 
@@ -18,8 +19,14 @@ Usage (from ProcessingLab root)::
       --xds-inp processing-lab/tools/data/76c1b_xds_seed.INP \\
       --workdir ~/projects/76c1b_0002212/xds_vs_pl_rerun --aimless
 
-  # Scale an existing comparison again (one space group for both)
+  # Scale an existing comparison again (one space group for all three)
   python3 processing-lab/tools/compare_xds_vs_processinglab.py \\
+      --workdir ~/projects/76c1b_0002212/xds_vs_pl_20261025 \\
+      --skip-pl --skip-xds --skip-dials --aimless
+
+  # Add a DIALS run to an existing ProcessingLab / XDS comparison
+  python3 processing-lab/tools/compare_xds_vs_processinglab.py \\
+      --image ~/projects/76c1b_0002212/76c1b_0002212_1_0001.cbf \\
       --workdir ~/projects/76c1b_0002212/xds_vs_pl_20261025 \\
       --skip-pl --skip-xds --aimless
 
@@ -77,6 +84,13 @@ DEFAULT_AIMLESS = _first_existing(
     Path(os.environ.get("CBIN", "/nonexistent")) / "aimless",
     Path("/Applications/ccp4-9/bin/aimless"),
     Path("/apps/ccp4/ccp4-9/bin/aimless"),
+)
+# dials.import; the other DIALS programs are found next to it.
+DEFAULT_DIALS_IMPORT = _first_existing(
+    shutil.which("dials.import"),
+    Path(os.environ.get("CBIN", "/nonexistent")) / "dials.import",
+    Path("/Applications/ccp4-9/bin/dials.import"),
+    Path("/apps/ccp4/ccp4-9/bin/dials.import"),
 )
 
 # Pilatus 6M geometry for 76c1b_0002212 (CBF header). Used when no --xds-inp.
@@ -482,6 +496,148 @@ def run_xds(
     return times
 
 
+def _dials_template(image: Path) -> str:
+    """DIALS ``template=`` for a numbered CBF (``####`` digits).
+
+    :param image: one frame path (``…_0001.cbf``)
+    :return: absolute template
+    """
+    return _cbf_template(image).replace("?", "#")
+
+
+def run_dials(
+    *,
+    import_exe: Path,
+    dials_dir: Path,
+    image: Path,
+    data_range: tuple[int, int],
+    spot_range: tuple[int, int],
+    nproc: int,
+    dmin: float,
+    exclude_ice: bool,
+) -> dict[str, float]:
+    """Run DIALS import → find_spots → index → refine → integrate → export.
+
+    The same frames as the other programs and integration to the same
+    high-resolution limit, with defaults otherwise. The unscaled
+    ``integrated.mtz`` is what Pointless and Aimless scale.
+
+    Spots should cover the whole sweep (DIALS's own default; the caller's
+    default): unlike XDS INTEGRATE, ``dials.integrate`` does not refine, so
+    the orientation over the sweep comes from ``dials.refine``. Refinement
+    keeps the full scan either way (``trim_scan_to_observations=False``);
+    otherwise a 50-frame spot range left DIALS integrating 50 frames.
+
+    :param import_exe: ``dials.import``; the other programs sit beside it
+    :param dials_dir: working directory (created)
+    :param image: first CBF frame or HDF5 master
+    :param data_range: inclusive frame range
+    :param spot_range: spot-finding frame range
+    :param nproc: processes for spot finding and integration
+    :param dmin: integration high-resolution limit (Å)
+    :param exclude_ice: leave out reflections on ice rings
+    :return: mapping of DIALS program → wall seconds
+    :raises subprocess.CalledProcessError: if a program fails
+    """
+    dials_dir.mkdir(parents=True, exist_ok=True)
+
+    def prog(name: str) -> str:
+        return str(import_exe.with_name(f"dials.{name}"))
+
+    first, last = data_range
+    source = (
+        [f"template={_dials_template(image)}"]
+        if image.suffix.lower() == ".cbf"
+        else [str(image.resolve())]
+    )
+    steps: list[tuple[str, list[str]]] = [
+        ("import", [*source, f"geometry.scan.image_range={first},{last}"]),
+        ("find_spots", ["imported.expt", f"spotfinder.scan_range={spot_range[0]},{spot_range[1]}",
+                        f"spotfinder.mp.nproc={nproc}"]),
+        ("index", ["imported.expt", "strong.refl"]),
+        ("refine", ["indexed.expt", "indexed.refl", "refinement.parameterisation.trim_scan_to_observations=False"]),
+        ("integrate", ["refined.expt", "refined.refl", f"prediction.d_min={dmin}",
+                       f"integration.mp.nproc={nproc}",
+                       f"integration.filter.ice_rings={exclude_ice}"]),
+        ("export", ["integrated.expt", "integrated.refl", "format=mtz", "mtz.hklout=integrated.mtz"]),
+    ]
+    times: dict[str, float] = {}
+    for name, arguments in steps:
+        times[name] = _run([prog(name), *arguments], cwd=dials_dir, log=dials_dir / f"{name}.out")
+    return times
+
+
+def _cell_from_real_space(a: Sequence[float], b: Sequence[float], c: Sequence[float]) -> list[float]:
+    """Unit cell ``a b c α β γ`` from DIALS real-space basis vectors."""
+    import math
+
+    def dot(u: Sequence[float], v: Sequence[float]) -> float:
+        return sum(x * y for x, y in zip(u, v))
+
+    la, lb, lc = (math.sqrt(dot(v, v)) for v in (a, b, c))
+
+    def angle(u: Sequence[float], v: Sequence[float], lu: float, lv: float) -> float:
+        return math.degrees(math.acos(max(-1.0, min(1.0, dot(u, v) / (lu * lv)))))
+
+    return [la, lb, lc, angle(b, c, lb, lc), angle(a, c, la, lc), angle(a, b, la, lb)]
+
+
+def _expt_cell(expt: Path) -> Optional[list[float]]:
+    """First crystal's cell in a DIALS ``.expt`` file, or ``None``."""
+    try:
+        crystal = json.loads(expt.read_text())["crystal"][0]
+        return _cell_from_real_space(crystal["real_space_a"], crystal["real_space_b"], crystal["real_space_c"])
+    except (OSError, KeyError, IndexError, ValueError):
+        return None
+
+
+def parse_dials(dials_dir: Path) -> dict[str, Any]:
+    """Extract metrics from a DIALS working directory written by :func:`run_dials`."""
+    out: dict[str, Any] = {"dir": str(dials_dir)}
+    index_log = dials_dir / "dials.index.log"
+    if index_log.is_file():
+        # Last "| Imageset | # indexed | # unindexed | % indexed |" table row.
+        rows = re.findall(r"^\|\s*\d+\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([\d.]+)\s*\|\s*$",
+                          index_log.read_text(errors="replace"), flags=re.MULTILINE)
+        if rows:
+            indexed, unindexed, pct = rows[-1]
+            out["indexed"] = int(indexed)
+            out["spots"] = int(indexed) + int(unindexed)
+            out["indexed_pct"] = float(pct)
+    cell = _expt_cell(dials_dir / "indexed.expt")
+    if cell:
+        out["cell_index"] = cell
+    cell = _expt_cell(dials_dir / "integrated.expt") or _expt_cell(dials_dir / "refined.expt")
+    if cell:
+        out["cell_refined"] = cell
+    try:
+        profiles = json.loads((dials_dir / "integrated.expt").read_text()).get("profile") or []
+        if profiles and "sigma_m" in profiles[0]:
+            out["mosaicity"] = round(float(profiles[0]["sigma_m"]), 3)
+    except (OSError, ValueError):
+        pass
+    mtz = dials_dir / "integrated.mtz"
+    if mtz.is_file():
+        out["mtz"] = str(mtz)
+        try:
+            import gemmi
+
+            out["n_integrated"] = gemmi.read_mtz_file(str(mtz)).nreflections
+        except Exception:  # noqa: BLE001 - gemmi missing or unreadable MTZ
+            pass
+    times: dict[str, float] = {}
+    for name in ("import", "find_spots", "index", "refine", "integrate", "export"):
+        log = dials_dir / f"{name}.out"
+        if log.is_file():
+            m = _search(log.read_text(errors="replace"), r"^# exit=\d+ elapsed=([\d.]+)s", flags=re.MULTILINE)
+            if m:
+                times[name] = float(m.group(1))
+    if times:
+        out["wall_s_parts"] = times
+        out["wall_s"] = round(sum(times.values()), 2)
+    return out
+
+
 def run_aimless(
     *,
     hkl: Path,
@@ -775,11 +931,29 @@ def parse_xds(xds_dir: Path) -> dict[str, Any]:
     integ = xds_dir / "INTEGRATE.LP"
     if integ.is_file():
         text = integ.read_text()
-        mosaics = re.findall(
-            r"CRYSTAL MOSAICITY \(DEGREES\)\s+([\d.]+)", text
-        )
+        # σ_M for the whole sweep is XDS's suggested REFLECTING_RANGE_E.S.D.
+        # (the σ_M of DIALS and ProcessingLab). Each block's "CRYSTAL
+        # MOSAICITY" is a per-block refinement; the last block is not the
+        # sweep (76c1b: last 0.198°, blocks 0.198–0.388°, sweep 0.391°).
+        mosaics = [float(v) for v in re.findall(r"CRYSTAL MOSAICITY \(DEGREES\)\s+([\d.]+)", text)]
         if mosaics:
-            out["mosaicity"] = float(mosaics[-1])
+            ordered = sorted(mosaics)
+            out["mosaicity_blocks"] = {
+                "n": len(ordered),
+                "min": ordered[0],
+                "median": ordered[len(ordered) // 2],
+                "max": ordered[-1],
+                "last": mosaics[-1],
+            }
+            out["mosaicity"] = mosaics[-1]
+        m = _search(text, r"SUGGESTED VALUES FOR INPUT PARAMETERS.*?REFLECTING_RANGE_E\.S\.D\.=\s*([\d.]+)",
+                    flags=re.DOTALL)
+        if m:
+            out["mosaicity"] = float(m.group(1))
+        m = _search(text, r"SUGGESTED VALUES FOR INPUT PARAMETERS.*?BEAM_DIVERGENCE_E\.S\.D\.=\s*([\d.]+)",
+                    flags=re.DOTALL)
+        if m:
+            out["beam_divergence_esd"] = float(m.group(1))
         m = _search(text, r"(\d+)\s+REFLECTIONS SAVED ON FILE")
         if m:
             out["n_integrated"] = int(m.group(1))
@@ -945,52 +1119,57 @@ def _fmt_cell(cell: Optional[Sequence[float]]) -> str:
 
 
 def print_summary(summary: Mapping[str, Any]) -> None:
-    """Print a compact side-by-side report."""
+    """Print a compact side-by-side report (ProcessingLab, XDS, DIALS)."""
     pl = summary.get("processinglab") or {}
     xds = summary.get("xds") or {}
+    dials = summary.get("dials") or {}
     aim = summary.get("aimless") or {}
     aim_x = summary.get("aimless_xds") or {}
+    aim_d = summary.get("aimless_dials") or {}
 
     xds_sg = xds.get("correct_space_group") or xds.get("space_group")
     rows = [
-        ("Space group", pl.get("space_group", "—"), xds_sg or "—"),
-        ("Index cell", _fmt_cell(pl.get("cell_index")), _fmt_cell(xds.get("cell_index"))),
+        ("Space group", pl.get("space_group", "—"), xds_sg or "—", "—"),
+        ("Index cell", _fmt_cell(pl.get("cell_index")), _fmt_cell(xds.get("cell_index")),
+         _fmt_cell(dials.get("cell_index"))),
         ("Refined cell", _fmt_cell(pl.get("cell_refined") or pl.get("cell")),
-         _fmt_cell(xds.get("cell_refined"))),
-        ("% indexed", pl.get("indexed_pct", "—"), xds.get("indexed_pct", "—")),
-        ("Mosaicity °", pl.get("mosaicity", "—"), xds.get("mosaicity", "—")),
-        ("N integrated", pl.get("n_integrated", "—"), xds.get("n_integrated", "—")),
-        ("Wall s", pl.get("wall_s", "—"), xds.get("wall_s", "—")),
+         _fmt_cell(xds.get("cell_refined")), _fmt_cell(dials.get("cell_refined"))),
+        ("% indexed", pl.get("indexed_pct", "—"), xds.get("indexed_pct", "—"), dials.get("indexed_pct", "—")),
+        ("Mosaicity °", pl.get("mosaicity", "—"), xds.get("mosaicity", "—"), dials.get("mosaicity", "—")),
+        ("N integrated", pl.get("n_integrated", "—"), xds.get("n_integrated", "—"),
+         dials.get("n_integrated", "—")),
+        ("Wall s", pl.get("wall_s", "—"), xds.get("wall_s", "—"), dials.get("wall_s", "—")),
     ]
     xu = (xds.get("correct") or {})
     pu = (pl.get("unscaled") or {})
     rows.extend(
         [
-            ("Rmeas %", pu.get("rmeas_pct", "—"), xu.get("rmeas_pct", "—")),
-            ("CC½", pu.get("cc12", "—"), xu.get("cc12", "—")),
-            ("I/σ", pu.get("isigi", "—"), xu.get("isigi", "—")),
+            ("Rmeas %", pu.get("rmeas_pct", "—"), xu.get("rmeas_pct", "—"), "—"),
+            ("CC½", pu.get("cc12", "—"), xu.get("cc12", "—"), "—"),
+            ("I/σ", pu.get("isigi", "—"), xu.get("isigi", "—"), "—"),
             ("Completeness %", pu.get("completeness_pct", "—"),
-             xu.get("completeness_pct", "—")),
+             xu.get("completeness_pct", "—"), "—"),
         ]
     )
 
-    print("\n=== ProcessingLab vs XDS ===")
-    print(f"{'metric':<18} {'ProcessingLab':<36} {'XDS':<36}")
-    print("-" * 90)
-    for name, a, b in rows:
-        print(f"{name:<18} {str(a):<36} {str(b):<36}")
+    print("\n=== ProcessingLab vs XDS vs DIALS ===")
+    print(f"{'metric':<18} {'ProcessingLab':<34} {'XDS':<34} {'DIALS':<34}")
+    print("-" * 122)
+    for name, a, b, c in rows:
+        print(f"{name:<18} {str(a):<34} {str(b):<34} {str(c):<34}")
 
     choice = summary.get("space_group_choice") or {}
     if choice:
         print(f"\nSpace group for scaling: {choice.get('chosen')} ({choice.get('reason')})")
-    if aim or aim_x:
-        print("\nPointless + Aimless (the same programs and settings for both):")
-        print(f"{'metric':<18} {'ProcessingLab':<36} {'XDS (XDS_ASCII.HKL)':<36}")
-        print("-" * 90)
+    if aim or aim_x or aim_d:
+        print("\nPointless + Aimless (the same programs and settings for all three):")
+        print(f"{'metric':<18} {'ProcessingLab':<34} {'XDS (XDS_ASCII.HKL)':<34} {'DIALS (integrated.mtz)':<34}")
+        print("-" * 122)
         for k in ("space_group", "rmeas", "cc12", "isigi", "completeness_pct",
                   "multiplicity", "observed", "unique"):
-            if k in aim or k in aim_x:
-                print(f"{k:<18} {str(aim.get(k, '—')):<36} {str(aim_x.get(k, '—')):<36}")
+            if k in aim or k in aim_x or k in aim_d:
+                print(f"{k:<18} {str(aim.get(k, '—')):<34} {str(aim_x.get(k, '—')):<34} "
+                      f"{str(aim_d.get(k, '—')):<34}")
     print()
 
 
@@ -1076,27 +1255,39 @@ def build_argparser() -> argparse.ArgumentParser:
         default=True,
         help="run IDXREF then INTEGRATE+CORRECT separately (default: on)",
     )
+    ap.add_argument("--dials-import", type=Path, default=DEFAULT_DIALS_IMPORT,
+                    help="dials.import (the other DIALS programs are found beside it)")
+    ap.add_argument(
+        "--dials-spot-range",
+        type=_parse_range,
+        default=None,
+        help="DIALS spot-finding range (default: the whole --range, as DIALS does; "
+        "dials.integrate does not refine, so a short range leaves the orientation "
+        "unrefined over the rest of the sweep)",
+    )
     ap.add_argument("--skip-pl", action="store_true")
     ap.add_argument("--skip-xds", action="store_true")
+    ap.add_argument("--skip-dials", action="store_true", help="do not run DIALS")
     ap.add_argument(
         "--aimless",
         action="store_true",
-        help="run Pointless+Aimless on ProcessingLab's process.mtz and XDS's XDS_ASCII.HKL",
+        help="run Pointless+Aimless on ProcessingLab's process.mtz, XDS's XDS_ASCII.HKL "
+        "and DIALS's integrated.mtz",
     )
     ap.add_argument(
         "--space-group",
         "--aimless-spacegroup",
         dest="space_group",
         default="auto",
-        help="space group for XDS CORRECT and for Pointless + Aimless on both: "
-        "'auto' (Pointless decides on each; the surer Laue group wins), a symbol "
+        help="space group for XDS CORRECT and for Pointless + Aimless on all three: "
+        "'auto' (Pointless decides on each; the surest Laue group wins), a symbol "
         "or number (e.g. 'P 1 21 1', 4), or 'none' (each Pointless alone)",
     )
     ap.add_argument(
         "--aimless-resolution",
         type=float,
         default=None,
-        help="Aimless high-resolution cutoff (Å) for both",
+        help="Aimless high-resolution cutoff (Å) for all three",
     )
     ap.add_argument("--pointless", type=Path, default=DEFAULT_POINTLESS)
     ap.add_argument("--aimless-exe", type=Path, default=DEFAULT_AIMLESS)
@@ -1116,30 +1307,35 @@ def scale_both(
     workdir: Path,
     pl_dir: Path,
     xds_dir: Path,
+    dials_dir: Path,
     seed: Path,
     data_range: tuple[int, int],
     spot_range: tuple[int, int],
     include_resolution: tuple[float, float],
 ) -> None:
-    """Scale ProcessingLab's MTZ and XDS's XDS_ASCII.HKL in one space group.
+    """Scale ProcessingLab's MTZ, XDS's XDS_ASCII.HKL and DIALS's
+    integrated.mtz in one space group.
 
     With ``--space-group auto`` Pointless decides on each data set and
     :func:`choose_space_group` picks one; XDS CORRECT is re-run in it (it
     otherwise stays in the indexing run's group, P1 by default), and
-    Pointless + Aimless are forced to it for both. ``--space-group none``
-    lets each Pointless decide alone (the old behaviour).
+    Pointless + Aimless are forced to it for all three. ``--space-group none``
+    lets each Pointless decide alone (the old behaviour). A data set whose
+    file is missing (e.g. DIALS not run) is skipped.
     """
     mtz = pl_dir / "process.mtz"
     ascii_hkl = xds_dir / "XDS_ASCII.HKL"
+    dials_mtz = dials_dir / "integrated.mtz"
     if not args.pointless.is_file() or not args.aimless_exe.is_file():
         print("warning: pointless/aimless not found; skipping", file=sys.stderr)
         return
     mode = args.space_group.strip()
     symbol: Optional[str] = None
     if mode.lower() == "auto":
-        print("== Pointless: one space group for both ==")
+        print("== Pointless: one space group for all ==")
         decisions: dict[str, dict[str, Any]] = {}
-        for name, hkl, is_ascii in (("ProcessingLab", mtz, False), ("XDS", ascii_hkl, True)):
+        for name, hkl, is_ascii in (("ProcessingLab", mtz, False), ("XDS", ascii_hkl, True),
+                                    ("DIALS", dials_mtz, False)):
             if not hkl.is_file():
                 continue
             try:
@@ -1178,6 +1374,7 @@ def scale_both(
     for name, hkl, is_ascii, out_dir, key in (
         ("ProcessingLab", mtz, False, workdir / "ccp4", "aimless_wall_s"),
         ("XDS", ascii_hkl, True, workdir / "ccp4_xds", "aimless_xds_wall_s"),
+        ("DIALS", dials_mtz, False, workdir / "ccp4_dials", "aimless_dials_wall_s"),
     ):
         if not hkl.is_file():
             print(f"warning: no {hkl.name} for {name}; skipping Aimless", file=sys.stderr)
@@ -1224,6 +1421,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     workdir = args.workdir or Path(f"xds_vs_pl_{_now_stamp()}").resolve()
     workdir, pl_dir, xds_dir = resolve_dirs(workdir, args.parse_only)
+    dials_dir = workdir / "dials"
     data_range = args.frame_range or (1, 900)
     spot_range = args.spot_range or (1, min(50, data_range[1]))
     include_resolution = (args.dmax, args.dmin)
@@ -1301,9 +1499,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"error: XDS failed: {exc}", file=sys.stderr)
                 return 1
 
+        if not args.skip_dials:
+            if not args.dials_import.is_file():
+                print(f"warning: dials.import not found ({args.dials_import}); skipping DIALS", file=sys.stderr)
+            else:
+                print("== DIALS ==")
+                try:
+                    summary["dials_wall_s"] = run_dials(
+                        import_exe=args.dials_import,
+                        dials_dir=dials_dir,
+                        image=args.image,
+                        data_range=data_range,
+                        spot_range=args.dials_spot_range or data_range,
+                        nproc=args.nproc,
+                        dmin=args.dmin,
+                        exclude_ice=args.exclude_ice,
+                    )
+                except subprocess.CalledProcessError as exc:
+                    # The other two programs' results still compare.
+                    print(f"warning: DIALS failed: {exc} (see {dials_dir})", file=sys.stderr)
+
         if args.aimless:
-            scale_both(args, summary, workdir=workdir, pl_dir=pl_dir, xds_dir=xds_dir, seed=args.xds_inp or seed_inp,
-                       data_range=data_range, spot_range=spot_range, include_resolution=include_resolution)
+            scale_both(args, summary, workdir=workdir, pl_dir=pl_dir, xds_dir=xds_dir, dials_dir=dials_dir,
+                       seed=args.xds_inp or seed_inp, data_range=data_range, spot_range=spot_range,
+                       include_resolution=include_resolution)
 
     # Parse whatever exists
     if pl_dir.is_dir():
@@ -1339,6 +1558,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if xds_dir.is_dir():
         summary["xds"] = parse_xds(xds_dir)
+    if dials_dir.is_dir():
+        summary["dials"] = parse_dials(dials_dir)
 
     ccp4_dir = workdir / "ccp4"
     if not _first_log(ccp4_dir, "aimless.log", "*aimless*.log"):
@@ -1351,6 +1572,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         summary["aimless"] = parse_aimless(ccp4_dir)
     if (workdir / "ccp4_xds").is_dir():
         summary["aimless_xds"] = parse_aimless(workdir / "ccp4_xds")
+    if (workdir / "ccp4_dials").is_dir():
+        summary["aimless_dials"] = parse_aimless(workdir / "ccp4_dials")
 
     print_summary(summary)
 
