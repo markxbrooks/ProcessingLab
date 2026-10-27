@@ -21,6 +21,18 @@ struct Obs {
     double d_A{0.0};
 };
 
+struct ImageObs {
+    int image{0};
+    double intensity{0.0};
+    double sigma{0.0};
+};
+
+struct ImageSums {
+    ImageRmeasStats stats;
+    double numerator{0.0};
+    double denominator{0.0};
+};
+
 int shell_index(double d_A, double dmax_A, double dmin_A, int n_shells) {
     if (!(dmax_A > dmin_A) || n_shells < 1) {
         return 0;
@@ -497,6 +509,89 @@ DataQualityReport compute_data_quality(
     }
 
     return report;
+}
+
+std::vector<ImageRmeasStats> compute_image_rmeas(
+    const crystal::CrystalMetadata& crystal,
+    const std::vector<crystal::MosflmReflection>& reflections,
+    double dmax_A,
+    double dmin_A,
+    double min_isigma
+) {
+    if (!(dmax_A > dmin_A)) {
+        dmax_A = 200.0;
+        dmin_A = 1.45;
+    }
+
+    std::map<Miller, std::vector<ImageObs>> by_hkl;
+    std::map<int, ImageSums> by_image;
+    for (const auto& row : reflections) {
+        if (row.flag != 0 || !(row.sigma > 0.0f) ||
+            !std::isfinite(row.intensity) || !std::isfinite(row.sigma)) {
+            continue;
+        }
+        int h = row.h;
+        int k = row.k;
+        int l = row.l;
+        int misym = 0;
+        crystal::MtzAdapter::reduce_to_asu(crystal.spacegroup, h, k, l, misym);
+        const gemmi::Op::Miller miller{h, k, l};
+        if (crystal.spacegroup != nullptr &&
+            crystal.spacegroup->operations().is_systematically_absent(miller)) {
+            continue;
+        }
+        const double isigi = static_cast<double>(row.intensity / row.sigma);
+        const double d = crystal.cell.calculate_d(miller);
+        if (isigi < min_isigma || !(d >= dmin_A) || !(d <= dmax_A)) {
+            continue;
+        }
+        auto& image = by_image[row.batch];
+        image.stats.image = row.batch;
+        ++image.stats.n_accepted;
+        by_hkl[Miller{h, k, l}].push_back(
+            {row.batch, static_cast<double>(row.intensity),
+             static_cast<double>(row.sigma)}
+        );
+    }
+
+    for (const auto& [hkl, group] : by_hkl) {
+        (void) hkl;
+        const int n = static_cast<int>(group.size());
+        if (n < 2) {
+            continue;
+        }
+        double sum_i = 0.0;
+        double sum_w = 0.0;
+        double sum_wi = 0.0;
+        for (const auto& obs : group) {
+            sum_i += obs.intensity;
+            const double w = 1.0 / (obs.sigma * obs.sigma);
+            sum_w += w;
+            sum_wi += w * obs.intensity;
+        }
+        const double mean = sum_w > 0.0 ? sum_wi / sum_w
+                                        : sum_i / static_cast<double>(n);
+        const double factor =
+            std::sqrt(static_cast<double>(n) / static_cast<double>(n - 1));
+        for (const auto& obs : group) {
+            auto& image = by_image[obs.image];
+            image.stats.image = obs.image;
+            ++image.stats.n_compared;
+            image.numerator += factor * std::abs(obs.intensity - mean);
+            image.denominator += std::abs(obs.intensity);
+        }
+    }
+
+    std::vector<ImageRmeasStats> result;
+    result.reserve(by_image.size());
+    for (auto& [batch, sums] : by_image) {
+        (void) batch;
+        if (sums.denominator > 0.0) {
+            sums.stats.rmeas_pct = 100.0 * sums.numerator / sums.denominator;
+        }
+        result.push_back(sums.stats);
+    }
+    return result;
 }
 
 void write_data_quality_table(

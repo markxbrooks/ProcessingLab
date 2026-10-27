@@ -50,6 +50,15 @@ struct DataQualityReport {
     double min_isigma{0.0};
 };
 
+/// R-meas contributions by image, using the same filters and denominator as
+/// the cumulative PROCESS data-quality report.
+struct ImageRmeasStats {
+    int image{0};
+    int n_accepted{0};
+    int n_compared{0};
+    double rmeas_pct{-99.9};
+};
+
 /// Build XDS-style completeness / R-factor / R-meas / CC(1/2) table from
 /// unmerged MOSFLM PROCESS rows.
 ///
@@ -62,6 +71,16 @@ struct DataQualityReport {
     double dmax_A,
     double dmin_A,
     int n_shells = 9,
+    double min_isigma = -3.0
+);
+
+/// Compute per-image R-meas against each reflection's mean over the complete
+/// input list. This makes image values additive into the cumulative R-meas.
+[[nodiscard]] std::vector<ImageRmeasStats> compute_image_rmeas(
+    const crystal::CrystalMetadata& crystal,
+    const std::vector<crystal::MosflmReflection>& reflections,
+    double dmax_A,
+    double dmin_A,
     double min_isigma = -3.0
 );
 

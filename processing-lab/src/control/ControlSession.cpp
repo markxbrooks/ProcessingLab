@@ -1816,6 +1816,25 @@ void print_process_run_summary(
             crystal, acc.mosflm_reflections, dmax_A, dmin_A
         );
         diffraction::write_data_quality_table(std::cout, quality);
+
+        // Store the per-image components against full-sweep reflection means
+        // so reports can plot raw PROCESS R-meas without reparsing Aimless.
+        const auto image_rmeas = diffraction::compute_image_rmeas(
+            crystal, acc.mosflm_reflections, dmax_A, dmin_A
+        );
+        const auto old_flags = std::cout.flags();
+        const auto old_precision = std::cout.precision();
+        std::cout << "\nIMAGE_RMEAS columns=image,n_accepted,n_compared,rmeas_pct\n";
+        std::cout << "# Unscaled PROCESS data; weighted full-run HKL means; "
+                     "n>=2; denominator=sum(abs(I)); filters match RESOLUTION_BINS.\n";
+        std::cout << std::fixed << std::setprecision(1);
+        for (const auto& row : image_rmeas) {
+            std::cout << row.image << ',' << row.n_accepted << ','
+                      << row.n_compared << ',' << row.rmeas_pct << '\n';
+        }
+        std::cout << "IMAGE_RMEAS_END\n";
+        std::cout.flags(old_flags);
+        std::cout.precision(old_precision);
     }
 }
 
